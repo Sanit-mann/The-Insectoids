@@ -47,6 +47,12 @@ export function AgentOutput({ agent }: { agent: AgentView }) {
         <span className="font-mono">{formatUsd(agent.costUsd)}</span>
       </div>
       <p className="m-0 text-xs text-muted">Model as reported by the engine; effort is what the hive asked for (engines don't report it).</p>
+      {agent.routeReason ? (
+        <div className="flex flex-col gap-1 rounded-[10px] border border-line bg-surface px-3 py-2" data-testid="route-reason">
+          <span className="text-xs font-semibold">Why this model</span>
+          <span className="text-xs text-muted">{agent.routeReason}</span>
+        </div>
+      ) : null}
 
       <div id="agent-output-label" className="text-xs text-muted">
         Live output (read-only)

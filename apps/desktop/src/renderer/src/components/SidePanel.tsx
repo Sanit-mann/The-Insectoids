@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { BrainStatus, LaneStatus } from '@insectoids/shared';
+import type { BrainStatus, EngineCard, LaneStatus } from '@insectoids/shared';
 import { ChevronRight } from 'lucide-react';
 import { KIND_META } from '@/components/approvals/kinds';
 import { openScreen } from '@/components/changes/navigate';
@@ -11,6 +11,28 @@ import { useBrainStatus } from '@/lib/useBrainStatus';
 const BRAIN_DOT: Record<BrainStatus['state'], LaneStatus> = { starting: 'waiting', ready: 'done', failed: 'blocked' };
 const BRAIN_LABEL: Record<BrainStatus['state'], string> = { starting: 'starting', ready: 'ready', failed: 'not running' };
 const LIVE: ReadonlySet<LaneStatus> = new Set(['working', 'waiting', 'blocked', 'paused']);
+
+/** Enabled engines near or at a usage limit (Treasurer, Phase 2 A5): one line, with a way to Connections. */
+function UsageWarning({ engines }: { engines: EngineCard[] }) {
+  const hit = engines.filter((e) => e.enabled && e.usage && e.usage.state !== 'ok');
+  if (hit.length === 0) return null;
+  const exhausted = hit.some((e) => e.usage.state === 'exhausted');
+  const names = hit.map((e) => e.name).join(', ');
+  return (
+    <button
+      className="flex min-h-10 w-full items-center gap-2 rounded-[10px] border border-line px-2 text-left text-xs hover:bg-surface-2"
+      data-testid="usage-warning"
+      onClick={() => openScreen('connections')}
+      type="button"
+    >
+      <StatusDot status={exhausted ? 'blocked' : 'waiting'} />
+      <span className="min-w-0 flex-1">
+        {exhausted ? 'Usage limit reached' : 'Near a usage limit'}: {names}
+      </span>
+      <ChevronRight aria-hidden="true" className="size-3.5 shrink-0" />
+    </button>
+  );
+}
 
 function BrainRow() {
   const status = useBrainStatus();
@@ -113,6 +135,7 @@ export function SidePanel() {
         <BrainRow />
       </Card>
       <Card title="Budget">
+        <UsageWarning engines={snap?.engines ?? []} />
         {!goal ? (
           <p className="m-0 text-xs text-muted">No goals yet, so nothing spent.</p>
         ) : (

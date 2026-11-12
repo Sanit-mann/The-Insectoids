@@ -189,6 +189,21 @@ export class Taskboard {
     return this.#holderMove(id, agentId, 'review', null, { lease: null, result });
   }
 
+  /**
+   * The card goes back on the board without using up an attempt: the work never really started (e.g. the
+   * engine hit its vendor's usage limit before doing anything). The Foreman can give it to another engine.
+   */
+  release(id: string, agentId: string, reason: string): BoardCard {
+    return transaction(this.db, () => {
+      const cur = this.#must(id);
+      this.#assertTransition(cur, 'open');
+      this.#assertHolder(cur, agentId);
+      this.#set(id, 'open', { holder: null, lease: null });
+      this.#event(id, cur.status, 'open', agentId, reason, this.now());
+      return this.#must(id);
+    });
+  }
+
   /** The insect gives up; counts as an attempt. */
   giveUp(id: string, agentId: string, reason: string): BoardCard {
     return transaction(this.db, () => {

@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Caste } from '@insectoids/shared';
 import type { ApprovalItem, BoardCard, Brain, Goal } from '@insectoids/brain';
@@ -9,6 +9,8 @@ import { type ServiceAccess, type ServiceTicket, servicesBrief } from './service
 import type { Engine, EngineRequest, EngineResult } from './engine';
 import { type Library, brainRules, inspectorPrompt, insectPrompt, queenPrompt } from './prompts';
 import { type Plan, parsePlan, parseStatus, parseVerdict } from './protocol';
+import type { EngineId } from '@insectoids/shared';
+import { detectUsageLimit } from '../engines/limits';
 import { type ModelTiers, type Route, type RouteInput, budgetState, routeCard, runTokens } from './router';
 
 export interface HiveOptions {
@@ -51,8 +53,27 @@ export interface HiveOptions {
    * token for only those (and only ones switched on) for each run; it's revoked when the run ends.
    */
   services?: ServiceAccess;
+  /**
+   * The Treasurer's limits (Connections 04-D7, Phase 2 A5): told when an engine's vendor limit stops a run,
+   * asked whether any engine can still take a role, and how many insects may work right now.
+   */
+  limits?: HiveLimits;
+  /** Clock for run outcomes (tests). Default Date.now. */
+  now?: () => number;
   onEvent?: (e: HiveEvent) => void;
 }
+
+export interface HiveLimits {
+  /** An engine's vendor said a usage or rate limit stopped a run. */
+  hit(engine: EngineId, resetAt: number | null, detail: string): void;
+  /** Can any engine take this role right now? */
+  canRoute(role: RouteInput['role']): boolean;
+  /** Most insects allowed right now (lower when engines are near their caps); null = the user's cap. */
+  cap?(): number | null;
+}
+
+/** Pause reasons that start with this are the Treasurer's: the app resumes the hive when an engine frees up. */
+export const LIMIT_PAUSE = 'Usage limit:';
 
 export interface HiveEvent {
   type:
@@ -97,6 +118,8 @@ export interface RunInfo {
   /** Planned by the router; the engine's init event reports what actually ran. */
   model: string;
   effort: string;
+  /** Why the Treasurer chose this engine, model and effort. */
+  reason?: string;
   /** run-ended only. */
   ok?: boolean;
   error?: string;
@@ -369,6 +392,7 @@ export class Hive {
       projectListing: this.#listing(),
     });
     let task = base.task;
+    let limitRetries = 0;
     for (let attempt = 0; attempt < 2; attempt++) {
       const result = await this.#runEngine(goal.id, undefined, {
         role: 'queen',
@@ -380,7 +404,15 @@ export class Hive {
         route: this.#route({ role: 'queen', priority: 'normal', attempts: 0 }),
         guard: { workspace: scratch, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
       });
-      if (!result.ok) return null;
+      if (!result.ok) {
+        // A vendor limit: plan on another engine if one can take it (doesn't count as a planning attempt).
+        if (result.error === 'quota' && limitRetries++ < 3 && (this.#o.limits?.canRoute('queen') ?? false)) {
+          attempt--;
+          continue;
+        }
+        if (result.error === 'quota') this.#afterLimit('queen');
+        return null;
+      }
       const parsed = parsePlan(result.text, { castes });
       if (parsed.ok) return parsed.plan;
       task = `${base.task}\n\nYour previous plan was not valid: ${parsed.error}\nReply again with only the corrected JSON plan.`;
@@ -435,11 +467,14 @@ export class Hive {
       return;
     }
     const insects = () => [...this.#jobs.values()].filter((j) => j.kind === 'insect').length;
+    const cap = Math.min(this.#o.insectCap, this.#o.limits?.cap?.() ?? Number.POSITIVE_INFINITY);
     let progress = true;
-    while (progress && insects() < this.#o.insectCap) {
+    while (progress && insects() < cap) {
       progress = false;
       for (const caste of this.#o.castes) {
-        if (insects() >= this.#o.insectCap) break;
+        if (insects() >= cap) break;
+        // A caste no engine can take right now (all at their limits) waits on the board.
+        if (this.#o.limits && !this.#o.limits.canRoute(caste)) continue;
         const agentId = `Ant-${String(++this.#ants).padStart(2, '0')}`;
         const card = brain.taskboard.claimNext({ agentId, caste, leaseMs: this.#o.leaseMs!, goalId: goal.id });
         if (!card) {
@@ -461,7 +496,10 @@ export class Hive {
       if (resumeNote) {
         cardPath = workspace.cardPath(goal.id, id);
       } else {
-        cardPath = (await workspace.createCard(goal.id, id, { linkDependencies: this.#o.linkDependencies ?? [] })).path;
+        // A run stopped by a vendor limit leaves this attempt's worktree in place (no attempt was used up):
+        // the next engine picks the card up in the same folder.
+        const kept = workspace.cardPath(goal.id, id);
+        cardPath = existsSync(kept) ? kept : (await workspace.createCard(goal.id, id, { linkDependencies: this.#o.linkDependencies ?? [] })).path;
         brain.taskboard.start(card.id, agentId);
       }
       this.#emit({ type: 'card-started', goalId: goal.id, cardId: card.id, agentId, message: card.title });
@@ -477,6 +515,7 @@ export class Hive {
       }, brain.bootCard(goal.shelf));
       const asks: string[] = [];
       let result: EngineResult;
+      let route: Route | undefined;
       try {
         result = await this.#runEngine(goal.id, card.id, {
           role: card.caste,
@@ -485,7 +524,7 @@ export class Hive {
           cwd: cardPath,
           system: prompt.system,
           task: prompt.task,
-          route: this.#route({ role: card.caste, priority: card.priority, attempts: card.attempts }),
+          route: (route = this.#route({ role: card.caste, priority: card.priority, attempts: card.attempts })),
           guard: {
             workspace: cardPath,
             home: this.#o.home,
@@ -509,6 +548,13 @@ export class Hive {
         if (result.error === 'auth') {
           brain.taskboard.block(card.id, agentId, 'The AI engine is signed out.');
           this.pause('Claude Code is signed out. Sign in, then resume the hive.');
+          return;
+        }
+        if (result.error === 'quota') {
+          // The vendor stopped it before real work: back on the board without using an attempt. The Foreman
+          // gives it to another engine, or the hive rests until one frees up.
+          brain.taskboard.release(card.id, agentId, `${route?.engine ?? 'The engine'} hit its usage limit`);
+          this.#afterLimit(card.caste);
           return;
         }
         this.#lastFailure.set(card.id, `${result.error}: ${clip(result.text || result.stderrTail, 300)}`);
@@ -575,10 +621,16 @@ export class Hive {
         this.pause('Claude Code is signed out. Sign in, then resume the hive.');
         return;
       }
+      if (!result.ok && result.error === 'quota') {
+        // The card stays in review; the next Foreman pass inspects it on another engine (or after the rest).
+        this.#afterLimit('inspector');
+        return;
+      }
       const verdict = result.ok ? parseVerdict(result.text) : { verdict: 'fail' as const, note: `Inspector run failed (${result.error}).` };
       if (verdict.verdict === 'pass') {
         const merge = await workspace.mergeCard(goal.id, id, card.title);
         if (merge.ok) {
+          brain.outcomes.settle(card.id, card.attempts, 'pass');
           brain.taskboard.review(card.id, { verdict: 'pass', by: 'Inspector' });
           brain.write({ kind: 'outcome', shelf: goal.shelf, title: `${local(card.id)} verified: ${card.title}`, body: `Passed on attempt ${card.attempts + 1}. ${clip(card.result ?? '', 300)}`, source: card.id }, { type: 'agent', id: 'Inspector' });
           await workspace.removeCard(goal.id, id);
@@ -589,6 +641,7 @@ export class Hive {
         verdict.note = `Verified, but it conflicts with earlier merged work in: ${merge.conflicts.join(', ')}. Redo it on top of the latest hive branch.`;
       }
       this.#lastFailure.set(card.id, verdict.note);
+      brain.outcomes.settle(card.id, card.attempts, 'fail');
       const after = brain.taskboard.review(card.id, { verdict: 'fail', by: 'Inspector', note: verdict.note });
       await workspace.removeCard(goal.id, id);
       this.#emit({ type: 'card-rejected', goalId: goal.id, cardId: card.id, message: verdict.note });
@@ -725,6 +778,7 @@ ${brief}`,
       engine: req.route.engine,
       model: req.route.model,
       effort: req.route.effort,
+      ...(req.route.reason ? { reason: req.route.reason } : {}),
     };
     const ids = { goalId, ...(cardId ? { cardId } : {}), agentId: req.agentId };
     this.#emit({ type: 'run-started', ...ids, message: info.title, run: info });
@@ -738,13 +792,18 @@ ${brief}`,
         },
       });
       onStop?.(run.stop);
-      result = await run.done;
+      result = this.#classifyLimit(await run.done);
     } catch (err) {
       this.#emit({ type: 'run-ended', ...ids, message: 'crash', run: { ...info, ok: false, error: 'crash' } });
       throw err;
     }
     const tokens = runTokens(result.usage);
     this.#o.brain.goals.addSpend(goalId, tokens, result.costUsd);
+    this.#recordOutcome(info.runId, goalId, cardId, req, result);
+    if (result.error === 'quota') {
+      const until = result.resetAt ?? null;
+      this.#o.limits?.hit(req.route.engine, until, clip(result.text || result.stderrTail, 300));
+    }
     this.#emit({
       type: 'run-ended',
       ...ids,
@@ -752,6 +811,57 @@ ${brief}`,
       run: { ...info, ...(result.model ? { model: result.model } : {}), ok: result.ok, ...(result.error ? { error: result.error } : {}), tokens, costUsd: result.costUsd },
     });
     return result;
+  }
+
+  /** A failed run whose text says a usage or rate limit stopped it becomes a `quota` result (Phase 2 A5). */
+  #classifyLimit(result: EngineResult): EngineResult {
+    if (result.ok || result.error === 'stopped' || result.error === 'timeout' || result.error === 'quota') return result;
+    const limit = detectUsageLimit(`${result.text}
+${result.stderrTail}`, this.#now());
+    return limit.limited ? { ...result, error: 'quota', resetAt: limit.resetAt } : result;
+  }
+
+  /** One row per run in the Treasurer's memory. Finished insect runs wait for the Inspector (`pending`). */
+  #recordOutcome(runId: string, goalId: string, cardId: string | undefined, req: EngineRequest, result: EngineResult): void {
+    const card = cardId ? this.#o.brain.taskboard.get(cardId) : undefined;
+    const insect = req.role !== 'queen' && req.role !== 'inspector';
+    const outcome = !result.ok
+      ? result.error === 'auth' ? 'auth' : result.error === 'stopped' ? 'stopped' : result.error === 'quota' ? 'limit' : 'error'
+      : insect ? 'pending' : 'pass';
+    try {
+      this.#o.brain.outcomes.record({
+        runId: `${goalId}:${runId}`,
+        goalId,
+        cardId: cardId ?? null,
+        role: req.role,
+        priority: card?.priority ?? 'normal',
+        engine: req.route.engine,
+        tier: req.route.tier ?? 'standard',
+        model: result.model ?? req.route.model,
+        effort: req.route.effort,
+        attempt: card?.attempts ?? 0,
+        result: outcome,
+        tokensIn: result.usage.input,
+        tokensOut: result.usage.output,
+        tokensCache: result.usage.cacheWrite,
+        costUsd: result.costUsd,
+        costEstimated: result.costEstimated ?? false,
+        durationMs: result.durationMs,
+        at: this.#now(),
+      });
+    } catch {
+      // Bookkeeping must never stop the hive.
+    }
+  }
+
+  /** After a vendor limit: rest the hive with a clear line if no engine can take this role any more. */
+  #afterLimit(role: RouteInput['role']): void {
+    if (this.#o.limits?.canRoute(role) ?? true) return;
+    this.pause(`${LIMIT_PAUSE} every AI engine that can do this work is at its usage limit. The hive rests and carries on by itself when one frees up.`);
+  }
+
+  #now(): number {
+    return (this.#o.now ?? Date.now)();
   }
 
   #ask(a: Parameters<Brain['approvals']['create']>[0]): void {

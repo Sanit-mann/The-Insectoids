@@ -16,19 +16,35 @@ export interface RouteInput {
   attempts: number;
 }
 
+export type Tier = 'light' | 'standard' | 'strongest';
+
 export interface Route {
   /** Which engine runs it (Connections 04-D2). */
   engine: EngineId;
+  /** Which of the engine's model tiers `model` is. */
+  tier: Tier;
   model: string;
   effort: Effort;
+  /** Why the Treasurer chose this, in plain words (shown on the Hive monitor lane). */
+  reason: string;
   maxTurns: number;
   maxBudgetUsd: number;
   timeoutMs: number;
 }
 
-const TIERS = ['light', 'standard', 'strongest'] as const;
-const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'max'];
+export const TIERS: readonly Tier[] = ['light', 'standard', 'strongest'];
+export const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'max'];
 const MIN = 60_000;
+
+/** Per-run spending cap by tier (the engine stops the run past it). */
+export const budgetForTier = (tier: Tier): number => (tier === 'strongest' ? 5 : tier === 'standard' ? 2 : 0.5);
+
+function ruleReason(input: RouteInput): string {
+  if (input.role === 'queen') return 'rule: the Queen plans on the strongest model';
+  if (input.role === 'inspector') return `rule: inspecting a ${input.priority} priority card`;
+  if (input.attempts > 0) return `rule: retry ${input.attempts}, so more effort or a stronger model`;
+  return `rule: ${input.priority} priority card`;
+}
 
 /**
  * Treasurer's model + effort router (Hive 02-D9 P1), rule-based for Phase 1:
@@ -36,7 +52,9 @@ const MIN = 60_000;
  * Learning from outcomes comes in Phase 2.
  */
 export function routeCard(input: RouteInput, models: ModelTiers, engine: EngineId = 'claude'): Route {
-  if (input.role === 'queen') return { engine, model: models.strongest, effort: 'high', maxTurns: 30, maxBudgetUsd: 3, timeoutMs: 15 * MIN };
+  if (input.role === 'queen') {
+    return { engine, tier: 'strongest', model: models.strongest, effort: 'high', reason: ruleReason(input), maxTurns: 30, maxBudgetUsd: 3, timeoutMs: 15 * MIN };
+  }
 
   let tier: number;
   let effort: number;
@@ -54,10 +72,12 @@ export function routeCard(input: RouteInput, models: ModelTiers, engine: EngineI
   const tierName = TIERS[tier]!;
   return {
     engine,
+    tier: tierName,
     model: models[tierName],
     effort: EFFORTS[effort]!,
+    reason: ruleReason(input),
     maxTurns: input.role === 'inspector' ? 30 : 40,
-    maxBudgetUsd: tierName === 'strongest' ? 5 : tierName === 'standard' ? 2 : 0.5,
+    maxBudgetUsd: budgetForTier(tierName),
     timeoutMs: 20 * MIN,
   };
 }
@@ -87,6 +107,10 @@ export interface EngineCandidate {
   /** Ready to run now (signed in, supported version), or the scripted test engine. */
   ready: boolean;
   guard: GuardKind | null;
+  /** Its subscription hit a limit (the vendor's, or the user's own cap): don't route to it (04-D7). */
+  exhausted?: boolean;
+  /** Near the user's cap: use it only when no other engine qualifies. */
+  near?: boolean;
 }
 
 /** Roles that never change files or run side-effecting commands: an engine limited to read-only work may take them. */
@@ -101,10 +125,14 @@ export const isReadOnlyRole = (role: RouteInput['role']): boolean => READ_ONLY_R
  * that changes files. Null when no engine qualifies.
  */
 export function pickEngine(role: RouteInput['role'], candidates: readonly EngineCandidate[]): EngineId | null {
-  for (const c of candidates) {
-    if (!c.enabled || !c.ready || !c.guard) continue;
-    if (c.guard === 'read-only' && !isReadOnlyRole(role)) continue;
-    return c.id;
-  }
-  return null;
+  const usable = allowedEngines(role, candidates);
+  return (usable.find((c) => !c.near) ?? usable[0])?.id ?? null;
+}
+
+/**
+ * Engines that may take a role at all, in the user's order: enabled, ready, guarded, not exhausted, and not
+ * read-only for work that changes files. The learning router only ever chooses among these.
+ */
+export function allowedEngines(role: RouteInput['role'], candidates: readonly EngineCandidate[]): EngineCandidate[] {
+  return candidates.filter((c) => c.enabled && c.ready && c.guard && !c.exhausted && !(c.guard === 'read-only' && !isReadOnlyRole(role)));
 }

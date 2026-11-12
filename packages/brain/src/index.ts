@@ -4,3 +4,4 @@ export * from './taskboard';
 export * from './goals';
 export * from './approvals';
 export { detectSecrets } from './secrets';
+export * from './outcomes';

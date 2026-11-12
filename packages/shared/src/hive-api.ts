@@ -86,8 +86,39 @@ export const EngineCardSchema = z.object({
   signIn: z.object({ command: z.string(), note: z.string() }).nullable(),
   /** Anything the user should know about privacy with this engine (e.g. it keeps its own chat logs). */
   privacyNote: z.string().nullable(),
+  /** The Treasurer's view of this engine's subscription (02-D9, 04-D7; Phase 2 A5). */
+  usage: z.lazy(() => EngineUsageSchema),
 });
 export type EngineCard = z.infer<typeof EngineCardSchema>;
+
+/** Hive usage in one rolling window (from the engine's own reports; cost marked when estimated). */
+export const UsageWindowSchema = z.object({
+  runs: z.number().int(),
+  tokens: z.number(),
+  costUsd: z.number(),
+  /** Some runs' cost was estimated by the hive (the engine didn't report it). */
+  costEstimated: z.boolean(),
+});
+
+/**
+ * Subscription usage (04-D7). The hive can't read a vendor's real quota, so it tracks its own use in
+ * rolling 5-hour and 7-day windows, honours limits the user sets, and believes the engine when it says
+ * a limit was hit (until the reset time it gives, or a safe default).
+ */
+export const EngineUsageSchema = z.object({
+  window5h: UsageWindowSchema,
+  window7d: UsageWindowSchema,
+  /** The user's own soft limits in USD per window; null = none. */
+  cap5hUsd: z.number().positive().nullable(),
+  cap7dUsd: z.number().positive().nullable(),
+  /** ok; near = 80%+ of a cap (the Treasurer lowers the insect cap); exhausted = a cap or the vendor's limit was hit. */
+  state: z.enum(['ok', 'near', 'exhausted']),
+  /** When the hive may use it again after a vendor limit (epoch ms); null when not limited. */
+  exhaustedUntil: z.number().nullable(),
+  /** Plain words: why near or exhausted, and when it frees up. */
+  message: z.string(),
+});
+export type EngineUsage = z.infer<typeof EngineUsageSchema>;
 
 export const PlanViewSchema = z.object({
   /** One short line for the plan card. */
@@ -191,6 +222,11 @@ export const AgentViewSchema = z.object({
   endedAt: z.number().nullable(),
   /** Last ~200 output lines (tool calls and text, already shortened for display). */
   output: z.array(z.string()),
+  /**
+   * Why the Treasurer chose this engine, model and effort, in plain words (e.g. "learned: sonnet·medium
+   * passes 9/10 coder cards here, cheaper than opus" or "rule: high priority"). Null for older lanes.
+   */
+  routeReason: z.string().nullable(),
 });
 export type AgentView = z.infer<typeof AgentViewSchema>;
 
@@ -248,6 +284,10 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('setEngineEnabled'), engineId: EngineIdSchema, enabled: z.boolean() }),
   /** The user's preference order (first = default). Unknown ids are ignored; missing ones keep their place at the end. */
   z.object({ type: z.literal('setEngineOrder'), order: z.array(EngineIdSchema).max(5) }),
+  /** The user's soft spending limits for an engine's subscription (null clears). */
+  z.object({ type: z.literal('setEngineLimits'), engineId: EngineIdSchema, cap5hUsd: z.number().positive().max(10_000).nullable(), cap7dUsd: z.number().positive().max(100_000).nullable() }),
+  /** Forget an engine's "limit reached" state now (e.g. the user upgraded the plan). */
+  z.object({ type: z.literal('clearEngineLimitHit'), engineId: EngineIdSchema }),
   z.object({ type: z.literal('cancelGoal'), goalId: Id }),
   /** Revert one card's changes on the hive branch (history kept). */
   z.object({ type: z.literal('undoCard'), goalId: Id, cardId: Id }),

@@ -5,6 +5,7 @@ import { ApprovalStore } from './approvals';
 import { transaction } from './db';
 import { GoalStore } from './goals';
 import { ConflictError, SecretError, TrustError } from './errors';
+import { OutcomeStore } from './outcomes';
 import { migrate } from './schema';
 import { detectSecrets } from './secrets';
 import { Taskboard } from './taskboard';
@@ -167,6 +168,14 @@ export class Brain {
   get taskboard(): Taskboard {
     this.#taskboard ??= new Taskboard(this.#db, this.#now);
     return this.#taskboard;
+  }
+
+  #outcomes: OutcomeStore | undefined;
+
+  /** Run outcomes: the Treasurer's memory (Phase 2 A5). */
+  get outcomes(): OutcomeStore {
+    this.#outcomes ??= new OutcomeStore(this.#db, this.#now);
+    return this.#outcomes;
   }
 
   get goals(): GoalStore {

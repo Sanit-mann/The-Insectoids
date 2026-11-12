@@ -39,6 +39,11 @@ import {
   headlineFrom,
   plannedAdapters,
   routeCard,
+  type LimitState,
+  LIMIT_PAUSE,
+  DEFAULT_LIMIT_WAIT_MS,
+  formatClock,
+  seededRng,
 } from '@insectoids/harness';
 import {
   type ActivityView,
@@ -56,6 +61,8 @@ import {
   type ProjectView,
   type EngineId,
   EngineIdSchema,
+  type EngineCard,
+  type EngineUsage,
 } from '@insectoids/shared';
 import { Workspace } from '@insectoids/workspace';
 import type { DoorPaths } from './messages';
@@ -120,12 +127,28 @@ export interface HiveManagerOptions {
   /** Tests: a custom engine instead of the demo or Claude. */
   engineOverride?: Engine;
   now?: () => number;
+  /** Seed for the Treasurer's learning router (tests). Default: the clock. */
+  seed?: number;
+}
+
+const HOUR = 3600_000;
+/** Share of a cap at which an engine counts as "near" (the Treasurer uses it less). */
+const NEAR_SHARE = 0.8;
+
+/** The user's own spending limits for one engine's subscription (04-D7). */
+interface EngineLimits {
+  cap5hUsd: number | null;
+  cap7dUsd: number | null;
 }
 
 /** The host's own settings file (the project and engine choices); app-wide settings live in main's app.json. */
 interface HostSettings {
   projectPath?: string;
   engines?: { order: EngineId[]; disabled: EngineId[] };
+  /** Soft caps per engine (Treasurer v2, Phase 2 A5). */
+  limits?: Partial<Record<EngineId, EngineLimits>>;
+  /** Vendor limits hit: engine -> when the hive may use it again (epoch ms). */
+  limitHits?: Partial<Record<EngineId, number>>;
 }
 
 interface ProjectState {
@@ -195,12 +218,21 @@ export class HiveManager {
   #ticking = false;
   #disposed = false;
   #limits: HiveLimits;
+  /** User caps per engine and vendor limit hits (persisted in the host settings). */
+  #engineLimits: Partial<Record<EngineId, EngineLimits>>;
+  #limitHits: Partial<Record<EngineId, number>>;
 
   constructor(o: HiveManagerOptions) {
     this.#o = o;
     this.#now = o.now ?? Date.now;
     this.#limits = { ...(o.limits ?? DEFAULT_LIMITS) };
-    this.#engines = new EngineRegistry(this.#adapters(), this.#readSettings().engines ?? {});
+    const settings = this.#readSettings();
+    this.#engines = new EngineRegistry(this.#adapters(), settings.engines ?? {});
+    this.#engineLimits = settings.limits ?? {};
+    this.#limitHits = settings.limitHits ?? {};
+    // The Treasurer (Phase 2 A5): limits steer the router, outcomes teach it.
+    this.#engines.setLimitState((id) => this.#limitState(id));
+    this.#engines.setLearning({ stats: (role) => o.brain.outcomes.stats(role), rng: seededRng(o.seed ?? this.#now()) });
   }
 
   /**
@@ -318,6 +350,20 @@ export class HiveManager {
       this.#engines.setOrder(cmd.order);
       return this.#saveEnginePrefs();
     }
+    if (cmd.type === 'setEngineLimits') {
+      if (!this.#engines.adapter(cmd.engineId)) throw new Error(`Unknown engine ${cmd.engineId}.`);
+      this.#engineLimits = { ...this.#engineLimits, [cmd.engineId]: { cap5hUsd: cmd.cap5hUsd, cap7dUsd: cmd.cap7dUsd } };
+      this.#writeSettings({ limits: this.#engineLimits });
+      return;
+    }
+    if (cmd.type === 'clearEngineLimitHit') {
+      const rest = { ...this.#limitHits };
+      delete rest[cmd.engineId];
+      this.#limitHits = rest;
+      this.#writeSettings({ limitHits: this.#limitHits });
+      this.#maybeResumeAfterLimit();
+      return;
+    }
     const p = this.#mustProject();
     switch (cmd.type) {
       case 'submitGoal': {
@@ -429,6 +475,12 @@ export class HiveManager {
       castes: ['coder', 'tester'],
       ...(this.#brainAccess() ? { brainAccess: this.#brainAccess()! } : {}),
       ...(this.#o.services ? { services: this.#o.services } : {}),
+      limits: {
+        hit: (engine, resetAt) => this.#limitHit(engine, resetAt),
+        canRoute: (role) => this.#engines.canRoute(role),
+        cap: () => this.#treasurerCap(),
+      },
+      now: this.#now,
       onEvent: (e) => this.#onHiveEvent(e),
     });
     if (this.#paused) hive.pause(this.#pausedReason ?? 'Paused.');
@@ -454,6 +506,7 @@ export class HiveManager {
     if (!p || this.#ticking || this.#disposed) return;
     this.#ticking = true;
     try {
+      this.#maybeResumeAfterLimit();
       await p.hive.tick();
     } catch (err) {
       this.#o.log?.(`[hive] tick failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
@@ -566,7 +619,7 @@ export class HiveManager {
     return {
       project: p?.view ?? null,
       engine: this.#engineView(),
-      engines: this.#engines.cards(),
+      engines: this.#engines.cards().map((c): EngineCard => ({ ...c, usage: this.#usage(c.id) })),
       hive: { paused: this.#paused, pausedReason: this.#pausedReason, insectCap: this.#limits.insectCap, working: this.#working() },
       goals: goals.map((g) => this.#goalView(g)),
       cards,
@@ -676,6 +729,7 @@ export class HiveManager {
         engine: EngineIdSchema.safeParse(r.engine).success ? (r.engine as EngineId) : null,
         model: r.model,
         effort: r.effort,
+        routeReason: r.reason ?? null,
         status: 'working',
         tokens: 0,
         costUsd: 0,
@@ -692,7 +746,7 @@ export class HiveManager {
     if (e.type === 'run-ended' && e.run) {
       const lane = this.#lanes.get(e.run.runId);
       if (lane) {
-        lane.status = e.run.ok ? 'done' : e.run.error === 'stopped' ? 'paused' : 'failed';
+        lane.status = e.run.ok ? 'done' : e.run.error === 'stopped' || e.run.error === 'quota' ? 'paused' : 'failed';
         lane.tokens = e.run.tokens ?? lane.tokens;
         lane.costUsd = e.run.costUsd ?? lane.costUsd;
         if (e.run.model) lane.model = e.run.model;
@@ -765,6 +819,80 @@ export class HiveManager {
     }, 100);
   }
 
+  // ---- the Treasurer: usage windows and limits (Phase 2 A5) -----------------------------------
+
+  #usage(id: EngineId): EngineUsage {
+    const now = this.#now();
+    const w5 = this.#o.brain.outcomes.usageSince(id, now - 5 * HOUR);
+    const w7 = this.#o.brain.outcomes.usageSince(id, now - 7 * 24 * HOUR);
+    const caps = this.#engineLimits[id] ?? { cap5hUsd: null, cap7dUsd: null };
+    const state = this.#limitState(id, { w5: w5.costUsd, w7: w7.costUsd });
+    const until = this.#limitHits[id];
+    return {
+      window5h: w5,
+      window7d: w7,
+      cap5hUsd: caps.cap5hUsd,
+      cap7dUsd: caps.cap7dUsd,
+      state: state.exhausted ? 'exhausted' : state.near ? 'near' : 'ok',
+      exhaustedUntil: until && until > now ? until : null,
+      message: state.message,
+    };
+  }
+
+  /** The engine's subscription as the router sees it: exhausted (vendor limit or a cap reached) or near a cap. */
+  #limitState(id: EngineId, spent?: { w5: number; w7: number }): LimitState {
+    const now = this.#now();
+    const name = this.#engines.adapter(id)?.name ?? id;
+    const until = this.#limitHits[id];
+    if (until && until > now) return { exhausted: true, near: false, message: `${name} is at its usage limit until ${formatClock(until)}.` };
+    const caps = this.#engineLimits[id];
+    if (!caps || (caps.cap5hUsd === null && caps.cap7dUsd === null)) return { exhausted: false, near: false, message: 'No limits set.' };
+    const w5 = spent?.w5 ?? this.#o.brain.outcomes.usageSince(id, now - 5 * HOUR).costUsd;
+    const w7 = spent?.w7 ?? this.#o.brain.outcomes.usageSince(id, now - 7 * 24 * HOUR).costUsd;
+    const money = (n: number) => `$${n.toFixed(2)}`;
+    const checks = [
+      { used: w5, cap: caps.cap5hUsd, label: '5 hours' },
+      { used: w7, cap: caps.cap7dUsd, label: '7 days' },
+    ];
+    for (const c of checks) {
+      if (c.cap !== null && c.used >= c.cap) {
+        return { exhausted: true, near: false, message: `${name} reached your limit of ${money(c.cap)} per ${c.label} (${money(c.used)} used). It frees up as older runs leave the window.` };
+      }
+    }
+    for (const c of checks) {
+      if (c.cap !== null && c.used >= c.cap * NEAR_SHARE) {
+        return { exhausted: false, near: true, message: `${name} has used ${money(c.used)} of your ${money(c.cap)} limit per ${c.label}; the hive uses it less until the window frees up.` };
+      }
+    }
+    return { exhausted: false, near: false, message: 'Within your limits.' };
+  }
+
+  /** An engine's vendor stopped a run at its limit: rest it until the reset time (or an hour). */
+  #limitHit(engine: EngineId, resetAt: number | null): void {
+    const until = resetAt && resetAt > this.#now() ? resetAt : this.#now() + DEFAULT_LIMIT_WAIT_MS;
+    this.#limitHits = { ...this.#limitHits, [engine]: until };
+    this.#writeSettings({ limitHits: this.#limitHits });
+    const name = this.#engines.adapter(engine)?.name ?? engine;
+    this.#note('limit', `${name} hit its usage limit; the hive leaves it alone until ${formatClock(until)}${resetAt ? '' : ' (no reset time given, so an hour)'}.`);
+  }
+
+  /**
+   * How many insects may work now: the user's cap, or one when every engine that can still take work is near
+   * its cap (so the hive doesn't burn through the rest). Null = the user's cap.
+   */
+  #treasurerCap(): number | null {
+    const usable = this.#engines.candidates().filter((c) => c.enabled && c.ready && c.guard && !c.exhausted);
+    return usable.length && usable.every((c) => c.near) ? 1 : null;
+  }
+
+  /** The hive rested because every engine was at a limit, and one is free again: carry on. */
+  #maybeResumeAfterLimit(): void {
+    if (!this.#paused || !this.#pausedReason?.startsWith(LIMIT_PAUSE)) return;
+    if (!this.#engines.canRoute('coder') && !this.#engines.canRoute('queen')) return;
+    this.#resume();
+    this.#note('resumed', 'An AI engine is free again; the hive carries on.');
+  }
+
   // ---- settings --------------------------------------------------------------------------------
 
   #settingsPath(): string {
@@ -773,12 +901,19 @@ export class HiveManager {
 
   #readSettings(): HostSettings {
     try {
-      const raw = JSON.parse(readFileSync(this.#settingsPath(), 'utf8')) as { projectPath?: unknown; engines?: { order?: unknown; disabled?: unknown } };
+      const raw = JSON.parse(readFileSync(this.#settingsPath(), 'utf8')) as {
+        projectPath?: unknown;
+        engines?: { order?: unknown; disabled?: unknown };
+        limits?: unknown;
+        limitHits?: unknown;
+      };
       const ids = (v: unknown): EngineId[] =>
         Array.isArray(v) ? v.flatMap((x) => (EngineIdSchema.safeParse(x).success ? [x as EngineId] : [])) : [];
       return {
         ...(typeof raw.projectPath === 'string' ? { projectPath: raw.projectPath } : {}),
         ...(raw.engines && typeof raw.engines === 'object' ? { engines: { order: ids(raw.engines.order), disabled: ids(raw.engines.disabled) } } : {}),
+        limits: readLimits(raw.limits),
+        limitHits: readHits(raw.limitHits),
       };
     } catch {
       return {};
@@ -789,6 +924,28 @@ export class HiveManager {
     mkdirSync(this.#o.userDataDir, { recursive: true });
     writeFileSync(this.#settingsPath(), JSON.stringify({ ...this.#readSettings(), ...next }, null, 2));
   }
+}
+
+/** Engine caps from the settings file; anything malformed is dropped. */
+function readLimits(v: unknown): Partial<Record<EngineId, EngineLimits>> {
+  const out: Partial<Record<EngineId, EngineLimits>> = {};
+  if (!v || typeof v !== 'object') return out;
+  const cap = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) && x > 0 ? x : null);
+  for (const [k, raw] of Object.entries(v as Record<string, unknown>)) {
+    if (!EngineIdSchema.safeParse(k).success || !raw || typeof raw !== 'object') continue;
+    const r = raw as Record<string, unknown>;
+    out[k as EngineId] = { cap5hUsd: cap(r['cap5hUsd']), cap7dUsd: cap(r['cap7dUsd']) };
+  }
+  return out;
+}
+
+function readHits(v: unknown): Partial<Record<EngineId, number>> {
+  const out: Partial<Record<EngineId, number>> = {};
+  if (!v || typeof v !== 'object') return out;
+  for (const [k, t] of Object.entries(v as Record<string, unknown>)) {
+    if (EngineIdSchema.safeParse(k).success && typeof t === 'number' && Number.isFinite(t)) out[k as EngineId] = t;
+  }
+  return out;
 }
 
 export type { LaneStatus };

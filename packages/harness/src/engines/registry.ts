@@ -1,7 +1,9 @@
 import type { EngineCard, EngineId } from '@insectoids/shared';
 import type { Effort } from '../claude/args';
 import type { Engine, EngineRequest, EngineResult, EngineRun } from '../hive/engine';
-import { type EngineCandidate, type GuardKind, type ModelTiers, type Route, type RouteInput, pickEngine } from '../hive/router';
+import type { OutcomeStat } from '@insectoids/brain';
+import { type EngineCandidate, type GuardKind, type ModelTiers, type Route, type RouteInput, allowedEngines, pickEngine } from '../hive/router';
+import { learnRoute } from '../hive/treasurer';
 
 /** What an engine can do (Connections 04-D2). The router and the UI read this; nothing is assumed. */
 export interface EngineCapabilities {
@@ -42,6 +44,20 @@ export interface EngineAdapter {
   create?(): Engine;
 }
 
+/** An engine's subscription state from the Treasurer (04-D7). */
+export interface LimitState {
+  exhausted: boolean;
+  near: boolean;
+  /** Plain words, e.g. "Claude Code is at its usage limit until 3:00 PM". */
+  message: string;
+}
+
+/** What the learning router needs: outcome stats per role and a random source. */
+export interface Learning {
+  stats(role: string): readonly OutcomeStat[];
+  rng: () => number;
+}
+
 export interface EnginePrefs {
   /** Preference order; first = default. */
   order: EngineId[];
@@ -61,6 +77,8 @@ export class EngineRegistry {
   readonly #disabled = new Set<EngineId>();
   readonly #detections = new Map<EngineId, EngineDetection>();
   readonly #checking = new Set<EngineId>();
+  #limitState: (id: EngineId) => LimitState | null = () => null;
+  #learning: Learning | null = null;
 
   constructor(adapters: readonly EngineAdapter[], prefs: Partial<EnginePrefs> = {}) {
     for (const a of adapters) this.#adapters.set(a.id, a);
@@ -135,14 +153,38 @@ export class EngineRegistry {
     return id ? this.#adapters.get(id)! : null;
   }
 
+  /** The Treasurer's view of each engine's subscription (exhausted / near a cap). */
+  setLimitState(fn: (id: EngineId) => LimitState | null): void {
+    this.#limitState = fn;
+  }
+
+  /** Turns on learning from outcomes (Phase 2 A5). Without it, routes are the rule routes. */
+  setLearning(learning: Learning | null): void {
+    this.#learning = learning;
+  }
+
+  limitState(id: EngineId): LimitState | null {
+    return this.#limitState(id);
+  }
+
   /** What the router sees, in the user's order. */
   candidates(): EngineCandidate[] {
-    return this.#order.map((id) => ({
-      id,
-      enabled: this.isEnabled(id),
-      ready: this.isReady(id),
-      guard: this.#adapters.get(id)!.capabilities.guard,
-    }));
+    return this.#order.map((id) => {
+      const limit = this.#limitState(id);
+      return {
+        id,
+        enabled: this.isEnabled(id),
+        ready: this.isReady(id),
+        guard: this.#adapters.get(id)!.capabilities.guard,
+        ...(limit?.exhausted ? { exhausted: true } : {}),
+        ...(limit?.near ? { near: true } : {}),
+      };
+    });
+  }
+
+  /** Can some engine take this role right now (enabled, ready, guarded, not exhausted)? */
+  canRoute(role: RouteInput['role']): boolean {
+    return allowedEngines(role, this.candidates()).length > 0;
   }
 
   /**
@@ -151,15 +193,30 @@ export class EngineRegistry {
    * "not ready" and the hive pauses, as before.
    */
   route(input: RouteInput, routeCard: (i: RouteInput, m: ModelTiers, e: EngineId) => Route): Route {
-    const picked = pickEngine(input.role, this.candidates());
+    const candidates = this.candidates();
+    const picked = pickEngine(input.role, candidates);
     const fallback = this.#order.find((id) => this.#adapters.get(id)?.models) ?? this.#order[0]!;
     const id = picked ?? fallback;
     const models = this.#adapters.get(id)?.models ?? { strongest: 'unknown', standard: 'unknown', light: 'unknown' };
-    return routeCard(input, models, id);
+    let rule = routeCard(input, models, id);
+    // Say so when the user's first choice is resting at a limit and another engine stands in.
+    const first = candidates.find((c) => c.enabled && c.ready && c.guard);
+    if (picked && first && first.id !== picked && first.exhausted) {
+      const why = (this.#limitState(first.id)?.message ?? `${first.id} is at its usage limit`).replace(/\.$/, '');
+      rule = { ...rule, reason: `fallback: ${why}; ${rule.reason}` };
+    }
+    if (!picked || !this.#learning) return rule;
+    const engines = allowedEngines(input.role, candidates).flatMap((c) => {
+      const a = this.#adapters.get(c.id);
+      return a?.models ? [{ id: c.id, name: a.name, models: a.models, efforts: a.capabilities.effort, ...(c.near ? { near: true } : {}) }] : [];
+    });
+    const learned = learnRoute({ input, rule, engines, stats: this.#learning.stats(input.role), rng: this.#learning.rng });
+    // Keep a fallback note in front of a learned reason too.
+    return learned === rule || !rule.reason.startsWith('fallback:') ? learned : { ...learned, reason: `${rule.reason.split('; ')[0]}; ${learned.reason}` };
   }
 
-  cards(): EngineCard[] {
-    return this.#order.map((id): EngineCard => {
+  cards(): Array<Omit<EngineCard, 'usage'>> {
+    return this.#order.map((id): Omit<EngineCard, 'usage'> => {
       const a = this.#adapters.get(id)!;
       const d = this.#detections.get(id);
       const base = {

@@ -6,6 +6,7 @@ import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { CopyCommand } from './CopyCommand';
 import { GUARD_TEXT, STATE_DOT, STATE_LABEL } from './engine-names';
+import { EngineUsageView } from './EngineUsage';
 import { Switch } from './Switch';
 
 interface EngineCardViewProps {
@@ -80,6 +81,8 @@ export function EngineCardView({ engine: e, isDefault, index, count, busy, error
           ) : null}
         </dl>
       ) : null}
+
+      {!unsupported ? <EngineUsageView engine={e} /> : null}
 
       {e.privacyNote ? <p className="m-0 rounded-[10px] border border-st-waiting/30 bg-st-waiting/10 px-3 py-2 text-xs">{e.privacyNote}</p> : null}
 

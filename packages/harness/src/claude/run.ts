@@ -28,7 +28,11 @@ export interface RunOptions {
   onEvent?: (e: ClaudeEvent) => void;
 }
 
-export type RunError = 'auth' | 'timeout' | 'stopped' | 'limit' | 'model-error' | 'crash';
+/**
+ * How a run failed. limit = the run's own turn or budget limit; quota = the vendor's usage or rate limit
+ * (the work never really started, so it doesn't use up a card attempt; Phase 2 A5).
+ */
+export type RunError = 'auth' | 'timeout' | 'stopped' | 'limit' | 'quota' | 'model-error' | 'crash';
 
 export interface RunResult {
   ok: boolean;
@@ -43,6 +47,8 @@ export interface RunResult {
   costUsd: number;
   /** true when the engine reported no cost and costUsd is the hive's estimate from tokens (Gemini CLI). */
   costEstimated?: boolean;
+  /** quota only: when the vendor says the limit resets (epoch ms), if it said. */
+  resetAt?: number | null;
   numTurns: number;
   durationMs: number;
   exitCode: number | null;

@@ -126,6 +126,32 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX approvals_status ON approvals (status, created_at);
   `,
+  // v4: run outcomes, the Treasurer's memory (Hive 02-D9 P1, Connections 04-D7; Phase 2 A5)
+  `
+  CREATE TABLE run_outcomes (
+    run_id          TEXT PRIMARY KEY,
+    goal_id         TEXT,
+    card_id         TEXT,
+    role            TEXT NOT NULL,
+    priority        TEXT NOT NULL,
+    engine          TEXT NOT NULL,
+    tier            TEXT NOT NULL,
+    model           TEXT NOT NULL,
+    effort          TEXT NOT NULL,
+    attempt         INTEGER NOT NULL DEFAULT 0,
+    result          TEXT NOT NULL,
+    tokens_in       INTEGER NOT NULL DEFAULT 0,
+    tokens_out      INTEGER NOT NULL DEFAULT 0,
+    tokens_cache    INTEGER NOT NULL DEFAULT 0,
+    cost_usd        REAL NOT NULL DEFAULT 0,
+    cost_estimated  INTEGER NOT NULL DEFAULT 0,
+    duration_ms     INTEGER NOT NULL DEFAULT 0,
+    at              INTEGER NOT NULL
+  );
+  CREATE INDEX run_outcomes_engine_at ON run_outcomes (engine, at);
+  CREATE INDEX run_outcomes_learn ON run_outcomes (role, engine, tier, effort, result);
+  CREATE INDEX run_outcomes_card ON run_outcomes (card_id, attempt);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

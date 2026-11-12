@@ -307,3 +307,28 @@ Three milestones, each ending in something the user can try.
     - install OpenCode (`npm install -g @opencode/cli@2.2.1`, about 250 MB; its install script runs PowerShell to copy the program) with the user's consent;
     - add a provider (a local Ollama model is free and private);
     - then run the opt-in smoke test.
+- **A5 Treasurer v2: done (2026-11-12).** Built by two parallel workers on the contract additions (`EngineCard.usage`, `AgentView.routeReason`, `setEngineLimits` / `clearEngineLimitHit`). 577 unit tests pass; the e2e suite passes 65/65 twice in a row.
+  - **Outcomes in the Brain** (migration v4, `run_outcomes`):
+    - one row per run: engine, tier, the model that actually ran, effort requested, attempt, result, tokens, cost (with an estimated flag), duration;
+    - the Inspector's verdict turns a card attempt's runs into pass or fail;
+    - limit, sign-in and stopped results never count against a model.
+  - **Learning router** (`harness/hive/treasurer.ts`, deterministic with a seeded RNG):
+    - **Candidates:** the rule route plus one tier or one effort level either way, on every allowed engine.
+    - **Belief:** Beta(success+1, fail+1) per caste × engine × tier × effort, with Thompson sampling.
+    - **Trust:** at least 5 finished runs before a candidate counts.
+    - **Choice:** the **cheapest option whose sampled success ≥ 0.8** wins.
+    - **Unchanged:** retries still escalate; the Queen and the Inspector stay on the rule route.
+    - **Plain-words reason on every lane:** "rule: …", "learned: …" or "fallback: …".
+  - **Usage and limits:**
+    - Rolling 5 h and 7 d use per engine; the user's own US$ caps.
+    - **Near (80%):** the engine is used only as a fallback, and the insect cap drops to 1 when every usable engine is near.
+    - **Exhausted:** the engine isn't used at all.
+    - **Vendor limits:** usage, rate-limit and quota messages and HTTP 429 are detected in the engines' output, with the reset time parsed when given (otherwise 1 h).
+      - The card is put back **without using an attempt** and keeps its work for the next engine.
+      - The Queen re-plans elsewhere.
+      - With no engine left, the hive pauses and resumes once one frees up.
+  - **UI:**
+    - Engine cards show 5 h / 7 d meters (cost marked "≈ estimated" when the engine didn't report it), "Set limits" and "Clear limit", and say plainly that the hive can't see the vendor's real quota.
+    - Hive lanes show "Why this model".
+    - The side panel warns when an engine is near or at a limit.
+  - **Flaky test check:** `brain-crash.spec.ts` failed once while two runs overlapped; it passed in both full sequential runs.

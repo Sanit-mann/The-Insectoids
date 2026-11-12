@@ -70,9 +70,10 @@ export function LanesTable({ agents, selectedId, onSelect, now }: LanesTableProp
                 <td className="max-w-[280px] truncate px-3 py-2.5 text-muted" title={a.title}>
                   {a.title}
                 </td>
-                <td className="px-3 py-2.5 text-xs text-muted">
+                <td className="px-3 py-2.5 text-xs text-muted" title={a.routeReason ? `Why this model: ${a.routeReason}` : undefined}>
                   {engineName(a.engine) ? <span className="mr-1.5 rounded border border-line px-1.5 py-0.5 font-sans text-[11px]">{engineName(a.engine)}</span> : null}
                   <span className="font-mono">{modelLabel(a)}</span>
+                  {a.routeReason ? <span className="mt-0.5 block max-w-[240px] truncate font-sans text-[11px]">{a.routeReason}</span> : null}
                 </td>
                 <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">{formatTokens(a.tokens)}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">{formatUsd(a.costUsd)}</td>

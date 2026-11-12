@@ -241,7 +241,7 @@ const req = (role: EngineRequest['role']): EngineRequest => ({
   cwd: tmp,
   system: 'Brief',
   task: 'Do it',
-  route: { engine: 'opencode', model: tiers.standard, effort: 'medium', maxTurns: 10, maxBudgetUsd: 1, timeoutMs: 20_000 },
+  route: { engine: 'opencode', tier: 'standard', model: tiers.standard, effort: 'medium', reason: 'rule: test', maxTurns: 10, maxBudgetUsd: 1, timeoutMs: 20_000 },
   guard: { workspace: tmp, home: tmp, noGo: [], network: 'none' },
 });
 

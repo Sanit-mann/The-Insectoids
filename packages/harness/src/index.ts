@@ -12,6 +12,8 @@ export * from './hive/router';
 export * from './hive/demo';
 export * from './engines/registry';
 export * from './engines/adapters';
+export * from './engines/limits';
+export * from './hive/treasurer';
 export * from './gemini/args';
 export * from './gemini/detect';
 export * from './gemini/engine';
