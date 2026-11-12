@@ -90,6 +90,19 @@ Each step ends in something that works and is tested. Core services are built te
   **Race test:** 8 threads with separate connections claim one card at the same instant, and exactly one wins (30/30 repeated runs). It exposed a real bug, now fixed: the Brain set WAL mode before its lock timeout, so opening while another connection was busy failed instead of waiting.
 
   Shared lifecycle change: `claimed -> failed` is allowed, for a card whose leases keep expiring until it runs out of attempts.
+- **Step 3 Workspace manager: done (2026-11-12).** `packages/workspace`, 19 tests against real temporary git repos (project path contains a space):
+  - **Isolation:** `hive/<goal>` branch plus an integration worktree per goal, kept outside the project folder; a worktree and `hive-card/<goal>/<card>` branch per card, started from the hive tip so it sees earlier merged cards.
+  - **Dependencies:** linked into cards (directory junction on Windows), never committed. Links are unlinked before removal so the real `node_modules` is never deleted.
+  - **Committing and merging:**
+    - single committer with the hive identity plus `Insect:` / `Card:` trailers;
+    - conflicts reported and the merge aborted, never forced;
+    - merging into main needs `approvedBy`, the project on the target branch, and no uncommitted tracked changes;
+    - main merges can be undone, also only with approval.
+  - **Undo:** a card is reverted (history kept); a goal is reset to its checkpoint with the old tip kept under `refs/insectoids/archive/…`.
+  - **Changes view:** a per-card diff (files + patch).
+  - **Safety:** ids are validated (no `..`, no leading `-`); git runs with no shell and no prompts.
+
+  Respects the user's git line-ending setting (`core.autocrlf`).
 
 ## Not in Phase 1 (by design)
 Other engines and providers, secret broker, embeddings and meaning search, code map, Brain graph, library activation, Cadence, containers. See Phase 2+.
