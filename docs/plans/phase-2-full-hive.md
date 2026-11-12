@@ -245,3 +245,30 @@ Three milestones, each ending in something the user can try.
       - Gemini CLI 0.68.0 stays installed and does nothing on its own.
       - **The Phase 2 demo's "2 engines" goal is on hold** until a second engine is chosen: Antigravity CLI once it's documented, a paid Gemini API key, or an OpenCode provider (A4).
       - **Next: A3** (Vault + secret broker).
+- **A3 Vault + secret broker: done (2026-11-12).** Built by two parallel workers on the shared contract `packages/shared/src/vault-api.ts`. 513 unit tests and 51 e2e tests pass. No real key was ever used: tests use made-up values and a fake local server.
+  - **Vault** (main process, `main/vault.ts`):
+    - `safeStorage` ciphertext only, in `<userData>/vault.json`; fails closed without OS encryption.
+    - The UI sees only a label, a 4-character hint and a handle. The key is decrypted only inside main, when the broker needs it.
+    - Removing a key is refused while an enabled service uses it.
+  - **Services** (`main/services.ts`): GitHub (bearer, GET/HEAD) and Brave Search (`X-Subscription-Token`, GET) are built in and off by default; users can add https REST services. A "Test connection" makes one harmless read through the broker.
+  - **Secret broker** (`main/broker.ts`): 127.0.0.1, random port, `POST /call` with a capability token. Each property has its own test (14 tests):
+    - **No key leaks:** a planted key appears in no IPC reply, log or audit entry, and an echoed key is redacted (even when split by the size cap).
+    - **Header stripping:** the key is added by the broker, and cookie/host-style headers from the caller are dropped.
+    - **Tokens:** missing, unknown, revoked or expired tokens are refused.
+    - **Scope:** a token reaches only services that are both granted for its card and switched on.
+    - **Path tricks:** `..`, `%2e%2e`, `//`, backslashes, full URLs and `?` in the path are refused before any request goes out.
+    - **Write methods:** answer 403 with a BLOCKED hint unless the user approved "publish" for that card.
+    - **Size cap:** bodies are capped at 200 KB; no CORS headers.
+  - **Tokens per run:**
+    - A new host → main channel (`broker.issue` / `broker.revoke`).
+    - Only insects whose card lists `integrations` get a token; the Queen, the Inspector and other cards never do.
+    - Revoked in `finally`, with a 2 h maximum life.
+    - The token reaches only the new `services` MCP server (`packages/services-mcp`, one tool: `call_service`), for Claude and Gemini runs alike; never the engine or the shell.
+  - **Queen:** plan cards gain `integrations`; the Queen's brief lists the services that are switched on and tells her to give a card only what it needs.
+  - **UI:**
+    - **Vault tab:** the key input is uncontrolled, so the key never enters React state, and it clears on save; there's a hold-to-remove.
+    - **Services tab:** key picker, on/off switch with consent wording, test connection, and an "Add a service" form (https only).
+    - **Card detail:** lists the card's services.
+    - Uses Kokonut `hold-button` and `inline-alert`, and shadcn `button`.
+    - An e2e test proves the planted key never appears in the page text or any input.
+  - **Screenshots:** `design/screenshots/phase-2-a3-services.png`, `phase-2-a3-vault.png`.
