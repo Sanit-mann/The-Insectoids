@@ -231,3 +231,12 @@ Three milestones, each ending in something the user can try.
   - **Notes:**
     - In Gemini runs, the `brain` CLI isn't reachable from the hive shell (its token is scrubbed); the Brain MCP door works.
     - A blocked engine (machine policies, unsafe env) shows as "missing" with the reason in its message; the contract has no separate "blocked" state yet.
+  - **Real smoke test (user approved, 2026-11-12): Google refused the sign-in, before anything ran.** All flags were accepted, and no quota was used.
+    - **The error:** "IneligibleTierError: This client is no longer supported for Gemini Code Assist for individuals… migrate to the Antigravity suite."
+    - **Confirmed in Google's announcement** (github.com/google-gemini/gemini-cli/discussions/27274, 2026-05-19): since **2026-06-18, Gemini CLI no longer serves Google AI Pro, Ultra or free use**. It still works with **paid Gemini API keys** and enterprise licenses. The replacement for personal plans is **Antigravity CLI** (`agy`, written in Go). Its headless mode, MCP, hooks and policies aren't documented yet, and users report sign-in and MCP problems.
+    - The A2 research checked flags but missed this; it was found by the first real run.
+    - **Fixes:**
+      - A personal Google sign-in now shows Gemini as **signed out**, with this explanation, instead of "ready".
+      - The sign-in note on the Connections card says a paid API key is needed.
+      - Gemini detection no longer runs `npm root -g` through a shell on Windows; it uses the default npm folder and a PATH scan instead (no shell anywhere).
+    - **Open decision for the user:** a paid Gemini API key (works with this adapter as built, billed per use, stored in the Vault from A3), or a new Antigravity CLI adapter (would use the paid plan; needs research first), or Gemini later.

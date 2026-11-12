@@ -125,23 +125,28 @@ describe('Gemini stream-json', () => {
 describe('finding Gemini CLI and its sign-in', () => {
   const pkg = (version: string) => JSON.stringify({ name: '@google/gemini-cli', version });
 
-  it('finds the npm package, its bundle and a Node.js 20+', async () => {
+  it('finds the npm package, its bundle and a Node.js 20+ (Windows: no npm call, so no shell)', async () => {
     const files: Record<string, string> = {
-      [join('/npm', 'node_modules', '@google', 'gemini-cli', 'bundle', 'gemini.js')]: '',
-      [join('/npm', 'node_modules', '@google', 'gemini-cli', 'package.json')]: pkg('0.68.0'),
+      [join('/appdata', 'npm', 'node_modules', '@google', 'gemini-cli', 'bundle', 'gemini.js')]: '',
+      [join('/appdata', 'npm', 'node_modules', '@google', 'gemini-cli', 'package.json')]: pkg('0.68.0'),
       [join('/bin', 'node.exe')]: '',
     };
+    const calls: string[] = [];
     const install = await detectGemini({
-      run: async () => '/npm/node_modules\n',
+      run: async (command) => {
+        calls.push(command);
+        return '';
+      },
       exists: (p) => p in files,
       readFile: (p) => files[p] ?? '',
       runNode: async () => 'v24.15.0\n',
-      env: { PATH: '/bin' },
+      env: { PATH: '/bin', APPDATA: '/appdata' },
       platform: 'win32',
     });
+    expect(calls).toEqual([]);
     expect(install).toEqual({
       status: 'installed',
-      script: join('/npm', 'node_modules', '@google', 'gemini-cli', 'bundle', 'gemini.js'),
+      script: join('/appdata', 'npm', 'node_modules', '@google', 'gemini-cli', 'bundle', 'gemini.js'),
       version: '0.68.0',
       node: join('/bin', 'node.exe'),
       nodeVersion: '24.15.0',
@@ -299,12 +304,17 @@ describe('the Gemini engine and adapter', () => {
     writeFileSync(tools, '');
     const installed = { status: 'installed' as const, script: 's', version: '0.68.0', node: 'node', nodeVersion: '24.0.0' };
     const make = (o: Partial<Parameters<typeof geminiAdapter>[0]> = {}) =>
-      geminiAdapter({ hiveTools: tools, runBase: tmp, detect: async () => installed, auth: () => ({ signedIn: true, method: 'oauth-personal' }), machinePolicies: () => false, ...o });
+      geminiAdapter({ hiveTools: tools, runBase: tmp, detect: async () => installed, auth: () => ({ signedIn: true, method: 'gemini-api-key' }), machinePolicies: () => false, ...o });
     const a = make();
     expect(a.capabilities).toMatchObject({ guard: 'policy-and-tools', reportsCost: false });
-    expect(await a.detect!()).toMatchObject({ state: 'ready', version: '0.68.0', message: expect.stringMatching(/signed in with Google/) });
+    expect(await a.detect!()).toMatchObject({ state: 'ready', version: '0.68.0', message: 'Gemini CLI 0.68.0 is ready.' });
     expect(a.create!()).toBeInstanceOf(GeminiEngine);
     expect(await make({ auth: () => ({ signedIn: false, method: null }) }).detect!()).toMatchObject({ state: 'signed-out' });
+    // A personal Google sign-in: Google's server refuses it since 2026-06-18 (found in the first real smoke run).
+    expect(await make({ auth: () => ({ signedIn: true, method: 'oauth-personal' }) }).detect!()).toMatchObject({
+      state: 'signed-out',
+      message: expect.stringMatching(/June 18, 2026.*Antigravity CLI.*paid Gemini API key/),
+    });
     expect(await make({ machinePolicies: () => true }).detect!()).toMatchObject({ state: 'missing', message: expect.stringMatching(/admin policies/) });
     expect(await make({ detect: async () => ({ status: 'missing' }) }).detect!()).toMatchObject({ state: 'missing' });
     const noTools = make({ hiveTools: join(tmp, 'nope.mjs') });

@@ -37,7 +37,7 @@ export interface GeminiDetectDeps {
 
 const defaultDeps = (): GeminiDetectDeps => ({
   run: async (command, args) =>
-    (await execFileAsync(command, args, { timeout: 15_000, windowsHide: true, shell: process.platform === 'win32' })).stdout,
+    (await execFileAsync(command, args, { timeout: 15_000, windowsHide: true })).stdout,
   exists: existsSync,
   readFile: (p) => readFileSync(p, 'utf8'),
   runNode: async (path) => (await execFileAsync(path, ['--version'], { timeout: 15_000, windowsHide: true })).stdout,
@@ -52,13 +52,17 @@ const defaultDeps = (): GeminiDetectDeps => ({
  */
 async function packageDirs(d: GeminiDetectDeps): Promise<string[]> {
   const dirs: string[] = [];
-  try {
-    const root = (await d.run('npm', ['root', '-g'])).trim().split(/\r?\n/).pop()?.trim();
-    if (root) dirs.push(join(root, ...PACKAGE));
-  } catch {
-    // npm not on PATH: fall back to the usual places.
-  }
   const win = d.platform === 'win32';
+  // Never through a shell: on Windows `npm` is a .cmd launcher that only starts through one, so there
+  // the default prefix and the PATH scan below find the package instead.
+  if (!win) {
+    try {
+      const root = (await d.run('npm', ['root', '-g'])).trim().split(/\r?\n/).pop()?.trim();
+      if (root) dirs.push(join(root, ...PACKAGE));
+    } catch {
+      // npm not on PATH: fall back to the usual places.
+    }
+  }
   if (win && d.env['APPDATA']) dirs.push(join(d.env['APPDATA'], 'npm', 'node_modules', ...PACKAGE));
   for (const dir of (d.env['PATH'] ?? d.env['Path'] ?? '').split(delimiter).filter(Boolean)) {
     if (win ? d.exists(join(dir, 'gemini.cmd')) : d.exists(join(dir, 'gemini'))) {

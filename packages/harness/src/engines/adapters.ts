@@ -83,6 +83,10 @@ export interface GeminiAdapterOptions {
  * Gemini CLI (Google). Its pre-tool hooks fail open, so the guard doesn't rely on them: every built-in tool
  * is denied by a per-run admin policy and changes go through the hive's guarded MCP tools.
  */
+/** Shown when Gemini CLI is signed in with a personal Google account, which Google no longer serves. */
+export const PERSONAL_LOGIN_ENDED =
+  'Google stopped serving Gemini CLI for personal Google sign-ins (Google AI Pro, Ultra and free use) on June 18, 2026; its replacement for those plans is Antigravity CLI. Gemini CLI still works with a paid Gemini API key.';
+
 export function geminiAdapter(o: GeminiAdapterOptions): EngineAdapter {
   const exists = o.exists ?? existsSync;
   const hasTools = (): boolean => Boolean(o.hiveTools && exists(o.hiveTools));
@@ -98,7 +102,10 @@ export function geminiAdapter(o: GeminiAdapterOptions): EngineAdapter {
     models: { strongest: 'pro', standard: 'flash', light: 'flash-lite' },
     availableIn: null,
     install: { command: 'npm install -g @google/gemini-cli', note: "Google's official package. Needs Node.js 20 or newer. The hive never runs it without you." },
-    signIn: { command: 'gemini', note: 'Run it once in a terminal and choose "Login with Google". The hive never sees your login.' },
+    signIn: {
+      command: 'gemini',
+      note: 'Needs a paid Gemini API key (or a work account with Gemini Code Assist). "Login with Google" no longer works for personal Google AI Pro/Ultra plans. The hive never sees your login.',
+    },
     privacyNote: 'Gemini CLI keeps its own chat logs in your user folder (~/.gemini/tmp). The hive turns its usage statistics off and never lets it spend AI credits.',
     async detect(): Promise<EngineDetection> {
       install = null;
@@ -121,8 +128,13 @@ export function geminiAdapter(o: GeminiAdapterOptions): EngineAdapter {
       if (!auth.signedIn) {
         return { state: 'signed-out', version: found.version, message: 'Gemini CLI is not signed in. Run "gemini" in a terminal and choose "Login with Google"; the hive checks again every minute.' };
       }
+      // Google stopped serving Gemini CLI for personal Google sign-ins (Google AI Pro/Ultra and free use) on
+      // 2026-06-18: the server refuses them ("IneligibleTierError"), so this sign-in can't run hive work.
+      if (auth.method === 'oauth-personal') {
+        return { state: 'signed-out', version: found.version, message: PERSONAL_LOGIN_ENDED };
+      }
       install = found;
-      const how = auth.method === 'oauth-personal' ? ' (signed in with Google)' : '';
+      const how = '';
       return {
         state: 'ready',
         version: found.version,
