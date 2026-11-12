@@ -88,6 +88,13 @@ describe('claiming (Hive 02-D10)', () => {
     expect(board.claimNext({ agentId: 'Ant-09', caste: 'coder', leaseMs: MIN })?.id).toBe('C-low');
     expect(board.claimNext({ agentId: 'Ant-10', caste: 'coder', leaseMs: MIN })).toBeNull();
   });
+
+  it('claimNext can be limited to one goal', () => {
+    board.post(card({ id: 'A-1', goalId: 'G-A' }));
+    board.post(card({ id: 'B-1', goalId: 'G-B' }));
+    expect(board.claimNext({ agentId: 'Ant-1', caste: 'coder', leaseMs: MIN, goalId: 'G-B' })?.id).toBe('B-1');
+    expect(board.claimNext({ agentId: 'Ant-2', caste: 'coder', leaseMs: MIN, goalId: 'G-B' })).toBeNull();
+  });
 });
 
 describe('leases: a crashed insect never strands a card', () => {

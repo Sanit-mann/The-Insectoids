@@ -11,8 +11,11 @@
     "typecheck": "tsc -p tsconfig.json"
   },
   "dependencies": {
+    "@insectoids/brain": "workspace:*",
     "@insectoids/reflexes": "workspace:*",
-    "@insectoids/shared": "workspace:*"
+    "@insectoids/shared": "workspace:*",
+    "@insectoids/workspace": "workspace:*",
+    "zod": "4.6.7"
   },
   "devDependencies": {
     "rolldown": "1.2.19"

@@ -257,12 +257,21 @@ importers:
 
   packages/harness:
     dependencies:
+      '@insectoids/brain':
+        specifier: workspace:*
+        version: link:../brain
       '@insectoids/reflexes':
         specifier: workspace:*
         version: link:../reflexes
       '@insectoids/shared':
         specifier: workspace:*
         version: link:../shared
+      '@insectoids/workspace':
+        specifier: workspace:*
+        version: link:../workspace
+      zod:
+        specifier: 4.6.7
+        version: 4.6.7
     devDependencies:
       rolldown:
         specifier: 1.2.19

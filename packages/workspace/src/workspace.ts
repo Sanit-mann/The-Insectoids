@@ -74,7 +74,71 @@ export class Workspace {
     this.#now = opts.now ?? Date.now;
   }
 
-  async startGoal(goalId: string, baseRef = 'HEAD'): Promise<GoalInfo> {
+  #queue: Promise<unknown> = Promise.resolve();
+
+  /**
+   * Single committer (Workspace 06-D3): every git operation runs strictly one at a time,
+   * so parallel insects and inspectors never collide in the same repository.
+   */
+  #serial<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.#queue.then(fn, fn);
+    this.#queue = run.catch(() => undefined);
+    return run;
+  }
+
+  startGoal(goalId: string, baseRef = 'HEAD'): Promise<GoalInfo> {
+    return this.#serial(() => this.#startGoalImpl(goalId, baseRef));
+  }
+
+  createCard(goalId: string, cardId: string, opts: { linkDependencies?: string[] } = {}): Promise<CardInfo> {
+    return this.#serial(() => this.#createCardImpl(goalId, cardId, opts));
+  }
+
+  /** Commit everything the insect changed in its worktree. Returns null when nothing changed. */
+  commitCard(goalId: string, cardId: string, c: { message: string; insect: string }): Promise<string | null> {
+    return this.#serial(() => this.#commitCardImpl(goalId, cardId, c));
+  }
+
+  /** Merge a verified card into the goal's hive branch. Conflicts are reported, never forced. */
+  mergeCard(goalId: string, cardId: string, title: string): Promise<MergeResult> {
+    return this.#serial(() => this.#mergeCardImpl(goalId, cardId, title));
+  }
+
+  /** Undo one card: revert its merge if it was merged, otherwise just drop its workspace. */
+  undoCard(goalId: string, cardId: string): Promise<void> {
+    return this.#serial(() => this.#undoCardImpl(goalId, cardId));
+  }
+
+  /** Undo a whole goal: archive the hive branch tip, then return it to the goal's checkpoint. */
+  undoGoal(goalId: string): Promise<string> {
+    return this.#serial(() => this.#undoGoalImpl(goalId));
+  }
+
+  /** Merge the goal into the user's branch. Needs approval and a clean project folder. */
+  mergeIntoMain(goalId: string, approval: Approval, target = 'main'): Promise<string> {
+    return this.#serial(() => this.#mergeIntoMainImpl(goalId, approval, target));
+  }
+
+  /** Revert a goal's merge into the user's branch. Also needs approval. */
+  undoMainMerge(goalId: string, approval: Approval, target = 'main'): Promise<void> {
+    return this.#serial(() => this.#undoMainMergeImpl(goalId, approval, target));
+  }
+
+  diffCard(goalId: string, cardId: string): Promise<{ files: FileChange[]; patch: string }> {
+    return this.#serial(() => this.#diffCardImpl(goalId, cardId));
+  }
+
+  /** Remove a card's worktree. Dependency links are unlinked first so their targets are never touched. */
+  removeCard(goalId: string, cardId: string): Promise<void> {
+    return this.#serial(() => this.#removeCardImpl(goalId, cardId));
+  }
+
+  /** Release every worktree this hive created (branches and refs stay as history). */
+  dispose(): Promise<void> {
+    return this.#serial(() => this.#disposeImpl());
+  }
+
+  async #startGoalImpl(goalId: string, baseRef = 'HEAD'): Promise<GoalInfo> {
     assertId(goalId);
     const base = await this.#git(this.#repo, ['rev-parse', '--verify', `${baseRef}^{commit}`]);
     const branch = `hive/${goalId}`;
@@ -96,7 +160,7 @@ export class Workspace {
     };
   }
 
-  async createCard(goalId: string, cardId: string, opts: { linkDependencies?: string[] } = {}): Promise<CardInfo> {
+  async #createCardImpl(goalId: string, cardId: string, opts: { linkDependencies?: string[] } = {}): Promise<CardInfo> {
     assertId(goalId);
     assertId(cardId);
     const from = await this.#git(this.#repo, ['rev-parse', `hive/${goalId}`]);
@@ -115,7 +179,7 @@ export class Workspace {
   }
 
   /** Commit everything the insect changed in its worktree. Returns null when nothing changed. */
-  async commitCard(goalId: string, cardId: string, c: { message: string; insect: string }): Promise<string | null> {
+  async #commitCardImpl(goalId: string, cardId: string, c: { message: string; insect: string }): Promise<string | null> {
     const path = this.#cardPath(goalId, cardId);
     const excludes = this.#links(path).map((name) => `:(exclude)${name}`);
     await this.#git(path, ['add', '-A', '--', '.', ...excludes]);
@@ -127,7 +191,7 @@ export class Workspace {
   }
 
   /** Merge a verified card into the goal's hive branch. Conflicts are reported, never forced. */
-  async mergeCard(goalId: string, cardId: string, title: string): Promise<MergeResult> {
+  async #mergeCardImpl(goalId: string, cardId: string, title: string): Promise<MergeResult> {
     assertId(goalId);
     assertId(cardId);
     const integration = join(this.#root, goalId, '_integration');
@@ -145,12 +209,12 @@ export class Workspace {
   }
 
   /** Undo one card: revert its merge if it was merged, otherwise just drop its workspace. */
-  async undoCard(goalId: string, cardId: string): Promise<void> {
+  async #undoCardImpl(goalId: string, cardId: string): Promise<void> {
     assertId(goalId);
     assertId(cardId);
     const mergeSha = await this.#tryGit(this.#repo, ['rev-parse', '--verify', '--quiet', this.#ref(goalId, `cards/${cardId}/merge`)]);
     if (!mergeSha) {
-      await this.removeCard(goalId, cardId);
+      await this.#removeCardImpl(goalId, cardId);
       return;
     }
     const integration = join(this.#root, goalId, '_integration');
@@ -159,7 +223,7 @@ export class Workspace {
   }
 
   /** Undo a whole goal: archive the hive branch tip, then return it to the goal's checkpoint. */
-  async undoGoal(goalId: string): Promise<string> {
+  async #undoGoalImpl(goalId: string): Promise<string> {
     const goal = await this.goal(goalId);
     const tip = await this.#git(this.#repo, ['rev-parse', goal.branch]);
     const archive = `refs/insectoids/archive/${goalId}/${this.#now()}`;
@@ -169,7 +233,7 @@ export class Workspace {
   }
 
   /** Merge the goal into the user's branch. Needs approval and a clean project folder. */
-  async mergeIntoMain(goalId: string, approval: Approval, target = 'main'): Promise<string> {
+  async #mergeIntoMainImpl(goalId: string, approval: Approval, target = 'main'): Promise<string> {
     if (!approval.approvedBy) throw new ApprovalRequiredError(`Merging goal ${goalId} into ${target}`);
     await this.#assertUserCheckoutReady(target);
     const identity = await this.#userIdentityOrHive();
@@ -185,7 +249,7 @@ export class Workspace {
   }
 
   /** Revert a goal's merge into the user's branch. Also needs approval. */
-  async undoMainMerge(goalId: string, approval: Approval, target = 'main'): Promise<void> {
+  async #undoMainMergeImpl(goalId: string, approval: Approval, target = 'main'): Promise<void> {
     if (!approval.approvedBy) throw new ApprovalRequiredError(`Undoing goal ${goalId} in ${target}`);
     assertId(goalId);
     await this.#assertUserCheckoutReady(target);
@@ -194,7 +258,7 @@ export class Workspace {
     await this.#git(this.#repo, [...identity, 'revert', '-m', '1', '--no-edit', sha]);
   }
 
-  async diffCard(goalId: string, cardId: string): Promise<{ files: FileChange[]; patch: string }> {
+  async #diffCardImpl(goalId: string, cardId: string): Promise<{ files: FileChange[]; patch: string }> {
     assertId(goalId);
     assertId(cardId);
     const base = await this.#git(this.#repo, ['rev-parse', this.#ref(goalId, `cards/${cardId}/base`)]);
@@ -212,7 +276,7 @@ export class Workspace {
   }
 
   /** Remove a card's worktree. Dependency links are unlinked first so their targets are never touched. */
-  async removeCard(goalId: string, cardId: string): Promise<void> {
+  async #removeCardImpl(goalId: string, cardId: string): Promise<void> {
     const path = this.#cardPath(goalId, cardId);
     if (!existsSync(path)) return;
     for (const name of this.#links(path)) {
@@ -227,13 +291,13 @@ export class Workspace {
   }
 
   /** Release every worktree this hive created (branches and refs stay as history). */
-  async dispose(): Promise<void> {
+  async #disposeImpl(): Promise<void> {
     if (!existsSync(this.#root)) return;
     for (const goal of readdirSync(this.#root)) {
       if (!ID.test(goal)) continue;
       for (const entry of readdirSync(join(this.#root, goal))) {
         if (entry === '_integration' || !ID.test(entry)) continue;
-        await this.removeCard(goal, entry);
+        await this.#removeCardImpl(goal, entry);
       }
       const integration = join(this.#root, goal, '_integration');
       if (existsSync(integration)) await this.#tryGit(this.#repo, ['worktree', 'remove', '--force', integration]);
@@ -255,6 +319,11 @@ export class Workspace {
   async #userIdentityOrHive(): Promise<string[]> {
     const email = await this.#tryGit(this.#repo, ['config', 'user.email']);
     return email ? [] : HIVE_IDENTITY;
+  }
+
+  /** Where a card's worktree lives (whether or not it exists yet). */
+  cardPath(goalId: string, cardId: string): string {
+    return this.#cardPath(goalId, cardId);
   }
 
   #cardPath(goalId: string, cardId: string): string {

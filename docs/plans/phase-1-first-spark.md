@@ -137,6 +137,25 @@ Each step ends in something that works and is tested. Core services are built te
     - the hook from `--settings` fires in `-p` mode: Read of `.env` **denied** (`protected-path`), Write of `hello.txt` allowed;
     - the model respected the denial and did not try another route.
   - **Token finding for Phase 2 (Treasurer):** Claude Code's default system prompt is about 18k tokens (17,850 cache write; 107k cache reads over 3 turns). Cheap when cached, but a slim hive-specific system prompt (`--system-prompt-file`) could cut per-card overhead. Evaluate against quality.
+- **Step 6 Hive runtime: done (2026-11-12).** `packages/harness/src/hive`.
+  - **6a, Brain:** goals (planning → awaiting approval → running → stuck/done/cancelled, plan, current wave, token and dollar spend, budget) and the approval inbox (only the user decides; decisions are final).
+  - **6b, protocol:**
+    - the Queen replies with a JSON plan, checked for allowed castes, "done means" on every card, real and earlier dependencies, no cycles, at most 6 waves × 6 cards, with one correction round;
+    - insects end with a `STATUS:` line; the Inspector ends with a `VERDICT:` line (no verdict counts as a fail).
+    - Prompts are built from the library: role AGENT.md plus default skills plus hive rules. Measured sizes: Queen ~3.9k, Coder ~4.4k, Tester ~4.9k, Inspector ~3.0k tokens.
+  - **6c, Treasurer router (rule-based):** Queen on the strongest model/high effort; cards by priority; each retry raises effort, then the model tier. Every run gets turn, dollar and time limits. Budget counts input + output + cache-write tokens; warn at 75%, stop at 100%.
+  - **6d, `Hive` orchestrator** behind an `Engine` interface (`ClaudeEngine` for real runs, `FakeEngine` for tests):
+    - the Queen plans (read-only, scratch workspace); a big plan (more than one wave, D11) waits for approval;
+    - waves are posted one by one;
+    - the Foreman dispatches by caste within the insect cap; each insect gets its own worktree, guard policy, heartbeat lease and route;
+    - `STATUS: BLOCKED` plus guard "ask" denials become an approval. Approving resumes the card with exactly that rule allowed (`approvedRules`; never affects "block");
+    - the Inspector verifies on the committed branch; pass merges into the hive branch; fail retries with the reason, then escalates; merge conflicts count as a fail;
+    - a goal with a failed card is "stuck";
+    - after the last wave, the merge into main waits for approval;
+    - the budget stop asks to raise the budget by 50%; an engine sign-out pauses the hive;
+    - outcomes are written to the Brain.
+  - **11 end-to-end tests on real git repos with `FakeEngine`.** They found a real bug: parallel inspections merged at the same time in one worktree and collided. Fixed by making `Workspace` a true single committer: every git operation is queued, with a parallel-merge test added. The suite test timeout was raised to 30 s for git-heavy tests on Windows.
+  - **Not yet run with the real engine:** a real multi-agent run costs subscription tokens and is planned for the Step 10 demo, or earlier on request.
 - **Step 5 history (built before the CLI was installed):** `packages/harness`, 10 tests against a fake CLI that speaks the same protocol and runs the real bundled guard hook.
   - **Command line, from the official CLI reference:**
     - `-p --output-format stream-json --verbose`;

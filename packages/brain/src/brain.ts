@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { RecordKind, Trust } from '@insectoids/shared';
+import { ApprovalStore } from './approvals';
 import { transaction } from './db';
+import { GoalStore } from './goals';
 import { ConflictError, SecretError, TrustError } from './errors';
 import { migrate } from './schema';
 import { detectSecrets } from './secrets';
@@ -156,11 +158,24 @@ export class Brain {
   }
 
   #taskboard: Taskboard | undefined;
+  #goals: GoalStore | undefined;
+  #approvals: ApprovalStore | undefined;
 
   /** The taskboard lives in the same database, behind the same single writer. */
   get taskboard(): Taskboard {
     this.#taskboard ??= new Taskboard(this.#db, this.#now);
     return this.#taskboard;
+  }
+
+  get goals(): GoalStore {
+    this.#goals ??= new GoalStore(this.#db, this.#now, this.#newId);
+    return this.#goals;
+  }
+
+  /** The user's approval inbox. */
+  get approvals(): ApprovalStore {
+    this.#approvals ??= new ApprovalStore(this.#db, this.#now, this.#newId);
+    return this.#approvals;
   }
 
   close(): void {

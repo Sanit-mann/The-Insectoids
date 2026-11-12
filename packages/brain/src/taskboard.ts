@@ -147,11 +147,13 @@ export class Taskboard {
     });
   }
 
-  /** Pull the most urgent claimable card for this caste (oldest first within a priority). */
-  claimNext(req: ClaimRequest): BoardCard | null {
-    const candidates = this.db
-      .prepare(`SELECT id, priority, created_at FROM tasks WHERE status = 'open' AND caste = ?`)
-      .all(req.caste) as Array<{ id: string; priority: Priority; created_at: number }>;
+  /** Pull the most urgent claimable card for this caste (oldest first within a priority), optionally from one goal. */
+  claimNext(req: ClaimRequest & { goalId?: string }): BoardCard | null {
+    const candidates = (
+      req.goalId
+        ? this.db.prepare(`SELECT id, priority, created_at FROM tasks WHERE status = 'open' AND caste = ? AND goal_id = ?`).all(req.caste, req.goalId)
+        : this.db.prepare(`SELECT id, priority, created_at FROM tasks WHERE status = 'open' AND caste = ?`).all(req.caste)
+    ) as Array<{ id: string; priority: Priority; created_at: number }>;
     candidates.sort((a, b) => PRIORITY_RANK[a.priority] - PRIORITY_RANK[b.priority] || a.created_at - b.created_at || a.id.localeCompare(b.id));
     for (const c of candidates) {
       const got = this.claim(c.id, req);

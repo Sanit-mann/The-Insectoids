@@ -129,6 +129,17 @@ describe('the harness is the single committer (Workspace 06-D3)', () => {
     expect(read(b.path, 'pricing.txt')).toBe('three plans\n');
   });
 
+  it('parallel merges never collide (single committer)', async () => {
+    await ws.startGoal('G-1');
+    const ids = ['C-01', 'C-02', 'C-03', 'C-04'];
+    const cards = await Promise.all(ids.map((id) => ws.createCard('G-1', id)));
+    cards.forEach((c, i) => writeFileSync(join(c.path, `${ids[i]}.txt`), 'x\n'));
+    await Promise.all(ids.map((id) => ws.commitCard('G-1', id, { message: id, insect: 'Ant' })));
+    const results = await Promise.all(ids.map((id) => ws.mergeCard('G-1', id, id)));
+    expect(results.every((r) => r.ok)).toBe(true);
+    for (const id of ids) expect(git(repo, 'show', `hive/G-1:${id}.txt`)).toBe('x');
+  });
+
   it('a conflicting card is reported, not forced in, and the hive branch stays clean', async () => {
     await ws.startGoal('G-1');
     const a = await ws.createCard('G-1', 'C-01');

@@ -41,6 +41,13 @@ describe('mapping Claude Code tools to guard checks', () => {
     expect(call('WebFetch', { url: 'http://developer.mozilla.org/', prompt: 'x' }, { ...policy, network: 'web' })).toBe('block');
   });
 
+  it('an approval lets through exactly that kind of action, never a blocked one', () => {
+    const approved = { ...policy, approvedRules: ['new-dependency'] };
+    expect(call('Bash', { command: 'npm install zod' }, approved)).toBe('allow');
+    expect(call('Bash', { command: 'git push' }, approved)).toBe('ask');
+    expect(call('Bash', { command: 'rm -rf /' }, { ...policy, approvedRules: ['delete-outside'] })).toBe('block');
+  });
+
   it('lets coordination tools and MCP tools through; asks about anything unknown', () => {
     expect(call('TodoWrite', { todos: [] })).toBe('allow');
     expect(call('mcp__brain__search', { query: 'x' })).toBe('allow');

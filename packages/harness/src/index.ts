@@ -2,3 +2,8 @@ export * from './claude/args';
 export * from './claude/detect';
 export * from './claude/run';
 export * from './claude/stream';
+export * from './hive/engine';
+export * from './hive/hive';
+export * from './hive/prompts';
+export * from './hive/protocol';
+export * from './hive/router';

@@ -92,6 +92,40 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX task_events_task ON task_events (task_id, seq);
   `,
+  // v3: goals and the approval inbox (Hive 02-D5, D7, D11)
+  `
+  CREATE TABLE goals (
+    id             TEXT PRIMARY KEY,
+    title          TEXT NOT NULL,
+    text           TEXT NOT NULL,
+    shelf          TEXT NOT NULL,
+    status         TEXT NOT NULL,
+    plan           TEXT,
+    current_wave   INTEGER NOT NULL DEFAULT 0,
+    budget_tokens  INTEGER,
+    spent_tokens   INTEGER NOT NULL DEFAULT 0,
+    spent_usd      REAL NOT NULL DEFAULT 0,
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL
+  );
+
+  CREATE TABLE approvals (
+    id           TEXT PRIMARY KEY,
+    goal_id      TEXT,
+    kind         TEXT NOT NULL,
+    title        TEXT NOT NULL,
+    from_agent   TEXT NOT NULL,
+    why          TEXT NOT NULL,
+    effect       TEXT NOT NULL,
+    destructive  INTEGER NOT NULL DEFAULT 0,
+    status       TEXT NOT NULL,
+    payload      TEXT,
+    created_at   INTEGER NOT NULL,
+    decided_at   INTEGER,
+    decided_by   TEXT
+  );
+  CREATE INDEX approvals_status ON approvals (status, created_at);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

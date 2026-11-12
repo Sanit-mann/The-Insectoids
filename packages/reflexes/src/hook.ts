@@ -10,7 +10,11 @@ import { type GuardContext, type Verdict, evaluateCommand, evaluatePath } from '
 /** Caste network policy (Workspace 06-D7): none, documentation and package sites only, or the open web. */
 export type NetworkPolicy = 'none' | 'docs' | 'web';
 
-export type HookPolicy = GuardContext & { network: NetworkPolicy };
+export type HookPolicy = GuardContext & {
+  network: NetworkPolicy;
+  /** "Ask" rules the user approved for this card only (e.g. ["new-dependency"]). Never affects "block". */
+  approvedRules?: string[];
+};
 
 export interface PreToolUseInput {
   hook_event_name?: string;
@@ -48,6 +52,12 @@ function checkUrl(raw: string | undefined, network: NetworkPolicy): Verdict {
 }
 
 export function preToolUse(input: PreToolUseInput, policy: HookPolicy): Verdict {
+  const v = decide(input, policy);
+  if (v.decision === 'ask' && policy.approvedRules?.includes(v.rule)) return { decision: 'allow' };
+  return v;
+}
+
+function decide(input: PreToolUseInput, policy: HookPolicy): Verdict {
   const t = input.tool_name;
   const ti = input.tool_input ?? {};
   if (t === 'Bash' || t === 'PowerShell') return evaluateCommand(str(ti['command']) ?? '', policy);
