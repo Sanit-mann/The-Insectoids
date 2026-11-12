@@ -39,7 +39,7 @@ export function AgentOutput({ agent }: { agent: AgentView }) {
         <span className="text-muted">·</span>
         <span className="font-mono">{formatUsd(agent.costUsd)}</span>
       </div>
-      <p className="m-0 text-xs text-muted">Model and effort as reported by the engine itself.</p>
+      <p className="m-0 text-xs text-muted">Model as reported by the engine; effort is what the hive asked for (engines don't report it).</p>
 
       <div id="agent-output-label" className="text-xs text-muted">
         Live output (read-only)

@@ -25,6 +25,10 @@ describe('prompts from the library', () => {
     const p = queenPrompt(lib, { goal: 'Add a contact form', bootCard: 'Shelf: site', context: '', castes: ['coder', 'tester'], projectListing: 'src/' });
     expect(p.system).toContain('one of: coder, tester');
     expect(p.task).toContain('# Goal');
+    // Phase 1 demo: the Queen marked a small task "high" and wrote "auto-approved" into her summary.
+    expect(p.system).toContain('"headline"');
+    expect(p.system).toMatch(/use "normal" by default/);
+    expect(p.system).toMatch(/Don't say whether the plan needs the user's approval/);
   });
 
   it('the Inspector must give a verdict and not change files', () => {

@@ -16,14 +16,23 @@ const PlanCardSchema = z.object({
 });
 
 const PlanSchema = z.object({
+  /** One short line for the plan card; older plans may lack it (derived from the summary). */
+  headline: z.string().trim().min(1).max(140).optional(),
   summary: z.string().min(1),
   waves: z.array(z.object({ cards: z.array(PlanCardSchema).min(1).max(MAX_CARDS_PER_WAVE) })).min(1).max(MAX_WAVES),
 });
 
 export type PlanCard = z.infer<typeof PlanCardSchema> & { id: string };
 export interface Plan {
+  headline: string;
   summary: string;
   waves: Array<{ cards: PlanCard[] }>;
+}
+
+/** First sentence of a summary, clipped: the fallback headline for plans written without one. */
+export function headlineFrom(summary: string): string {
+  const first = summary.trim().split(/(?<=[.!?])\s/)[0] ?? summary;
+  return first.length <= 100 ? first : `${first.slice(0, 99).trimEnd()}…`;
 }
 
 export type PlanResult = { ok: true; plan: Plan } | { ok: false; error: string };
@@ -82,7 +91,7 @@ export function parsePlan(text: string, opts: { castes: readonly Caste[] }): Pla
   };
   if ([...deps.keys()].some(visit)) return { ok: false, error: 'The plan has a dependency cycle.' };
 
-  return { ok: true, plan: { summary: parsed.data.summary, waves } };
+  return { ok: true, plan: { headline: parsed.data.headline ?? headlineFrom(parsed.data.summary), summary: parsed.data.summary, waves } };
 }
 
 export type InsectStatus = { status: 'done' | 'blocked' | 'needs_context'; detail: string };

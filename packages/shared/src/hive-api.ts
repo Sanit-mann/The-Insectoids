@@ -49,6 +49,8 @@ export const EngineViewSchema = z.object({
 export type EngineView = z.infer<typeof EngineViewSchema>;
 
 export const PlanViewSchema = z.object({
+  /** One short line for the plan card. */
+  headline: z.string(),
   summary: z.string(),
   waves: z.array(
     z.object({

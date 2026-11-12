@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parsePlan, parseStatus, parseVerdict } from './protocol';
+import { headlineFrom, parsePlan, parseStatus, parseVerdict } from './protocol';
 
 const plan = (obj: unknown) => `Here is the plan.\n\n\`\`\`json\n${JSON.stringify(obj)}\n\`\`\`\n`;
 const card = (over: Record<string, unknown> = {}) => ({
@@ -17,6 +17,17 @@ describe('the Queen\'s plan', () => {
     if (!r.ok) return;
     expect(r.plan.waves.map((w) => w.cards.map((c) => c.id))).toEqual([['C-01', 'C-02'], ['C-03']]);
     expect(r.plan.waves[0]!.cards[1]).toMatchObject({ caste: 'tester', priority: 'normal', dependsOn: ['C-01'] });
+  });
+
+  it("keeps the Queen's one-line headline", () => {
+    const r = parsePlan(plan({ headline: 'Add slugify with tests', summary: 'Long story. More detail.', waves: [{ cards: [card()] }] }), { castes: ['coder'] });
+    expect(r.ok && r.plan.headline).toBe('Add slugify with tests');
+  });
+
+  it('derives a headline from the summary when the Queen gives none', () => {
+    const r = parsePlan(plan({ summary: 'Small goal, one wave. Then lots of detail about the files.', waves: [{ cards: [card()] }] }), { castes: ['coder'] });
+    expect(r.ok && r.plan.headline).toBe('Small goal, one wave.');
+    expect(headlineFrom('x'.repeat(300))).toHaveLength(100);
   });
 
   it('refuses a caste the hive does not have yet', () => {

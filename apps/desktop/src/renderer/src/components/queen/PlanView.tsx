@@ -6,12 +6,18 @@ const castes = (cards: Plan['waves'][number]['cards']): string => {
   return [...counts].map(([caste, n]) => `${n} ${caste}${n > 1 ? 's' : ''}`).join(', ');
 };
 
-/** The Queen's plan: summary, then each wave with its cards (App 07 Queen chat plan card). */
+/** The Queen's plan: a one-line headline (details on demand), then each wave with its cards (App 07 Queen chat plan card). */
 export function PlanBody({ plan, currentWave }: { plan: Plan; currentWave?: number }) {
   const cardCount = plan.waves.reduce((n, w) => n + w.cards.length, 0);
   return (
     <div className="mt-3 flex flex-col gap-2.5" data-testid="plan">
-      <p className="m-0 text-[13.5px]">{plan.summary}</p>
+      <p className="m-0 text-[13.5px] font-medium">{plan.headline}</p>
+      {plan.summary !== plan.headline && (
+        <details className="text-[13px] text-muted">
+          <summary className="cursor-pointer select-none text-xs">Details</summary>
+          <p className="m-0 mt-1.5 whitespace-pre-wrap">{plan.summary}</p>
+        </details>
+      )}
       <p className="m-0 text-xs text-muted">
         {plan.waves.length} {plan.waves.length === 1 ? 'wave' : 'waves'} · {cardCount} {cardCount === 1 ? 'card' : 'cards'}
       </p>

@@ -29,6 +29,7 @@ import {
   checkClaudeAuth,
   demoEngine,
   detectClaude,
+  headlineFrom,
 } from '@insectoids/harness';
 import type {
   ActivityView,
@@ -509,7 +510,8 @@ export class HiveManager {
   }
 
   #goalView(g: Goal): GoalView {
-    const plan = g.plan as Plan | null;
+    // Plans saved before headlines existed have none; derive one.
+    const plan = g.plan as (Omit<Plan, 'headline'> & { headline?: string }) | null;
     return {
       id: g.id,
       title: g.title,
@@ -517,6 +519,7 @@ export class HiveManager {
       status: g.status,
       plan: plan
         ? {
+            headline: plan.headline ?? headlineFrom(plan.summary),
             summary: plan.summary,
             waves: plan.waves.map((w, i) => ({ n: i + 1, cards: w.cards.map((c) => ({ id: `${g.id}.${c.id}`, title: c.title, caste: c.caste })) })),
           }

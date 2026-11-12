@@ -161,7 +161,7 @@ export class Hive {
       return brain.goals.get(goal.id)!;
     }
     brain.goals.setPlan(goal.id, plan);
-    this.#emit({ type: 'goal-planned', goalId: goal.id, message: `${plan.waves.length} wave(s), ${plan.waves.flatMap((w) => w.cards).length} card(s): ${plan.summary}` });
+    this.#emit({ type: 'goal-planned', goalId: goal.id, message: `${plan.waves.length} wave(s), ${plan.waves.flatMap((w) => w.cards).length} card(s): ${plan.headline}` });
 
     const big = plan.waves.length > 1;
     if (big || this.#o.approveEveryPlan) {
