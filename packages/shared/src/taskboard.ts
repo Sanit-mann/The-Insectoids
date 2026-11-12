@@ -32,8 +32,8 @@ export type TaskCard = z.infer<typeof TaskCardSchema>;
 
 const ALLOWED: Readonly<Record<TaskStatus, readonly TaskStatus[]>> = {
   open: ['claimed'],
-  // back to open = lease expired or released
-  claimed: ['in_progress', 'open'],
+  // back to open = lease expired or released; failed = out of attempts
+  claimed: ['in_progress', 'open', 'failed'],
   in_progress: ['blocked', 'review', 'open', 'failed'],
   blocked: ['in_progress', 'open', 'failed'],
   // back to open = Inspector rejected it, retry

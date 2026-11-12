@@ -77,6 +77,19 @@ Each step ends in something that works and is tested. Core services are built te
   - 300-token boot card.
 
   Runs on `node:sqlite`; verified that FTS5 works inside Electron. The Brain-in-its-own-process part is Step 7.
+- **Step 2 Taskboard store: done (2026-11-12).** `Taskboard` in `packages/brain`, sharing the Brain's database and single writer. 20 tests cover:
+  - posting with validation;
+  - caste-matched, atomic claim, with dependency locking in the same SQL statement;
+  - `claimNext` by priority, then age;
+  - leases with heartbeat and an expiry sweep; blocked cards pause their lease;
+  - holder-only moves;
+  - the Inspector's review as the only road to done;
+  - retry, then escalate after `maxAttempts`;
+  - a full event history.
+
+  **Race test:** 8 threads with separate connections claim one card at the same instant, and exactly one wins (30/30 repeated runs). It exposed a real bug, now fixed: the Brain set WAL mode before its lock timeout, so opening while another connection was busy failed instead of waiting.
+
+  Shared lifecycle change: `claimed -> failed` is allowed, for a card whose leases keep expiring until it runs out of attempts.
 
 ## Not in Phase 1 (by design)
 Other engines and providers, secret broker, embeddings and meaning search, code map, Brain graph, library activation, Cadence, containers. See Phase 2+.

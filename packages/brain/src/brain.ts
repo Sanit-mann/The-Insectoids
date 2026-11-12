@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { RecordKind, Trust } from '@insectoids/shared';
+import { transaction } from './db';
 import { ConflictError, SecretError, TrustError } from './errors';
 import { migrate } from './schema';
 import { detectSecrets } from './secrets';
+import { Taskboard } from './taskboard';
 
 export type Actor = { type: 'user' } | { type: 'agent'; id: string };
 
@@ -146,10 +148,19 @@ export class Brain {
 
   constructor(path: string, opts: BrainOptions = {}) {
     this.#db = new DatabaseSync(path);
-    this.#db.exec('PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;');
+    // busy_timeout first: switching to WAL needs a lock, and must wait for other connections instead of failing.
+    this.#db.exec('PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON;');
     migrate(this.#db);
     this.#now = opts.now ?? Date.now;
     this.#newId = opts.newId ?? (() => randomUUID());
+  }
+
+  #taskboard: Taskboard | undefined;
+
+  /** The taskboard lives in the same database, behind the same single writer. */
+  get taskboard(): Taskboard {
+    this.#taskboard ??= new Taskboard(this.#db, this.#now);
+    return this.#taskboard;
   }
 
   close(): void {
@@ -354,15 +365,7 @@ export class Brain {
   }
 
   #tx<T>(fn: () => T): T {
-    this.#db.exec('BEGIN IMMEDIATE');
-    try {
-      const out = fn();
-      this.#db.exec('COMMIT');
-      return out;
-    } catch (err) {
-      this.#db.exec('ROLLBACK');
-      throw err;
-    }
+    return transaction(this.#db, fn);
   }
 }
 

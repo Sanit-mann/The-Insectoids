@@ -56,6 +56,42 @@ const MIGRATIONS: readonly string[] = [
     INSERT INTO records_fts (rowid, title, body, summary) VALUES (new.rowid, new.title, new.body, new.summary);
   END;
   `,
+  // v2: taskboard (Hive 02-D10)
+  `
+  CREATE TABLE tasks (
+    id                TEXT PRIMARY KEY,
+    goal_id           TEXT NOT NULL,
+    wave              INTEGER NOT NULL,
+    title             TEXT NOT NULL,
+    brief             TEXT NOT NULL,
+    caste             TEXT NOT NULL,
+    priority          TEXT NOT NULL,
+    acceptance        TEXT NOT NULL,
+    depends_on        TEXT NOT NULL DEFAULT '[]',
+    status            TEXT NOT NULL,
+    claimed_by        TEXT,
+    lease_expires_at  INTEGER,
+    attempts          INTEGER NOT NULL DEFAULT 0,
+    max_attempts      INTEGER NOT NULL DEFAULT 3,
+    escalated         INTEGER NOT NULL DEFAULT 0,
+    result            TEXT,
+    created_at        INTEGER NOT NULL,
+    updated_at        INTEGER NOT NULL
+  );
+  CREATE INDEX tasks_board ON tasks (status, caste, priority, created_at);
+  CREATE INDEX tasks_goal ON tasks (goal_id, wave);
+
+  CREATE TABLE task_events (
+    seq        INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id    TEXT NOT NULL REFERENCES tasks(id),
+    from_st    TEXT NOT NULL,
+    to_st      TEXT NOT NULL,
+    actor      TEXT NOT NULL,
+    note       TEXT,
+    at         INTEGER NOT NULL
+  );
+  CREATE INDEX task_events_task ON task_events (task_id, seq);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

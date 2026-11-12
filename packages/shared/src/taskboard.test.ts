@@ -38,6 +38,7 @@ describe('status transitions (Hive D10)', () => {
     ['open', 'claimed'],
     ['claimed', 'in_progress'],
     ['claimed', 'open'],
+    ['claimed', 'failed'],
     ['in_progress', 'blocked'],
     ['in_progress', 'review'],
     ['in_progress', 'open'],
