@@ -4,3 +4,4 @@ export * from './brain';
 export * from './approvals';
 export * from './ipc';
 export * from './hive-api';
+export * from './setup-api';

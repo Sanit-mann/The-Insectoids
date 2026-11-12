@@ -14,6 +14,10 @@ import {
   IPC,
   type InsectoidsApi,
   ProjectViewSchema,
+  SETUP_IPC,
+  type SetupApi,
+  SetupResultSchema,
+  SetupStateSchema,
 } from '@insectoids/shared';
 
 /** Electron prefixes errors from main with "Error invoking remote method '…': Error: "; the UI shows plain words. */
@@ -45,11 +49,22 @@ const hive: HiveApi = {
   },
 };
 
+const setup: SetupApi = {
+  state: async () => SetupStateSchema.parse(await invoke(SETUP_IPC.state)),
+  pickBrainFolder: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.pickBrainFolder)),
+  useDefaultBrainFolder: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.useDefaultBrainFolder)),
+  setPreset: async (preset) => SetupResultSchema.parse(await invoke(SETUP_IPC.setPreset, preset)),
+  saveAbout: async (input) => SetupResultSchema.parse(await invoke(SETUP_IPC.saveAbout, input)),
+  finish: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.finish)),
+  restart: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.restart)),
+};
+
 // The only door from the UI to the main process. Every reply is validated.
 const api: InsectoidsApi = {
   appInfo: async () => AppInfoSchema.parse(await invoke(IPC.appInfo)),
   brainStatus: async () => BrainStatusSchema.parse(await invoke(IPC.brainStatus)),
   hive,
+  setup,
 };
 
 contextBridge.exposeInMainWorld('insectoids', api);

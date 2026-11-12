@@ -192,6 +192,8 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('deny'), approvalId: Id }),
   z.object({ type: z.literal('pause'), reason: z.string().max(200).optional() }),
   z.object({ type: z.literal('resume') }),
+  /** Check the AI engine again now (e.g. right after the user signed in). */
+  z.object({ type: z.literal('checkEngine') }),
   z.object({ type: z.literal('cancelGoal'), goalId: Id }),
   /** Revert one card's changes on the hive branch (history kept). */
   z.object({ type: z.literal('undoCard'), goalId: Id, cardId: Id }),

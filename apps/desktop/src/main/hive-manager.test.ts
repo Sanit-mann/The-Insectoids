@@ -158,6 +158,39 @@ describe('engine state', () => {
     await until('engine ready', () => snap(ready).engine.state === 'ready');
     expect(snap(ready).engine).toMatchObject({ version: '2.1.322' });
   });
+  it('"check again" re-checks right away instead of waiting a minute', async () => {
+    let loggedIn = false;
+    const install = { status: 'installed' as const, command: 'claude', version: '2.1.322' };
+    const m = make({ engine: 'claude', realEngine: true, project: repo, detect: async () => install, auth: async () => ({ loggedIn }) });
+    await m.init();
+    await until('signed out', () => snap(m).engine.state === 'signed-out');
+    loggedIn = true; // the user signed in in a terminal
+    expect(await m.command({ type: 'checkEngine' })).toEqual({ ok: true });
+    expect(snap(m).engine.state).toBe('ready');
+  });
+});
+
+describe('safety preset limits (Onboarding 08-D7)', () => {
+  it('start with the given limits, show them in the snapshot, and change them live', async () => {
+    const m = make({ project: repo, limits: { insectCap: 2, goalBudgetTokens: 1_000_000, approveEveryPlan: true } });
+    await m.init();
+    expect(snap(m).hive.insectCap).toBe(2);
+    // Careful: even this plan waits for you (the demo plan is 2 waves anyway; the budget shows the preset).
+    expect(await m.command({ type: 'submitGoal', text: 'Say hello please' })).toEqual({ ok: true });
+    await waiting(m, 'plan');
+    expect(snap(m).goals[0]?.budgetTokens).toBe(1_000_000);
+
+    m.setLimits({ insectCap: 5, goalBudgetTokens: 4_000_000, approveEveryPlan: false });
+    expect(snap(m).hive.insectCap).toBe(5);
+    expect(m.limits).toEqual({ insectCap: 5, goalBudgetTokens: 4_000_000, approveEveryPlan: false });
+    expect(() => m.setLimits({ insectCap: 0, goalBudgetTokens: 1, approveEveryPlan: false })).toThrow(/at least 1/);
+  });
+
+  it('defaults to Balanced', async () => {
+    const m = make({ project: repo });
+    await m.init();
+    expect(snap(m).hive.insectCap).toBe(3);
+  });
 });
 
 describe('a goal end to end through the manager', () => {

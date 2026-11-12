@@ -33,7 +33,8 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
     brain = openBrain(m.dbPath);
     const svc = await startBrainService({ brain, endpoint: m.endpoint, masterToken: m.masterToken });
     service = svc;
-    const doors = { ...m.doors, ...installCliShims(m.dbPath, m.doors), ...installHookLauncher(m.dbPath, m.doors) };
+    // Launchers live in the app profile, never next to a Brain folder the user picked.
+    const doors = { ...m.doors, ...installCliShims(m.hive.userDataDir, m.doors), ...installHookLauncher(m.hive.userDataDir, m.doors) };
     hive = new HiveManager({
       brain,
       tokens: { endpoint: svc.endpoint, issue: (g) => svc.issueAgentToken(g), revoke: (t) => svc.revokeToken(t) },
@@ -42,6 +43,7 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
       libraryDir: m.hive.libraryDir,
       engine: m.hive.engine,
       ...(m.hive.project ? { project: m.hive.project } : {}),
+      ...(m.hive.limits ? { limits: m.hive.limits } : {}),
       push: (push) => send({ type: 'push', push }),
       log: (line) => console.log(line),
     });
@@ -63,8 +65,8 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
  * Rewritten every start so they always point at the current app executable. A failure here only
  * disables the CLI door (insects still have MCP), so it never stops the Brain.
  */
-function installCliShims(dbPath: string, d: DoorPaths): { cliShimDir?: string } {
-  const dir = join(dirname(dbPath), '..', 'bin');
+function installCliShims(userDataDir: string, d: DoorPaths): { cliShimDir?: string } {
+  const dir = join(userDataDir, 'bin');
   try {
     writeBrainShims(dir, { command: d.runtime.command, args: [d.brainCli], env: d.runtime.env });
     return { cliShimDir: dir };
@@ -75,9 +77,9 @@ function installCliShims(dbPath: string, d: DoorPaths): { cliShimDir?: string } 
 }
 
 /** Launcher that runs the guard hook as Node without putting ELECTRON_RUN_AS_NODE in Claude's environment. */
-function installHookLauncher(dbPath: string, d: DoorPaths): { hookLauncher?: { command: string; args: string[] } } {
+function installHookLauncher(userDataDir: string, d: DoorPaths): { hookLauncher?: { command: string; args: string[] } } {
   try {
-    return { hookLauncher: writeHookLauncher(join(dirname(dbPath), '..', 'hooks'), d.runtime, d.guardHook) };
+    return { hookLauncher: writeHookLauncher(join(userDataDir, 'hooks'), d.runtime, d.guardHook) };
   } catch (err) {
     console.error('[brain-host] could not write the guard hook launcher:', err);
     return {};
@@ -98,6 +100,10 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
       return hive.project;
     case 'brainRecent':
       return hive.brainRecent((params ?? {}) as Parameters<HiveManager['brainRecent']>[0]);
+    case 'setLimits':
+      // Built in main from the shared PRESETS table; checked again by setLimits.
+      hive.setLimits(params as Parameters<HiveManager['setLimits']>[0]);
+      return hive.limits;
     default:
       throw new Error(`Unknown host method ${String(method)}`);
   }

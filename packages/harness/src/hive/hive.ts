@@ -31,6 +31,11 @@ export interface HiveOptions {
   leaseMs?: number;
   defaultBudgetTokens?: number;
   /**
+   * Every plan waits for the user's approval, not only big ones (Onboarding 08-D7 "Careful" preset).
+   * Default false: only plans with more than one wave wait (Hive 02-D11).
+   */
+  approveEveryPlan?: boolean;
+  /**
    * Gives each run a Brain token and the doors (MCP + `brain` command). Without it agents get the
    * boot card in their brief but no live Brain tools.
    */
@@ -129,6 +134,16 @@ export class Hive {
     return this.#paused;
   }
 
+  /** Limits from the user's safety preset (Onboarding 08-D7). Applies to the next dispatch and the next goal. */
+  configure(limits: { insectCap?: number; defaultBudgetTokens?: number; approveEveryPlan?: boolean }): void {
+    if (limits.insectCap !== undefined) {
+      if (!Number.isInteger(limits.insectCap) || limits.insectCap < 1) throw new Error('insectCap must be a whole number of at least 1.');
+      this.#o.insectCap = limits.insectCap;
+    }
+    if (limits.defaultBudgetTokens !== undefined) this.#o.defaultBudgetTokens = limits.defaultBudgetTokens;
+    if (limits.approveEveryPlan !== undefined) this.#o.approveEveryPlan = limits.approveEveryPlan;
+  }
+
   get runningJobs(): number {
     return this.#jobs.size;
   }
@@ -148,14 +163,17 @@ export class Hive {
     brain.goals.setPlan(goal.id, plan);
     this.#emit({ type: 'goal-planned', goalId: goal.id, message: `${plan.waves.length} wave(s), ${plan.waves.flatMap((w) => w.cards).length} card(s): ${plan.summary}` });
 
-    if (plan.waves.length > 1) {
+    const big = plan.waves.length > 1;
+    if (big || this.#o.approveEveryPlan) {
       brain.goals.setStatus(goal.id, 'awaiting_approval');
       this.#ask({
         goalId: goal.id,
         kind: 'plan',
         title: `Approve the plan for "${goal.title}"`,
         from: 'Queen',
-        whyItNeedsYou: 'The plan has more than one wave, so it counts as big (Hive D11).',
+        whyItNeedsYou: big
+          ? 'The plan has more than one wave, so it counts as big (Hive D11).'
+          : 'Your safety preset (Careful) asks you to approve every plan.',
         ifYouSayYes: 'Wave 1 is posted to the taskboard and insects start working in separate copies of your project.',
         payload: { action: 'start-goal', goalId: goal.id },
       });

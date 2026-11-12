@@ -14,7 +14,8 @@ test.beforeAll(async () => {
   app = await electron.launch({
     args: ciLinux ? ['.', '--no-sandbox'] : ['.'],
     cwd: appDir,
-    env: { ...process.env, INSECTOIDS_E2E: '1' },
+    // Setup counts as done here; the first-run wizard has its own spec.
+    env: { ...process.env, INSECTOIDS_E2E: '1', INSECTOIDS_E2E_ONBOARDED: '1' },
   });
   win = await app.firstWindow();
 });

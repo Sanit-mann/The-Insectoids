@@ -225,6 +225,28 @@ Each step ends in something that works and is tested. Core services are built te
     - Real Claude Code through the new hook launcher (Step 10 demo). If the launcher fails, the hook's `onFailure: block` stops every tool, which is safe.
     - Door and library paths for the packaged app (Phase 3).
   - **Screenshots:** `design/screenshots/phase-1-step8-*.png`.
+- **Step 9 Minimal onboarding: done (2026-11-12).** Two parallel workers built it on the shared contract `packages/shared/src/setup-api.ts`. 417 unit tests and 36 e2e tests pass.
+  - **First-run wizard** (Cult UI `onboarding` step frame, shadcn `button`, Kokonut `inline-alert`): Welcome with the privacy promise → Brain folder → AI engine → About you → Safety → First project → Done.
+    - Every step except Welcome can be skipped, and Enter moves to the next step, so the whole wizard works by keyboard.
+    - The engine step shows Claude Code's state with "Check again", plus the exact install, sign-in or update command to copy. It never runs them itself (04-D6).
+    - "About you" is a chat-style interview (08-D3/D4). Answers become confirmed facts on the Global shelf; answering again updates the same record; secrets are refused inline.
+  - **Safety presets (08-D7):**
+    - **Careful:** 2 insects, 1M-token goal budget, every plan needs approval.
+    - **Balanced (default):** 3 insects, 2M, big plans only.
+    - **Hands-off:** 5 insects, 4M, big plans only.
+    - The "always asks you" list and the command guard can't be switched off. Presets apply live to the hive (new `approveEveryPlan` option in the harness Hive).
+  - **Settings screen:** the "finish setup" checklist (phase-2 items marked "later"), "Run setup again", the preset switcher, and the Brain folder (Change… / Back to default).
+  - **Main** owns `<userData>/app.json` (atomic writes). The Brain folder switch:
+    - checks the folder first (full path, a folder, writable);
+    - is refused while goals are planning or running;
+    - restarts the Brain host on `<dir>/brain.db`, reusing an existing Brain as is, and rolls back to the old Brain if the new one fails.
+    - The `bin/` and `hooks/` launchers always stay in the profile folder.
+  - **Gate:** if setup state can't be read, the gate offers Retry and "Open the app without setup", so the app never locks the user out.
+  - **e2e:**
+    - `launchApp({ onboarded })` skips setup by default; `first-run.spec.ts` walks the whole wizard by keyboard and mouse.
+    - `setup-backend.spec.ts` covers presets → insect cap, answers in the Brain, the secret refusal, the real Brain folder switch (`INSECTOIDS_E2E_PICK_FOLDER` replaces the dialog in tests only) and finish.
+  - **Found in screenshots:** on the Balanced card, the "Recommended" badge pushed "Selected" outside the card. Fixed by wrapping the card header.
+  - **Screenshots:** `design/screenshots/phase-1-step9-*.png`.
 - **Brain research note: ruvector (2026-11-12, for Phase 2).** We reviewed github.com/ruvnet/ruvector against our Brain spec.
   - **Verdict:** don't take it as a dependency.
   - **Why not:**

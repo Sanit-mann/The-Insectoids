@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { HiveApi } from './hive-api';
+import type { SetupApi } from './setup-api';
 
 /**
  * Typed contract between the renderer and the main process.
@@ -32,4 +33,5 @@ export interface InsectoidsApi {
   appInfo(): Promise<AppInfo>;
   brainStatus(): Promise<BrainStatus>;
   hive: HiveApi;
+  setup: SetupApi;
 }

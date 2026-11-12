@@ -7,6 +7,8 @@ import { BrainScreen } from '@/components/screens/BrainScreen';
 import { ChangesScreen } from '@/components/screens/ChangesScreen';
 import { HiveScreen } from '@/components/screens/HiveScreen';
 import { QueenScreen } from '@/components/screens/QueenScreen';
+import { SettingsScreen } from '@/components/screens/SettingsScreen';
+import { SetupGate } from '@/components/setup/SetupGate';
 import { TaskboardScreen } from '@/components/screens/TaskboardScreen';
 import { SidePanel } from '@/components/SidePanel';
 import { TopBar } from '@/components/TopBar';
@@ -22,6 +24,7 @@ const LIVE: Partial<Record<ScreenId, () => ReactNode>> = {
   hive: () => <HiveScreen />,
   changes: () => <ChangesScreen />,
   brain: () => <BrainScreen />,
+  settings: () => <SettingsScreen />,
 };
 
 export function App() {
@@ -56,6 +59,7 @@ export function App() {
   const screen = SCREENS.find((s) => s.id === screenId) ?? SCREENS[0]!;
 
   return (
+    <SetupGate>
     <div className="flex min-h-full flex-wrap items-stretch">
       <Rail active={screenId} onSelect={setScreenId} approvals={pendingApprovals(snapshot).length} />
       <main className="flex min-w-0 flex-[999_1_560px] flex-col">
@@ -69,5 +73,6 @@ export function App() {
       </main>
       {screenId === 'queen' && <SidePanel />}
     </div>
+    </SetupGate>
   );
 }

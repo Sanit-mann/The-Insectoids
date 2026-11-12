@@ -4,6 +4,7 @@
  * and process listings could see it.
  */
 import type { HivePush } from '@insectoids/shared';
+import type { HiveLimits } from './hive-manager';
 
 export interface DoorPaths {
   /** Runtime for door processes: the app's own executable run as Node. */
@@ -23,10 +24,12 @@ export interface HiveSetup {
   engine: 'claude' | 'fake';
   /** e2e only: use this folder as the project instead of settings.json. */
   project?: string;
+  /** Limits from the user's safety preset (Onboarding 08-D7); Balanced when absent. */
+  limits?: HiveLimits;
 }
 
 /** Host RPC methods (main -> host). Inputs and outputs are validated in main against the shared schemas. */
-export type HostMethod = 'snapshot' | 'command' | 'changes' | 'project' | 'brainRecent';
+export type HostMethod = 'snapshot' | 'command' | 'changes' | 'project' | 'brainRecent' | 'setLimits';
 
 export type ToHost =
   | { type: 'start'; dbPath: string; endpoint: string; masterToken: string; doors: DoorPaths; hive: HiveSetup }

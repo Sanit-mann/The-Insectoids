@@ -57,7 +57,14 @@ const PATCH_MAX = 400 * 1024;
 const LINE_MAX = 300;
 const ENGINE_RECHECK_MS = 60_000;
 const MODELS: ModelTiers = { strongest: 'opus', standard: 'sonnet', light: 'haiku' };
-const INSECT_CAP = 3;
+
+/** Limits from the user's safety preset (Onboarding 08-D7). Default = Balanced. */
+export interface HiveLimits {
+  insectCap: number;
+  goalBudgetTokens: number;
+  approveEveryPlan: boolean;
+}
+export const DEFAULT_LIMITS: HiveLimits = { insectCap: 3, goalBudgetTokens: 2_000_000, approveEveryPlan: false };
 
 export interface HiveManagerOptions {
   brain: Brain;
@@ -69,6 +76,8 @@ export interface HiveManagerOptions {
   engine: 'claude' | 'fake';
   /** e2e: use this folder as the project (instead of settings.json). */
   project?: string;
+  /** Safety preset limits. Default: Balanced. */
+  limits?: HiveLimits;
   push: (p: HivePush) => void;
   log?: (line: string) => void;
   /** Foreman tick interval. Default 1000 ms (500 ms with the demo engine). */
@@ -158,10 +167,12 @@ export class HiveManager {
   #changedReason = '';
   #ticking = false;
   #disposed = false;
+  #limits: HiveLimits;
 
   constructor(o: HiveManagerOptions) {
     this.#o = o;
     this.#now = o.now ?? Date.now;
+    this.#limits = { ...(o.limits ?? DEFAULT_LIMITS) };
     if (o.engineOverride) {
       this.#engine.current = o.engineOverride;
       this.#engineView = { state: 'fake', name: 'Test engine', version: null, message: 'A scripted test engine.' };
@@ -183,6 +194,18 @@ export class HiveManager {
     } catch (err) {
       this.#note('error', `Could not open the project ${path}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  /** Apply a safety preset now: the current hive and every project opened later. */
+  setLimits(limits: HiveLimits): void {
+    if (!Number.isInteger(limits.insectCap) || limits.insectCap < 1) throw new Error('The insect limit must be at least 1.');
+    this.#limits = { ...limits };
+    this.#project?.hive.configure({ insectCap: limits.insectCap, defaultBudgetTokens: limits.goalBudgetTokens, approveEveryPlan: limits.approveEveryPlan });
+    this.#changed('limits');
+  }
+
+  get limits(): HiveLimits {
+    return { ...this.#limits };
   }
 
   get project(): ProjectView | null {
@@ -213,6 +236,7 @@ export class HiveManager {
     if (cmd.type === 'setProject') return this.#setProject(cmd.path);
     if (cmd.type === 'pause') return this.#pause(cmd.reason ?? 'Paused by you.');
     if (cmd.type === 'resume') return this.#resume();
+    if (cmd.type === 'checkEngine') return this.#recheckEngine();
     const p = this.#mustProject();
     switch (cmd.type) {
       case 'submitGoal': {
@@ -316,7 +340,9 @@ export class HiveManager {
       shelf: view.shelf,
       home: homedir(),
       models: MODELS,
-      insectCap: INSECT_CAP,
+      insectCap: this.#limits.insectCap,
+      defaultBudgetTokens: this.#limits.goalBudgetTokens,
+      approveEveryPlan: this.#limits.approveEveryPlan,
       castes: ['coder', 'tester'],
       ...(this.#brainAccess() ? { brainAccess: this.#brainAccess()! } : {}),
       onEvent: (e) => this.#onHiveEvent(e),
@@ -375,6 +401,15 @@ export class HiveManager {
   }
 
   // ---- engine ----------------------------------------------------------------------------------
+
+  /** "Check again" (e.g. right after signing in): re-check Claude Code now instead of waiting a minute. */
+  async #recheckEngine(): Promise<void> {
+    // The demo and test engines are always ready.
+    if (this.#o.engine === 'fake' || this.#o.engineOverride) return;
+    if (this.#engineTimer) clearTimeout(this.#engineTimer);
+    this.#engineTimer = null;
+    await this.#checkEngine();
+  }
 
   async #checkEngine(): Promise<void> {
     if (this.#disposed) return;
@@ -456,7 +491,7 @@ export class HiveManager {
     return {
       project: p?.view ?? null,
       engine: this.#engineView,
-      hive: { paused: this.#paused, pausedReason: this.#pausedReason, insectCap: INSECT_CAP, working: this.#working() },
+      hive: { paused: this.#paused, pausedReason: this.#pausedReason, insectCap: this.#limits.insectCap, working: this.#working() },
       goals: goals.map((g) => this.#goalView(g)),
       cards,
       approvals: [...waiting, ...decided].map(

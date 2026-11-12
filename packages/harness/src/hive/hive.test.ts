@@ -131,6 +131,27 @@ describe('big plans and waves (Hive 02-D5, D11)', () => {
     expect(brain.goals.get(goal.id)?.status).toBe('cancelled');
     expect(engine.calls).toHaveLength(1);
   });
+
+  it('with approveEveryPlan (Careful preset) a one-wave plan waits too', async () => {
+    const engine = new FakeEngine((req) => (req.role === 'queen' ? planReply([[card('C-01', 'coder')]]) : { text: 'STATUS: DONE' }));
+    const hive = makeHive(engine, { approveEveryPlan: true });
+    const goal = await hive.submitGoal('g');
+    expect(goal.status).toBe('awaiting_approval');
+    const ask = brain.approvals.list({ status: 'waiting' })[0]!;
+    expect(ask.kind).toBe('plan');
+    expect(ask.whyItNeedsYou).toMatch(/Careful/);
+    expect(engine.calls).toHaveLength(1);
+  });
+
+  it('configure() changes the limits for the next goal and dispatch', async () => {
+    const engine = new FakeEngine((req) => (req.role === 'queen' ? planReply([[card('C-01', 'coder')]]) : { text: 'STATUS: DONE' }));
+    const hive = makeHive(engine);
+    hive.configure({ approveEveryPlan: true, defaultBudgetTokens: 1_000_000, insectCap: 1 });
+    const goal = await hive.submitGoal('g');
+    expect(goal.status).toBe('awaiting_approval');
+    expect(goal.budgetTokens).toBe(1_000_000);
+    expect(() => hive.configure({ insectCap: 0 })).toThrow(/at least 1/);
+  });
 });
 
 describe('retry, escalation and the Queen\'s plan check', () => {

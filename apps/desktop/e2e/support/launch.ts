@@ -22,6 +22,11 @@ export interface LaunchedApp {
 export interface LaunchOptions {
   /** 'fresh-repo' (default): a new git repo with one commit on main is the project. 'none': no project yet. */
   project?: 'fresh-repo' | 'none';
+  /**
+   * true (default): setup counts as done, so specs that are not about onboarding open straight into the app.
+   * false: a true first run (the setup wizard shows).
+   */
+  onboarded?: boolean;
   /** Extra environment for the app. */
   env?: Record<string, string>;
 }
@@ -61,6 +66,7 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<LaunchedApp> 
       INSECTOIDS_E2E: '1',
       INSECTOIDS_ENGINE: 'fake',
       ...(repo ? { INSECTOIDS_E2E_PROJECT: repo } : {}),
+      ...(opts.onboarded === false ? {} : { INSECTOIDS_E2E_ONBOARDED: '1' }),
       ...opts.env,
     },
   });

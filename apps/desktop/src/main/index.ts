@@ -5,10 +5,12 @@ import { fileURLToPath } from 'node:url';
 import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, session, shell } from 'electron';
 import { CommandResultSchema, HIVE_IPC, type HivePush, HiveSnapshotSchema, IPC } from '@insectoids/shared';
 import { buildAppInfo } from './app-info';
+import { AppSettingsStore, checkBrainFolder, limitsFor } from './app-settings';
 import { BrainHost } from './brain-host';
 import { resolveDoorPaths, resolveLibraryDir } from './doors';
 import { registerHiveIpc } from './hive-ipc';
 import { isAllowedExternalUrl, isTrustedRendererUrl } from './security';
+import { registerSetupIpc } from './setup';
 import { type TrayState, createTray } from './tray';
 
 const APP_NAME = 'The Insectoids';
@@ -33,6 +35,9 @@ let tray: ReturnType<typeof createTray> | null = null;
 let trayTimer: NodeJS.Timeout | null = null;
 let quitting = false;
 let brainHost: BrainHost | null = null;
+let settings: AppSettingsStore | null = null;
+/** True while the Brain is being moved to another folder (the old host is stopping, the new one starting). */
+let switchingBrain = false;
 
 function showWindow(): void {
   if (!mainWindow) return;
@@ -96,10 +101,10 @@ function assertTrustedSender(event: IpcMainInvokeEvent): void {
  * The Brain runs in its own utility process, the only writer of brain.db (Memory 01-D14).
  * Main keeps the master token and never opens the database itself.
  */
-function startBrain(): BrainHost {
+function startBrain(brainDir: string): BrainHost {
   const host = new BrainHost({
     entry: join(here, 'brain-host.js'),
-    dbPath: join(app.getPath('userData'), 'brain', 'brain.db'),
+    dbPath: join(brainDir, 'brain.db'),
     doors: resolveDoorPaths({ mainDir: here, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, execPath: process.execPath }),
     hive: {
       userDataDir: app.getPath('userData'),
@@ -107,9 +112,14 @@ function startBrain(): BrainHost {
       // fake = the scripted demo engine (no AI calls, no tokens): e2e tests and demos.
       engine: process.env['INSECTOIDS_ENGINE'] === 'fake' ? 'fake' : 'claude',
       ...(isE2E && process.env['INSECTOIDS_E2E_PROJECT'] ? { project: process.env['INSECTOIDS_E2E_PROJECT'] } : {}),
+      limits: limitsFor(settings?.preset ?? 'balanced'),
     },
     onPush: forwardPush,
-    onStatus: () => scheduleTrayUpdate(),
+    onStatus: (s) => {
+      scheduleTrayUpdate();
+      // A (re)started Brain has fresh data: the window re-reads everything.
+      if (s.state === 'ready') forwardPush({ type: 'changed', reason: 'brain-ready' });
+    },
     log: (line) => console.log(line),
   });
   host.start();
@@ -148,7 +158,66 @@ async function hiveCommand(cmd: { type: 'pause'; reason?: string } | { type: 're
   scheduleTrayUpdate();
 }
 
+/** Wait until a starting host is ready or has failed (it would otherwise retry with backoff). */
+async function settle(host: BrainHost, timeoutMs = 25_000): Promise<void> {
+  const until = Date.now() + timeoutMs;
+  while (host.status.state === 'starting' && Date.now() < until) await new Promise((r) => setTimeout(r, 100));
+  if (host.status.state !== 'ready') throw new Error(host.status.message);
+}
+
+/**
+ * Move the Brain to another folder (Onboarding 08 step 2). An existing brain.db there is used as is,
+ * so a user can point the app at a Brain they already have. Refused while goals are running, because
+ * the hive's data lives in the Brain. If the new folder fails, the old Brain is started again.
+ */
+async function switchBrainDir(dir: string | null): Promise<string | null> {
+  if (!settings) return 'The app is still starting.';
+  const target = dir ?? settings.defaultBrainDir;
+  if (target === settings.brainDir) return null;
+  if (switchingBrain) return 'The Brain is already moving. Try again in a moment.';
+  const bad = checkBrainFolder(target);
+  if (bad) return bad;
+  const old = brainHost;
+  if (old && old.status.state === 'ready') {
+    const snap = await old.call('snapshot').then((x) => HiveSnapshotSchema.parse(x), () => null);
+    const busy = snap && (snap.hive.working > 0 || snap.goals.some((g) => g.status === 'running' || g.status === 'planning'));
+    if (busy) return 'Goals are running in this Brain. Let them finish (or cancel them) before moving the Brain.';
+  }
+  switchingBrain = true;
+  try {
+    brainHost = null;
+    await old?.stop();
+    const next = startBrain(target);
+    brainHost = next;
+    try {
+      await settle(next);
+    } catch (err) {
+      await next.stop();
+      brainHost = startBrain(settings.brainDir);
+      return `The Brain could not open ${target}: ${err instanceof Error ? err.message : String(err)}`;
+    }
+    settings.update((s) => {
+      const next = { ...s };
+      if (dir === null) delete next.brainDir;
+      else next.brainDir = target;
+      return next;
+    });
+    return null;
+  } finally {
+    switchingBrain = false;
+  }
+}
+
 function registerIpc(): void {
+  const testPickedFolder = isE2E ? process.env['INSECTOIDS_E2E_PICK_FOLDER'] : undefined;
+  registerSetupIpc({
+    settings: settings!,
+    host: () => brainHost,
+    window: () => mainWindow,
+    assertTrustedSender,
+    switchBrainDir,
+    ...(testPickedFolder ? { testPickedFolder } : {}),
+  });
   registerHiveIpc({ host: () => brainHost, window: () => mainWindow, assertTrustedSender });
   ipcMain.handle(IPC.brainStatus, (event) => {
     assertTrustedSender(event);
@@ -184,8 +253,13 @@ if (!app.requestSingleInstanceLock()) {
     // The app asks for no browser permissions (camera, mic, location, …).
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 
+    settings = new AppSettingsStore(app.getPath('userData'));
+    // e2e specs that are not about setup start as if setup were done (fresh throwaway profile each run).
+    if (isE2E && process.env['INSECTOIDS_E2E_ONBOARDED'] === '1' && settings.value.onboarding.completedAt === undefined) {
+      settings.update((s) => ({ ...s, onboarding: { completedAt: Date.now() } }));
+    }
     registerIpc();
-    brainHost = startBrain();
+    brainHost = startBrain(settings.brainDir);
     mainWindow = createWindow();
     tray = createTray({
       iconPath: trayIcon,
