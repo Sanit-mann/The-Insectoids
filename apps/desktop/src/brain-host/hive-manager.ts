@@ -101,7 +101,10 @@ interface ProjectState {
 
 /** Brain shelf for a project folder: lowercase slug of its name (shelf rules in brain-service). */
 export function shelfFor(path: string): string {
-  const slug = basename(path)
+  // Split on both separators: path.basename only knows the current OS's, so a Windows path on macOS/Linux
+  // (or a POSIX path on Windows) would otherwise give a different shelf for the same folder name.
+  const name = path.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? '';
+  const slug = name
     .toLowerCase()
     .replace(/[^a-z0-9._-]+/g, '-')
     .replace(/^[^a-z0-9]+/, '')
