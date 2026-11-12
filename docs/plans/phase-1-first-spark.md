@@ -126,6 +126,32 @@ Each step ends in something that works and is tested. Core services are built te
     They found and fixed 3 real gaps: git global options hiding the subcommand, link creation, and writing through links.
   - **Claude Code adapter:** maps Bash/PowerShell, Read/Write/Edit/MultiEdit/Notebook, Glob/Grep, WebFetch/WebSearch (caste network policy: none / docs-and-package sites / web, https only) and MCP tools. "Ask" becomes a deny telling the insect to block its card for approval. `runHook` fails closed on a bad input or missing policy.
   - **Honest limit:** this is one safety layer, not a sandbox. Untrusted code runs in container mode (06-D4); engines without hooks are restricted (09-D5).
+- **Step 5 Claude Code adapter: done (2026-11-12).**
+  - **Install:** Claude Code CLI 2.1.322 installed with the official native installer (with the user's approval) at `~/.local/bin/claude.exe`; Authenticode-signed by "Anthropic, PBC", valid. The user signed in with `claude auth login` (claude.ai account).
+  - **Added:**
+    - `MIN_CLAUDE_VERSION` 2.1.295 (older CLIs are reported "outdated" and never used);
+    - `checkClaudeAuth` via `claude auth status` JSON, which costs no tokens. It exits non-zero even when signed in, so the JSON is read regardless of the exit code.
+  - **Real-CLI smoke test** (`claude.smoke.test.ts`, only with `INSECTOIDS_SMOKE=1`) **passed**:
+    - Haiku 5.5 (`claude-haiku-5-5`), 3 turns, $0.0049;
+    - prompt on stdin works; stream-json fields match;
+    - the hook from `--settings` fires in `-p` mode: Read of `.env` **denied** (`protected-path`), Write of `hello.txt` allowed;
+    - the model respected the denial and did not try another route.
+  - **Token finding for Phase 2 (Treasurer):** Claude Code's default system prompt is about 18k tokens (17,850 cache write; 107k cache reads over 3 turns). Cheap when cached, but a slim hive-specific system prompt (`--system-prompt-file`) could cut per-card overhead. Evaluate against quality.
+- **Step 5 history (built before the CLI was installed):** `packages/harness`, 10 tests against a fake CLI that speaks the same protocol and runs the real bundled guard hook.
+  - **Command line, from the official CLI reference:**
+    - `-p --output-format stream-json --verbose`;
+    - `--permission-mode dontAsk` (tools run only when the guard allows);
+    - `--setting-sources project,local` (the user's personal hooks and plugins don't leak into insects);
+    - `--no-session-persistence`;
+    - the guard via inline `--settings`;
+    - `--model`, `--effort` (low…max), `--max-turns`, `--max-budget-usd`;
+    - brief via `--append-system-prompt-file`; MCP via `--mcp-config --strict-mcp-config`;
+    - the prompt on stdin.
+  - **Hook safety:** Claude Code lets a tool run when a hook fails with a non-2 exit code. So the hook is registered with `onFailure: "block"` (v2.1.295+), and the hook process itself exits 2 on any internal failure. The hook is bundled to one file (`packages/reflexes`, `build:hook`, 26 KB) with rolldown.
+  - **Stream events:** init (session, model), text, tool use and result, final result (cost, tokens incl. cache, turns, models actually used). Malformed lines are ignored.
+  - **Run results:** ok, auth (signed out), timeout, stopped (Watchdog), limit (turns or budget), model error, crash. Process trees are killed on stop (`taskkill /T` on Windows, process group on POSIX).
+  - **Detection:** native `claude.exe` (`~/.local/bin`) or on PATH, parsed with `--version`. An npm `.cmd` shim is reported unsupported (no shell spawning).
+  - **Open:** the real CLI isn't installed yet. The smoke test against it still needs to confirm stdin prompts in `-p` mode, the stream-json field names, and that hooks from `--settings` fire in `-p` mode.
 
 ## Not in Phase 1 (by design)
 Other engines and providers, secret broker, embeddings and meaning search, code map, Brain graph, library activation, Cadence, containers. See Phase 2+.

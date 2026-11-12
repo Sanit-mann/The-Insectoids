@@ -1,0 +1,20 @@
+{
+  "name": "@insectoids/harness",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "@insectoids/reflexes": "workspace:*",
+    "@insectoids/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "rolldown": "1.2.19"
+  }
+}

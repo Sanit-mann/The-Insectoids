@@ -255,11 +255,32 @@ importers:
         specifier: workspace:*
         version: link:../shared
 
+  packages/harness:
+    dependencies:
+      '@insectoids/reflexes':
+        specifier: workspace:*
+        version: link:../reflexes
+      '@insectoids/shared':
+        specifier: workspace:*
+        version: link:../shared
+    devDependencies:
+      rolldown:
+        specifier: 1.2.19
+        version: 1.2.19
+
+  packages/reflexes:
+    devDependencies:
+      rolldown:
+        specifier: 1.2.19
+        version: 1.2.19
+
   packages/shared:
     dependencies:
       zod:
         specifier: 4.6.7
         version: 4.6.7
+
+  packages/workspace: {}
 
 packages:
 
