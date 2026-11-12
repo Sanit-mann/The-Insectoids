@@ -26,7 +26,7 @@ Each step ends in something that works and is tested. Core services are built te
 | 4 | **Command guard + protected paths**: deny-list rules for shell commands and file paths; Claude Code pre-tool-use hook adapter | `packages/reflexes` | Table-driven tests of allowed and blocked actions |
 | 5 | **Claude Code engine adapter**: detect, install (with consent), sign-in check; run a card headless with streamed output; model + effort flags; hooks wired to the guard; token usage captured | `packages/harness` | Smoke test against the real CLI (after user installs it) |
 | 6 | **Hive runtime** (details below) | `packages/harness` | Scripted end-to-end run on a sample repo |
-| 7 | **Brain service + doors**: Brain in its own utilityProcess (single writer); MCP server and `brain` CLI for insects | `packages/brain-mcp`, `packages/brain-cli` | Insect reads and writes the Brain through MCP in a test |
+| 7 | **Brain service + doors**: Brain in its own utilityProcess (single writer); MCP server and `brain` CLI for insects | `packages/brain-service`, `packages/brain-mcp`, `packages/brain-cli` | Insect reads and writes the Brain through MCP in a test |
 | 8 | **UI** (details below), wired over the typed IPC | `apps/desktop` | Playwright tests per screen |
 | 9 | **Minimal onboarding**: Brain folder, Claude Code detect and sign-in, short "about you", Balanced preset | `apps/desktop` | First-run e2e test |
 | 10 | **Phase 1 demo** on a small sample project | — | The goal above works end to end |
@@ -156,6 +156,67 @@ Each step ends in something that works and is tested. Core services are built te
     - outcomes are written to the Brain.
   - **11 end-to-end tests on real git repos with `FakeEngine`.** They found a real bug: parallel inspections merged at the same time in one worktree and collided. Fixed by making `Workspace` a true single committer: every git operation is queued, with a parallel-merge test added. The suite test timeout was raised to 30 s for git-heavy tests on Windows.
   - **Not yet run with the real engine:** a real multi-agent run costs subscription tokens and is planned for the Step 10 demo, or earlier on request.
+- **Step 7 Brain service + doors: done (2026-11-12).** Built in parallel by three workers on top of a shared service core. 101 new tests.
+  - **`packages/brain-service` (17 tests):** the single-writer service.
+    - **Transport:** newline-delimited JSON over a local named pipe (Windows) or a Unix socket in a private 0700 folder.
+    - **Identity comes from the token, never from the request:**
+      - The app holds the master token (the user).
+      - Each insect run gets an agent token bound to its id, its project shelf, and read or read-write. Tokens are revocable, and revoking also closes open connections.
+    - **Agent rules:**
+      - Agents see only their shelf plus `global`; other projects' records look missing.
+      - They change only records on their own shelf.
+      - Read-only tokens can't change anything.
+      - Brain rules still apply: trust, secrets and confirmed-by-user.
+    - **Limits:** 1 MB frame limit and a 5 s hello timeout.
+    - **Load test:** 8 clients × 25 concurrent writes all land exactly once.
+  - **`packages/brain-mcp` (19 tests):** the official MCP SDK 1.32.2 over stdio.
+    - **Tools:** 10 tools; read-only tokens only see the 6 read tools.
+    - **Replies:** compact text to save tokens; errors come with hints.
+    - **Startup:** without the env vars it still starts and explains the problem instead of hanging.
+    - **Bundle:** 771 KB (no sqlite, no HTTP stack).
+    - **Proof:** a stdio test spawns the real bundle and an insect writes and reads the Brain as itself.
+  - **`packages/brain-cli` (42 tests):** `brain whoami | boot | search | read | get | history | links | write | update | archive | link`.
+    - **Options:** `--json` output, and `--body -` reads the body from stdin.
+    - **Exit codes:** 0 ok, 1 service error, 2 usage error.
+    - **Launchers:** `writeBrainShims` writes `brain` (sh) and `brain.cmd`.
+      - Two obvious Windows designs were injectable through cmd metacharacters.
+      - The final `.cmd` captures arguments inside a never-run `rem` line and lets Node split them.
+      - Tested for real in `cmd.exe` and Git Bash, from a path with a space.
+    - **Guard fix:** a `brain` title mentioning `~/.ssh` was falsely blocked. Path checks are now skipped for the bare `brain` command only; redirects are still checked. 13 table tests added.
+  - **Desktop:** the Brain host runs as an Electron `utilityProcess`.
+    - **Startup:** main makes the endpoint and master token; the token travels only over parentPort, never in argv or env.
+    - **Recovery:** ready/failed handshake, a 20 s start timeout, and crash restarts with backoff (1→30 s).
+    - **Shutdown:** clean stop on quit.
+    - **UI:** a `brainStatus` IPC call and a status line in the side panel.
+    - **CLI launchers:** written to `<userData>/bin` on every start.
+    - **Hive host:** decision recorded in code. Step 8 moves the Hive into this process, so `brain.db` keeps exactly one writer; main never opens it.
+    - **e2e:** the Brain reaches ready; `brain.db` and the launchers exist.
+  - **Harness:** per-run Brain access for insects (`brainAccess`).
+    - **Per run:** the hive mints a token on the goal's shelf and passes `INSECTOIDS_BRAIN_*`. It writes a per-run `.mcp.json` (0600, used with `--strict-mcp-config`, deleted afterwards), puts the launcher folder first on PATH, and adds a "The Brain" section to the brief.
+    - **Revocation:** the token is revoked in `finally`.
+    - **Access by caste:** Coder/Tester read-write (their writes still start unconfirmed/proposed). Queen read-only (the hive records her plan). Inspector read-only (a verifier must not shape the memory it checks against).
+  - **Root:** `pnpm build:doors` builds the guard hook and both door bundles; `dev` and `test:e2e` run it first.
+  - **Open:**
+    - Packaged-app door paths (`resources/doors`) are a Phase 3 TODO.
+    - A host crash/restart isn't covered by e2e.
+    - Not yet run through the real Claude CLI; that comes with the Step 10 demo or the opt-in smoke test.
+- **Brain research note: ruvector (2026-11-12, for Phase 2).** We reviewed github.com/ruvnet/ruvector against our Brain spec.
+  - **Verdict:** don't take it as a dependency.
+  - **Why not:**
+    - Only its vector store (`ruvector-core`, built on `hnsw_rs` + `redb`) is real.
+    - It had correctness bugs fixed only in Sep and Nov 2026.
+    - Its README admits that compaction and consolidation aren't wired in, and that every start rebuilds the index.
+    - A second storage file would break one-transaction single-writer saves.
+    - It ships native binaries (no Windows arm64).
+    - It has near-daily npm releases from a single maintainer.
+  - **Ideas to borrow:**
+    - an importance score for decay (recency + frequency + coherence; E7);
+    - trust weight = confidence × reliability × freshness half-life (D3, E9);
+    - Reciprocal Rank Fusion (k = 60) to merge FTS5 keyword and meaning results.
+  - **Phase 2 meaning-search plan:**
+    - store embeddings in the same Brain file (BLOBs + brute force, or `sqlite-vec`, still pre-1.0);
+    - benchmark on real Brain data;
+    - consider an approximate index only past about 100k records (R7).
 - **Step 5 history (built before the CLI was installed):** `packages/harness`, 10 tests against a fake CLI that speaks the same protocol and runs the real bundled guard hook.
   - **Command line, from the official CLI reference:**
     - `-p --output-format stream-json --verbose`;

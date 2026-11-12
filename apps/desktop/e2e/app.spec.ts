@@ -1,3 +1,5 @@
+import { existsSync } from 'node:fs';
+import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { type ElectronApplication, type Page, _electron as electron, expect, test } from '@playwright/test';
 
@@ -37,6 +39,18 @@ test('shows the brand logo in the rail and on the Queen screen', async () => {
   // naturalWidth is 0 when an image fails to load (e.g. blocked by the Content-Security-Policy).
   const loaded = await marks.evaluateAll((imgs) => imgs.map((img) => (img as unknown as { naturalWidth: number }).naturalWidth > 0));
   expect(loaded).toEqual([true, true]);
+});
+
+test('the Brain runs in its own process and reports ready', async () => {
+  const brain = win.getByTestId('brain-status');
+  await expect(brain).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
+  await expect(brain).toContainText('ready');
+  // The single writer created the database in this run's throwaway profile.
+  const userData = await app.evaluate(({ app: electronApp }) => electronApp.getPath('userData'));
+  expect(existsSync(join(userData, 'brain', 'brain.db'))).toBe(true);
+  // The `brain` CLI launchers insects get on their PATH.
+  expect(existsSync(join(userData, 'bin', 'brain.cmd'))).toBe(true);
+  expect(existsSync(join(userData, 'bin', 'brain'))).toBe(true);
 });
 
 test('the renderer reaches the main process through the validated bridge', async () => {

@@ -33,7 +33,11 @@ export default defineConfig({
   main: {
     build: {
       // Workspace packages are TypeScript source: bundle them instead of requiring at runtime.
-      externalizeDeps: { exclude: ['@insectoids/shared'] },
+      externalizeDeps: { exclude: ['@insectoids/shared', '@insectoids/brain', '@insectoids/brain-service', '@insectoids/brain-cli'] },
+      rolldownOptions: {
+        // Two main-side entries: the app's main process and the Brain host utility process.
+        input: { index: r('./src/main/index.ts'), 'brain-host': r('./src/brain-host/index.ts') },
+      },
     },
   },
   preload: {

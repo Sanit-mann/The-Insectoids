@@ -1,0 +1,25 @@
+{
+  "name": "@insectoids/brain-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "MCP door into the Brain (stdio), for insects and any MCP-capable AI tool.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "rolldown src/bin/brain-mcp.ts --file dist/brain-mcp.mjs --format esm --platform node"
+  },
+  "dependencies": {
+    "@insectoids/brain-service": "workspace:*",
+    "@insectoids/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@insectoids/brain": "workspace:*",
+    "rolldown": "1.2.19"
+  }
+}

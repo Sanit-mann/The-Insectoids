@@ -15,6 +15,9 @@
     "test:e2e": "electron-vite build && playwright test"
   },
   "dependencies": {
+    "@insectoids/brain": "workspace:*",
+    "@insectoids/brain-cli": "workspace:*",
+    "@insectoids/brain-service": "workspace:*",
     "@insectoids/shared": "workspace:*"
   },
   "devDependencies": {

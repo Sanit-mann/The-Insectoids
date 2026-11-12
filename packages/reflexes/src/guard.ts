@@ -117,8 +117,13 @@ function checkSegment(seg: Segment, ctx: GuardContext, depth: number): Verdict {
   const lower = args.map((a) => a.toLowerCase());
   let v: Verdict = ALLOW;
 
+  // The Brain CLI door: its arguments are text stored in the Brain, never paths it opens, so a title like
+  // "keys live in ~/.ssh" is not a file access. Only the bare command (the shim the hive puts first on PATH)
+  // gets this; a path-qualified "./brain" is any other program. Redirects are still checked below.
+  const brainDoor = /^brain(\.cmd)?$/i.test(words[0] ?? '');
+
   // Every argument and redirect that looks like a path: protected files and no-go folders.
-  for (const a of [...args, ...seg.redirects]) {
+  for (const a of [...(brainDoor ? [] : args), ...seg.redirects]) {
     if (a.includes(SUBST) || !looksLikePath(a)) continue;
     const abs = resolveIn(a.replace(/^[A-Za-z]+=/, ''), ctx);
     const why = protectedReason(abs);

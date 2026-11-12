@@ -4,8 +4,9 @@ import type { Caste } from '@insectoids/shared';
 import type { ApprovalItem, BoardCard, Brain, Goal } from '@insectoids/brain';
 import type { Workspace } from '@insectoids/workspace';
 import type { ClaudeEvent } from '../claude/stream';
+import { type BrainAccess, type BrainTicket, brainWriteAccess } from './brain-access';
 import type { Engine, EngineRequest, EngineResult } from './engine';
-import { type Library, inspectorPrompt, insectPrompt, queenPrompt } from './prompts';
+import { type Library, brainRules, inspectorPrompt, insectPrompt, queenPrompt } from './prompts';
 import { type Plan, parsePlan, parseStatus, parseVerdict } from './protocol';
 import { type ModelTiers, budgetState, routeCard, runTokens } from './router';
 
@@ -29,6 +30,11 @@ export interface HiveOptions {
   linkDependencies?: string[];
   leaseMs?: number;
   defaultBudgetTokens?: number;
+  /**
+   * Gives each run a Brain token and the doors (MCP + `brain` command). Without it agents get the
+   * boot card in their brief but no live Brain tools.
+   */
+  brainAccess?: BrainAccess;
   onEvent?: (e: HiveEvent) => void;
 }
 
@@ -472,6 +478,24 @@ export class Hive {
   }
 
   async #runEngine(goalId: string, cardId: string | undefined, req: EngineRequest, onStop?: (stop: () => void) => void): Promise<EngineResult> {
+    const access = this.#o.brainAccess;
+    if (!access) return this.#runWith(goalId, cardId, req, onStop);
+    // One token per run, scoped to this agent and the goal's shelf; it dies with the run, whatever happens.
+    const write = brainWriteAccess(req.role);
+    const shelf = this.#o.brain.goals.get(goalId)?.shelf ?? this.#o.shelf;
+    const ticket: BrainTicket = await access.grant({ agentId: req.agentId, shelf, write });
+    try {
+      return await this.#runWith(goalId, cardId, {
+        ...req,
+        system: `${req.system}\n\n${brainRules(write)}`,
+        brain: { endpoint: access.endpoint, token: ticket.token, write, doors: access.doors },
+      }, onStop);
+    } finally {
+      await ticket.revoke();
+    }
+  }
+
+  async #runWith(goalId: string, cardId: string | undefined, req: EngineRequest, onStop?: (stop: () => void) => void): Promise<EngineResult> {
     const run = this.#o.engine.run({
       ...req,
       onEvent: (e) => {

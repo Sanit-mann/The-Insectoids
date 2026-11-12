@@ -45,6 +45,18 @@ const HIVE_RULES = `## Hive rules for this run
   stop and end with "STATUS: BLOCKED: <what you need and why>".
 - Keep your messages compact: facts, file paths, commands and results.`;
 
+/** Added to every brief when the run has live Brain access. */
+export function brainRules(write: boolean): string {
+  return [
+    '## The Brain',
+    '- The hive shares one Brain: the long-term memory for this project. Use the `brain` MCP tools (or the `brain` command in a shell if they are missing).',
+    '- Search it before guessing at project conventions, earlier decisions or why something is the way it is.',
+    write
+      ? '- Record what the next agent should know: short, specific facts, proposed decisions and outcomes. Never secrets. Facts and decisions you write wait for the user to confirm them.'
+      : '- Your Brain access is read-only in this run.',
+  ].join('\n');
+}
+
 export interface PromptPair {
   /** Appended to the engine's own system prompt (via a file). */
   system: string;

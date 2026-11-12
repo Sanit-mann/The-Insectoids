@@ -9,13 +9,14 @@
     "node": ">=24"
   },
   "scripts": {
-    "dev": "pnpm --filter @insectoids/desktop dev",
+    "dev": "pnpm build:doors && pnpm --filter @insectoids/desktop dev",
     "build": "pnpm -r build",
+    "build:doors": "pnpm --filter @insectoids/reflexes build:hook && pnpm --filter @insectoids/brain-mcp build && pnpm --filter @insectoids/brain-cli build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:e2e": "pnpm --filter @insectoids/desktop test:e2e",
+    "test:e2e": "pnpm build:doors && pnpm --filter @insectoids/desktop test:e2e",
     "check": "pnpm lint && pnpm typecheck && pnpm test"
   },
   "devDependencies": {

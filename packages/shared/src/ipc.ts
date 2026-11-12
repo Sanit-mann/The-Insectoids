@@ -7,6 +7,7 @@ import { z } from 'zod';
  */
 export const IPC = {
   appInfo: 'app:info',
+  brainStatus: 'brain:status',
 } as const;
 
 export const AppInfoSchema = z.object({
@@ -17,7 +18,16 @@ export const AppInfoSchema = z.object({
 });
 export type AppInfo = z.infer<typeof AppInfoSchema>;
 
+/** Health of the Brain host process (the single writer, Memory 01-D14). */
+export const BrainStatusSchema = z.object({
+  state: z.enum(['starting', 'ready', 'failed']),
+  /** Plain words for the user, e.g. why it failed and when it retries. */
+  message: z.string(),
+});
+export type BrainStatus = z.infer<typeof BrainStatusSchema>;
+
 /** The API the preload script exposes on `window.insectoids`. */
 export interface InsectoidsApi {
   appInfo(): Promise<AppInfo>;
+  brainStatus(): Promise<BrainStatus>;
 }

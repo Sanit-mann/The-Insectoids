@@ -2,9 +2,11 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BrowserWindow, app, ipcMain, session, shell, type Tray } from 'electron';
+import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, session, shell, type Tray } from 'electron';
 import { IPC } from '@insectoids/shared';
 import { buildAppInfo } from './app-info';
+import { BrainHost } from './brain-host';
+import { resolveDoorPaths } from './doors';
 import { isAllowedExternalUrl, isTrustedRendererUrl } from './security';
 import { createTray } from './tray';
 
@@ -28,6 +30,7 @@ if (isE2E) app.setPath('userData', mkdtempSync(join(tmpdir(), 'insectoids-e2e-')
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let quitting = false;
+let brainHost: BrainHost | null = null;
 
 function showWindow(): void {
   if (!mainWindow) return;
@@ -81,11 +84,34 @@ function createWindow(): BrowserWindow {
   return win;
 }
 
+function assertTrustedSender(event: IpcMainInvokeEvent): void {
+  if (!isTrustedRendererUrl(event.senderFrame?.url, { rendererDir, devServerUrl })) {
+    throw new Error('Refused: untrusted sender');
+  }
+}
+
+/**
+ * The Brain runs in its own utility process, the only writer of brain.db (Memory 01-D14).
+ * Main keeps the master token and never opens the database itself.
+ */
+function startBrain(): BrainHost {
+  const host = new BrainHost({
+    entry: join(here, 'brain-host.js'),
+    dbPath: join(app.getPath('userData'), 'brain', 'brain.db'),
+    doors: resolveDoorPaths({ mainDir: here, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, execPath: process.execPath }),
+    log: (line) => console.log(line),
+  });
+  host.start();
+  return host;
+}
+
 function registerIpc(): void {
+  ipcMain.handle(IPC.brainStatus, (event) => {
+    assertTrustedSender(event);
+    return brainHost?.status ?? { state: 'starting', message: 'Starting the Brain…' };
+  });
   ipcMain.handle(IPC.appInfo, (event) => {
-    if (!isTrustedRendererUrl(event.senderFrame?.url, { rendererDir, devServerUrl })) {
-      throw new Error('Refused: untrusted sender');
-    }
+    assertTrustedSender(event);
     return buildAppInfo({
       name: APP_NAME,
       version: app.getVersion(),
@@ -99,8 +125,15 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on('second-instance', showWindow);
-  app.on('before-quit', () => {
+  app.on('before-quit', (event) => {
     quitting = true;
+    // Let the Brain close its database cleanly before the app exits.
+    if (brainHost) {
+      const host = brainHost;
+      brainHost = null;
+      event.preventDefault();
+      void host.stop().finally(() => app.quit());
+    }
   });
 
   void app.whenReady().then(() => {
@@ -108,6 +141,7 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 
     registerIpc();
+    brainHost = startBrain();
     mainWindow = createWindow();
     tray = createTray({
       iconPath: trayIcon,

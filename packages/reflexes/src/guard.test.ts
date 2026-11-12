@@ -187,3 +187,33 @@ describe('protected paths and workspace limits for file tools (Workspace 06-D8)'
     expect(evaluatePath(path, op, win).decision).toBe(expected);
   });
 });
+
+describe('the `brain` command (the Brain CLI door) is ordinary work', () => {
+  it.each([
+    'brain search "x"',
+    'brain boot',
+    'echo text | brain write --kind fact --title T --body -',
+    'cat notes.md | brain write --kind update --title Notes --body -',
+    'brain search hero && brain get r1',
+    // Its arguments are text for the Brain, not files: mentioning a protected path is fine.
+    'brain write --kind fact --title ".env handling" --body -',
+    'brain write --kind fact --title "SSH keys live in ~/.ssh" --body -',
+    'brain search /etc/passwd',
+  ])('allows: %s', (cmd) => {
+    expect(decide(cmd)).toBe('allow');
+    expect(decide(cmd, win)).toBe('allow');
+  });
+
+  it.each([
+    // Redirects are still real file writes.
+    ['brain search x > ~/.ssh/config', 'block'],
+    ['brain boot > /etc/motd', 'block'],
+    // Only the bare command on PATH is trusted; a path-qualified "brain" is any other program.
+    ['./brain cat ~/.ssh/id_rsa', 'block'],
+    ['/tmp/brain ~/.aws/credentials', 'block'],
+    // Wrappers don't change that.
+    ['env X=1 ./brain ~/.ssh/id_rsa', 'block'],
+  ] as const)('still checks: %s -> %s', (cmd, expected) => {
+    expect(decide(cmd)).toBe(expected);
+  });
+});

@@ -1,9 +1,10 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Caste } from '@insectoids/shared';
 import type { HookPolicy } from '@insectoids/reflexes';
 import type { ClaudeEvent } from '../claude/stream';
 import { type RunResult, runClaude } from '../claude/run';
+import { type RunBrain, brainMcpConfig, brainRunEnv } from './brain-access';
 import type { Route } from './router';
 
 /** One run of one agent. The hive never cares which AI tool does the work (Connections 04-D5). */
@@ -16,6 +17,8 @@ export interface EngineRequest {
   task: string;
   route: Route;
   guard: Omit<HookPolicy, 'platform' | 'realpath'>;
+  /** Brain access for this run (a scoped token and the doors); absent when the hive has none. */
+  brain?: RunBrain;
   onEvent?: (e: ClaudeEvent) => void;
 }
 
@@ -37,6 +40,8 @@ export class ClaudeEngine implements Engine {
   constructor(
     private readonly o: {
       claude: string;
+      /** Leading arguments for `claude` (e.g. a script path when it runs through a runtime, as in tests). */
+      claudeArgs?: string[];
       /** How to start the bundled guard hook, e.g. { command: process.execPath, args: [guardHookPath] }. */
       hook: { command: string; args: string[] };
       /** Where system-prompt files are written (outside every workspace). */
@@ -47,10 +52,19 @@ export class ClaudeEngine implements Engine {
 
   run(req: EngineRequest): EngineRun {
     mkdirSync(this.o.promptDir, { recursive: true });
-    const file = join(this.o.promptDir, `${req.agentId}-${++this.#n}.md`);
+    const n = ++this.#n;
+    const file = join(this.o.promptDir, `${req.agentId}-${n}.md`);
     writeFileSync(file, req.system);
-    return runClaude({
-      bin: { command: this.o.claude, args: [] },
+    // The Brain door: an MCP config holding this run's token, next to the prompt (outside every workspace).
+    let mcpFile: string | undefined;
+    let env = this.o.env;
+    if (req.brain) {
+      mcpFile = join(this.o.promptDir, `${req.agentId}-${n}.mcp.json`);
+      writeFileSync(mcpFile, JSON.stringify(brainMcpConfig(req.brain), null, 2), { mode: 0o600 });
+      env = { ...this.o.env, ...brainRunEnv(req.brain, { ...process.env, ...this.o.env }) };
+    }
+    const handle = runClaude({
+      bin: { command: this.o.claude, args: this.o.claudeArgs ?? [] },
       cwd: req.cwd,
       prompt: req.task,
       model: req.route.model,
@@ -61,9 +75,13 @@ export class ClaudeEngine implements Engine {
       systemPromptFile: file,
       hook: this.o.hook,
       guard: req.guard,
-      ...(this.o.env ? { env: this.o.env } : {}),
+      ...(mcpFile ? { mcpConfig: mcpFile } : {}),
+      ...(env ? { env } : {}),
       ...(req.onEvent ? { onEvent: req.onEvent } : {}),
     });
+    if (!mcpFile) return handle;
+    const config = mcpFile;
+    return { done: handle.done.finally(() => rmSync(config, { force: true })), stop: handle.stop };
   }
 }
 

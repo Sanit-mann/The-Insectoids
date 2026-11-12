@@ -1,0 +1,24 @@
+{
+  "name": "@insectoids/brain-cli",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "The `brain` command: the Brain's door for tools without MCP.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./shims": "./src/shims.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "rolldown src/bin/brain.ts --file dist/brain.mjs --format esm --platform node"
+  },
+  "dependencies": {
+    "@insectoids/brain-service": "workspace:*",
+    "@insectoids/shared": "workspace:*"
+  },
+  "devDependencies": {
+    "@insectoids/brain": "workspace:*",
+    "rolldown": "1.2.19"
+  }
+}
