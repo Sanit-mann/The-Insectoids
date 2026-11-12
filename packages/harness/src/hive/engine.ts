@@ -5,6 +5,7 @@ import type { HookPolicy } from '@insectoids/reflexes';
 import type { ClaudeEvent } from '../claude/stream';
 import { type RunResult, runClaude } from '../claude/run';
 import { type RunBrain, brainMcpConfig, brainRunEnv } from './brain-access';
+import { type RunServices, servicesMcpServer } from './services-access';
 import type { Route } from './router';
 
 /** One run of one agent. The hive never cares which AI tool does the work (Connections 04-D5). */
@@ -21,6 +22,8 @@ export interface EngineRequest {
   guard: Omit<HookPolicy, 'platform' | 'realpath'>;
   /** Brain access for this run (a scoped token and the doors); absent when the hive has none. */
   brain?: RunBrain;
+  /** Outside services through the secret broker; only when the card named integrations that were granted. */
+  services?: RunServices;
   onEvent?: (e: ClaudeEvent) => void;
 }
 
@@ -58,12 +61,19 @@ export class ClaudeEngine implements Engine {
     const file = join(this.o.promptDir, `${req.agentId}-${n}.md`);
     writeFileSync(file, req.system);
     // The Brain door: an MCP config holding this run's token, next to the prompt (outside every workspace).
+    // The services door gets the broker address and token in its own server env only: never in Claude's
+    // environment, so neither the model's shell nor its other tools can read the token.
     let mcpFile: string | undefined;
     let env = this.o.env;
+    const servers: Record<string, { command: string; args: string[]; env: Record<string, string> }> = {};
     if (req.brain) {
-      mcpFile = join(this.o.promptDir, `${req.agentId}-${n}.mcp.json`);
-      writeFileSync(mcpFile, JSON.stringify(brainMcpConfig(req.brain), null, 2), { mode: 0o600 });
+      Object.assign(servers, brainMcpConfig(req.brain).mcpServers);
       env = { ...this.o.env, ...brainRunEnv(req.brain, { ...process.env, ...this.o.env }) };
+    }
+    if (req.services) servers['services'] = servicesMcpServer(req.services);
+    if (Object.keys(servers).length) {
+      mcpFile = join(this.o.promptDir, `${req.agentId}-${n}.mcp.json`);
+      writeFileSync(mcpFile, JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 });
     }
     const handle = runClaude({
       bin: { command: this.o.claude, args: this.o.claudeArgs ?? [] },

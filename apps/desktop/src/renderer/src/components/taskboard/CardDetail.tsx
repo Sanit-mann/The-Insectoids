@@ -67,6 +67,11 @@ export function CardDetail({ card, cards, now, onClose }: CardDetailProps) {
                 </span>
               ))}
         </Field>
+        {card.integrations.length ? (
+          <Field label="Services">
+            <span data-testid="card-services">Services: {card.integrations.join(', ')}</span>
+          </Field>
+        ) : null}
         <Field label="Priority">{casteLabel(card.priority)}</Field>
         <Field label="Held by">{card.claimedBy ?? 'Nobody'}</Field>
         <Field label="Lease">

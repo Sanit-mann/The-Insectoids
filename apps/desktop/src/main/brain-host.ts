@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto';
 import { type UtilityProcess, utilityProcess } from 'electron';
 import { BrainClient, makeEndpoint } from '@insectoids/brain-service';
 import type { BrainStatus, HivePush } from '@insectoids/shared';
-import type { DoorPaths, FromHost, HiveSetup, HostMethod, ToHost } from '../brain-host/messages';
+import type { DoorPaths, FromHost, HiveSetup, HostMethod, HostRequestMethod, ToHost } from '../brain-host/messages';
 
 /** Restart delays after a crash: quick at first, then capped so a broken host doesn't spin. */
 const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
@@ -24,6 +24,8 @@ export interface BrainHostOptions {
   /** Hive pushes (changed / agent-output), forwarded to the window. */
   onPush?: (p: HivePush) => void;
   onStatus?: (s: BrainStatus) => void;
+  /** Answers the host's requests to main (the secret broker). Errors become plain-words replies. */
+  onHostRequest?: (method: HostRequestMethod, params: unknown) => Promise<unknown>;
   log?: (line: string) => void;
 }
 
@@ -120,6 +122,20 @@ export class BrainHost {
   }
 
   async #onMessage(m: FromHost): Promise<void> {
+    if (m.type === 'host-request') {
+      const proc = this.#proc;
+      const reply = (r: Extract<ToHost, { type: 'host-reply' }>): void => {
+        if (proc && proc === this.#proc) proc.postMessage(r);
+      };
+      const handler = this.#o.onHostRequest;
+      if (!handler) return reply({ type: 'host-reply', id: m.id, ok: false, error: 'Main has no broker.' });
+      try {
+        reply({ type: 'host-reply', id: m.id, ok: true, result: await handler(m.method, m.params) });
+      } catch (err) {
+        reply({ type: 'host-reply', id: m.id, ok: false, error: err instanceof Error ? err.message : String(err) });
+      }
+      return;
+    }
     if (m.type === 'push') {
       this.#o.onPush?.(m.push);
       return;

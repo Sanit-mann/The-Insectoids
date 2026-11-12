@@ -13,6 +13,8 @@ const PlanCardSchema = z.object({
   priority: PrioritySchema.default('normal'),
   acceptance: z.array(z.string().min(1)).min(1),
   dependsOn: z.array(z.string()).default([]),
+  /** Outside services this card needs (ids from the enabled list the Queen was given); none by default. */
+  integrations: z.array(z.string().regex(/^[a-z][a-z0-9-]{1,31}$/)).max(5).default([]),
 });
 
 const PlanSchema = z.object({

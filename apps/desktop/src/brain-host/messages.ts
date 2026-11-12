@@ -14,6 +14,8 @@ export interface DoorPaths {
   brainCli: string;
   /** Guarded shell and file tools over MCP, for engines without a fail-closed hook (Gemini CLI). */
   hiveTools: string;
+  /** The services door: `call_service` over MCP, through the secret broker in main (Phase 2 A3). */
+  servicesMcp: string;
 }
 
 /** What the hive host needs besides the Brain (Phase 1 Step 8: the Hive lives in this process). */
@@ -33,10 +35,18 @@ export interface HiveSetup {
 /** Host RPC methods (main -> host). Inputs and outputs are validated in main against the shared schemas. */
 export type HostMethod = 'snapshot' | 'command' | 'changes' | 'project' | 'brainRecent' | 'setLimits';
 
+/**
+ * Requests the host makes to main (the reverse direction): the secret broker and the Vault live in
+ * main, and the hive asks it for a capability token per run. No key ever crosses this channel.
+ */
+export type HostRequestMethod = 'broker.available' | 'broker.issue' | 'broker.revoke';
+
 export type ToHost =
   | { type: 'start'; dbPath: string; endpoint: string; masterToken: string; doors: DoorPaths; hive: HiveSetup }
   | { type: 'stop' }
-  | { type: 'rpc'; id: number; method: HostMethod; params?: unknown };
+  | { type: 'rpc'; id: number; method: HostMethod; params?: unknown }
+  | { type: 'host-reply'; id: number; ok: true; result: unknown }
+  | { type: 'host-reply'; id: number; ok: false; error: string };
 
 export type FromHost =
   | { type: 'ready'; endpoint: string }
@@ -44,7 +54,8 @@ export type FromHost =
   | { type: 'stopped' }
   | { type: 'rpc-result'; id: number; ok: true; result: unknown }
   | { type: 'rpc-result'; id: number; ok: false; error: string }
-  | { type: 'push'; push: HivePush };
+  | { type: 'push'; push: HivePush }
+  | { type: 'host-request'; id: number; method: HostRequestMethod; params?: unknown };
 
 export function isStartMessage(m: unknown): m is Extract<ToHost, { type: 'start' }> {
   if (typeof m !== 'object' || m === null) return false;
@@ -59,6 +70,12 @@ export function isStartMessage(m: unknown): m is Extract<ToHost, { type: 'start'
     typeof o['hive'] === 'object' &&
     o['hive'] !== null
   );
+}
+
+export function isHostReply(m: unknown): m is Extract<ToHost, { type: 'host-reply' }> {
+  if (typeof m !== 'object' || m === null) return false;
+  const o = m as Record<string, unknown>;
+  return o['type'] === 'host-reply' && typeof o['id'] === 'number' && typeof o['ok'] === 'boolean';
 }
 
 export function isRpcMessage(m: unknown): m is Extract<ToHost, { type: 'rpc' }> {

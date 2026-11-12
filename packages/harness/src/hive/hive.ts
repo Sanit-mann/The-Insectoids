@@ -5,6 +5,7 @@ import type { ApprovalItem, BoardCard, Brain, Goal } from '@insectoids/brain';
 import type { Workspace } from '@insectoids/workspace';
 import type { ClaudeEvent } from '../claude/stream';
 import { type BrainAccess, type BrainTicket, brainWriteAccess } from './brain-access';
+import { type ServiceAccess, type ServiceTicket, servicesBrief } from './services-access';
 import type { Engine, EngineRequest, EngineResult } from './engine';
 import { type Library, brainRules, inspectorPrompt, insectPrompt, queenPrompt } from './prompts';
 import { type Plan, parsePlan, parseStatus, parseVerdict } from './protocol';
@@ -45,6 +46,11 @@ export interface HiveOptions {
    * boot card in their brief but no live Brain tools.
    */
   brainAccess?: BrainAccess;
+  /**
+   * Outside services through the secret broker (Connections 04-D4). A card that names integrations gets a
+   * token for only those (and only ones switched on) for each run; it's revoked when the run ends.
+   */
+  services?: ServiceAccess;
   onEvent?: (e: HiveEvent) => void;
 }
 
@@ -353,7 +359,9 @@ export class Hive {
     const { brain, library, castes } = this.#o;
     const scratch = join(this.#o.dataDir, 'goals', goal.id, 'queen');
     mkdirSync(scratch, { recursive: true });
+    const services = await this.#o.services?.available().catch(() => []) ?? [];
     const base = queenPrompt(library, {
+      services,
       goal: goal.text,
       bootCard: brain.bootCard(goal.shelf),
       context: brain.read(goal.text, { shelf: goal.shelf, tokenBudget: 800 }).text,
@@ -655,7 +663,43 @@ export class Hive {
     }
   }
 
+  /** The card's integrations from its plan (cards themselves don't store them; the plan does). */
+  #cardIntegrations(goalId: string, cardId: string): string[] {
+    const plan = this.#o.brain.goals.get(goalId)?.plan as Plan | null | undefined;
+    const card = plan?.waves.flatMap((w) => w.cards).find((c) => `${goalId}.${c.id}` === cardId);
+    return card?.integrations ?? [];
+  }
+
   async #runEngine(goalId: string, cardId: string | undefined, req: EngineRequest, onStop?: (stop: () => void) => void): Promise<EngineResult> {
+    // Outside services: only insects working a card that names integrations; never the Queen or Inspector.
+    const services = this.#o.services;
+    const wanted = services && cardId && req.role !== 'queen' && req.role !== 'inspector' ? this.#cardIntegrations(goalId, cardId) : [];
+    if (!services || !cardId || !wanted.length) return this.#runWithBrain(goalId, cardId, req, onStop);
+    let ticket: ServiceTicket;
+    try {
+      ticket = await services.issue({ cardId, agentId: req.agentId, integrations: wanted, approvedRules: this.#approved.get(cardId) ?? [] });
+    } catch (err) {
+      // No broker: the card runs without services and is told so.
+      const reason = err instanceof Error ? err.message : String(err);
+      return this.#runWithBrain(goalId, cardId, { ...req, system: `${req.system}
+
+${servicesBrief([], wanted.map((id) => ({ id, reason })))}` }, onStop);
+    }
+    try {
+      const brief = servicesBrief(ticket.granted, ticket.denied);
+      return await this.#runWithBrain(goalId, cardId, {
+        ...req,
+        system: `${req.system}
+
+${brief}`,
+        ...(ticket.granted.length ? { services: { url: ticket.url, token: ticket.token, granted: ticket.granted, door: services.door } } : {}),
+      }, onStop);
+    } finally {
+      await services.revoke(ticket.token).catch(() => {});
+    }
+  }
+
+  async #runWithBrain(goalId: string, cardId: string | undefined, req: EngineRequest, onStop?: (stop: () => void) => void): Promise<EngineResult> {
     const access = this.#o.brainAccess;
     if (!access) return this.#runWith(goalId, cardId, req, onStop);
     // One token per run, scoped to this agent and the goal's shelf; it dies with the run, whatever happens.

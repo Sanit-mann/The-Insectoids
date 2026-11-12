@@ -15,7 +15,8 @@ import { writeBrainShims } from '@insectoids/brain-cli/shims';
 import { type BrainService, startBrainService } from '@insectoids/brain-service';
 import { HiveManager } from './hive-manager';
 import { writeHookLauncher } from '../main/hook-launcher';
-import { type DoorPaths, type FromHost, type HostMethod, type ToHost, isRpcMessage, isStartMessage } from './messages';
+import type { ServiceAccess, ServiceTicket } from '@insectoids/harness';
+import { type DoorPaths, type FromHost, type HostMethod, type HostRequestMethod, type ToHost, isHostReply, isRpcMessage, isStartMessage } from './messages';
 
 const port = process.parentPort;
 let brain: Brain | null = null;
@@ -23,6 +24,34 @@ let service: BrainService | null = null;
 let hive: HiveManager | null = null;
 
 const send = (m: FromHost): void => port.postMessage(m);
+
+/** Requests to main (the secret broker lives there, with the Vault). */
+const MAIN_TIMEOUT_MS = 15_000;
+let mainId = 0;
+const mainPending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
+function requestMain(method: HostRequestMethod, params?: unknown): Promise<unknown> {
+  const id = ++mainId;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      mainPending.delete(id);
+      reject(new Error('The app did not answer the request for outside services.'));
+    }, MAIN_TIMEOUT_MS);
+    mainPending.set(id, { resolve, reject, timer });
+    send({ type: 'host-request', id, method, ...(params === undefined ? {} : { params }) });
+  });
+}
+
+/** Outside services for the hive: tokens come from the broker in main; the door is the services MCP bundle. */
+function serviceAccess(d: DoorPaths): ServiceAccess {
+  return {
+    available: async () => (await requestMain('broker.available')) as Array<{ id: string; description: string }>,
+    issue: async (g) => (await requestMain('broker.issue', g)) as ServiceTicket,
+    revoke: async (token) => {
+      await requestMain('broker.revoke', { token });
+    },
+    door: { runtime: d.runtime, mcpScript: d.servicesMcp },
+  };
+}
 
 async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
   if (service) return send({ type: 'ready', endpoint: service.endpoint });
@@ -44,6 +73,7 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
       engine: m.hive.engine,
       ...(m.hive.project ? { project: m.hive.project } : {}),
       ...(m.hive.limits ? { limits: m.hive.limits } : {}),
+      services: serviceAccess(m.doors),
       push: (push) => send({ type: 'push', push }),
       log: (line) => console.log(line),
     });
@@ -122,6 +152,15 @@ async function stop(): Promise<void> {
 
 port.on('message', (e: Electron.MessageEvent) => {
   const m: unknown = e.data;
+  if (isHostReply(m)) {
+    const p = mainPending.get(m.id);
+    if (!p) return;
+    mainPending.delete(m.id);
+    clearTimeout(p.timer);
+    if (m.ok) p.resolve(m.result);
+    else p.reject(new Error(m.error));
+    return;
+  }
   if (isRpcMessage(m)) {
     rpc(m.method, m.params).then(
       (result) => send({ type: 'rpc-result', id: m.id, ok: true, result }),

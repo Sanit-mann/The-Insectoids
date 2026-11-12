@@ -76,11 +76,8 @@ test('moving an engine down changes the order', async () => {
 
 test('tabs for later steps say so', async () => {
   const { win } = launched;
-  for (const [label, id] of [
-    ['API providers', 'providers'],
-    ['Services', 'services'],
-    ['Vault', 'vault'],
-  ] as const) {
+  // Services and Vault went live in Phase 2 step A3 (covered by vault-services.spec.ts).
+  for (const [label, id] of [['API providers', 'providers']] as const) {
     await win.getByRole('tab', { name: new RegExp(`^${label}`) }).click();
     await expect(win.getByTestId(`later-${id}`)).toContainText('Later');
   }

@@ -1,0 +1,23 @@
+{
+  "name": "@insectoids/services-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "MCP door to outside services through the local secret broker: agents use a service without ever seeing its key.",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "rolldown src/bin/services-mcp.ts --file dist/services-mcp.mjs --format esm --platform node"
+  },
+  "dependencies": {
+    "@insectoids/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "rolldown": "1.2.19"
+  }
+}

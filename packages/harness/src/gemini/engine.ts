@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import type { HookPolicy } from '@insectoids/reflexes';
 import type { RunHandle } from '../claude/run';
 import { brainEnv } from '../hive/brain-access';
+import { servicesEnv } from '../hive/services-access';
 import type { Engine, EngineRequest, EngineRun } from '../hive/engine';
 import { isReadOnlyRole } from '../hive/router';
 import type { GeminiMcpServer } from './args';
@@ -54,6 +55,10 @@ export class GeminiEngine implements Engine {
     }
     if (req.brain) {
       mcpServers['brain'] = { command: this.o.node, args: [req.brain.doors.mcpScript], env: brainEnv(req.brain), timeout: MCP_TIMEOUT_MS };
+    }
+    if (req.services) {
+      // Read-only runs keep services too: the broker refuses writes without the user's approval anyway.
+      mcpServers['services'] = { command: this.o.node, args: [req.services.door.mcpScript], env: servicesEnv(req.services), timeout: MCP_TIMEOUT_MS };
     }
     const handle: RunHandle = (this.o.run ?? runGemini)({
       bin: { command: this.o.node, args: [this.o.script] },

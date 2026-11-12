@@ -14,6 +14,7 @@ describe('resolveDoorPaths', () => {
       brainMcp: join(repo, 'packages', 'brain-mcp', 'dist', 'brain-mcp.mjs'),
       brainCli: join(repo, 'packages', 'brain-cli', 'dist', 'brain.mjs'),
       hiveTools: join(repo, 'packages', 'hive-tools-mcp', 'dist', 'hive-tools-mcp.mjs'),
+      servicesMcp: join(repo, 'packages', 'services-mcp', 'dist', 'services-mcp.mjs'),
     });
   });
 

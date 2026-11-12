@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "pnpm build:doors && pnpm --filter @insectoids/desktop dev",
     "build": "pnpm -r build",
-    "build:doors": "pnpm --filter @insectoids/reflexes build:hook && pnpm --filter @insectoids/brain-mcp build && pnpm --filter @insectoids/brain-cli build && pnpm --filter @insectoids/hive-tools-mcp build",
+    "build:doors": "pnpm --filter @insectoids/reflexes build:hook && pnpm --filter @insectoids/brain-mcp build && pnpm --filter @insectoids/brain-cli build && pnpm --filter @insectoids/hive-tools-mcp build && pnpm --filter @insectoids/services-mcp build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
     "test": "vitest run",

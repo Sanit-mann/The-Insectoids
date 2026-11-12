@@ -28,7 +28,7 @@ describe('Gemini CLI run config (verified against the 0.68.0 bundle)', () => {
       '-m', 'flash',
       '--approval-mode', 'default',
       '--admin-policy', '/run/policy.toml',
-      '--allowed-mcp-server-names', 'hive', 'brain',
+      '--allowed-mcp-server-names', 'hive', 'brain', 'services',
       '-e', 'none',
       '--skip-trust',
     ]);
@@ -64,6 +64,7 @@ describe('Gemini CLI run config (verified against the 0.68.0 bundle)', () => {
     expect(p).toMatch(/toolName = "\*"\ndecision = "deny"\npriority = 100/);
     expect(p).toMatch(/mcpName = "hive"\ndecision = "allow"\npriority = 900/);
     expect(p).toMatch(/mcpName = "brain"\ndecision = "allow"/);
+    expect(p).toMatch(/mcpName = "services"\ndecision = "allow"/);
     expect(p).not.toMatch(/read_file/);
   });
 
@@ -289,6 +290,17 @@ describe('the Gemini engine and adapter', () => {
     // The Brain door runs on Node too: Gemini CLI won't pass ELECTRON_RUN_AS_NODE to an MCP server.
     expect(o.mcpServers['brain']).toMatchObject({ command: '/bin/node', args: ['/doors/brain-mcp.mjs'], env: { INSECTOIDS_BRAIN_TOKEN: 'tok' } });
     expect(JSON.stringify(o.mcpServers)).not.toMatch(/ELECTRON_RUN_AS_NODE/);
+    expect(o.mcpServers['services']).toBeUndefined();
+
+    // A card with granted integrations also gets the services door, on Node, with the broker token in its env only.
+    const services = { url: 'http://127.0.0.1:7', token: 'svc', granted: ['github'], door: { runtime: { command: 'electron', env: { ELECTRON_RUN_AS_NODE: '1' } }, mcpScript: '/doors/services-mcp.mjs' } };
+    await engine.run({ ...req('coder', true), services }).done;
+    expect(seen[1]!.mcpServers['services']).toEqual({
+      command: '/bin/node',
+      args: ['/doors/services-mcp.mjs'],
+      env: { INSECTOIDS_BROKER_URL: 'http://127.0.0.1:7', INSECTOIDS_BROKER_TOKEN: 'svc' },
+      timeout: expect.any(Number),
+    });
   });
 
   it('without the hive tools it takes read-only work only, and refuses writers', async () => {

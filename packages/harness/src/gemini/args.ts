@@ -11,7 +11,7 @@ export interface GeminiMcpServer {
 }
 
 /** The MCP servers a hive run may use. Everything else (the user's own servers) stays off. */
-export const HIVE_MCP_SERVERS = ['hive', 'brain'] as const;
+export const HIVE_MCP_SERVERS = ['hive', 'brain', 'services'] as const;
 
 /**
  * Gemini 3 models take a thinking level (only LOW and HIGH exist in 0.68.0); Gemini 2.5 models take a
@@ -72,6 +72,8 @@ export function buildGeminiPolicy(o: { readOnly: boolean }): string {
       `denyMessage = "${o.readOnly ? 'This hive run is read-only.' : "Use the hive's tools (mcp_hive_*) for files and commands; built-in tools are switched off in the hive."}"`,
     ]),
     rule(['toolName = "*"', 'mcpName = "brain"', 'decision = "allow"', 'priority = 900']),
+    // Outside services: the broker scopes the token to the card's integrations and asks before writes.
+    rule(['toolName = "*"', 'mcpName = "services"', 'decision = "allow"', 'priority = 900']),
   ];
   if (o.readOnly) {
     rules.push(

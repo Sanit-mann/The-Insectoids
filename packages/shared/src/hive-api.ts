@@ -134,6 +134,8 @@ export const CardViewSchema = z.object({
   priority: PrioritySchema,
   acceptance: z.array(z.string()),
   dependsOn: z.array(z.string()),
+  /** Outside services this card may use through the secret broker (04-D4: least privilege). */
+  integrations: z.array(z.string()),
   status: TaskStatusSchema,
   claimedBy: z.string().nullable(),
   leaseExpiresAt: z.number().nullable(),

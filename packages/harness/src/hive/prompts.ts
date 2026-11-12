@@ -66,19 +66,40 @@ export interface PromptPair {
   task: string;
 }
 
-export function queenPrompt(lib: Library, o: { goal: string; bootCard: string; context: string; castes: readonly Caste[]; projectListing: string }): PromptPair {
+/** The outside services the Queen may hand to cards (only ones the user switched on). */
+function servicesSection(services: ReadonlyArray<{ id: string; description: string }>): string {
+  if (!services.length) return '## Outside services\nNone are switched on, so every card\'s "integrations" stays [].';
+  return [
+    '## Outside services',
+    'These are switched on. A card may list in "integrations" only the ones it really needs (least privilege); most cards need none:',
+    ...services.map((s) => `- ${s.id}: ${s.description}`),
+  ].join('\n');
+}
+
+export function queenPrompt(
+  lib: Library,
+  o: {
+    goal: string;
+    bootCard: string;
+    context: string;
+    castes: readonly Caste[];
+    projectListing: string;
+    services?: ReadonlyArray<{ id: string; description: string }>;
+  },
+): PromptPair {
   const system = [
     lib.role('queen'),
     HIVE_RULES.replace('You never talk to the user; only the Queen does.', 'You are the Queen. In this run you only plan; you do not edit files.'),
     `## Output contract
 Reply with your plan as ONE fenced \`\`\`json block, exactly this shape:
-{"headline": "<one short line, at most 100 characters>", "summary": "<at most 3 sentences>", "waves": [{"cards": [{"id": "C-01", "title": "...", "brief": "what to change and why, with file paths", "caste": "<one of: ${o.castes.join(', ')}>", "priority": "critical|high|normal|low", "acceptance": ["checkable criterion", "..."], "dependsOn": ["C-..."]}]}]}
+{"headline": "<one short line, at most 100 characters>", "summary": "<at most 3 sentences>", "waves": [{"cards": [{"id": "C-01", "title": "...", "brief": "what to change and why, with file paths", "caste": "<one of: ${o.castes.join(', ')}>", "priority": "critical|high|normal|low", "acceptance": ["checkable criterion", "..."], "dependsOn": ["C-..."], "integrations": []}]}]}
 Rules: at most ${MAX_WAVES} waves and ${MAX_CARDS_PER_WAVE} cards per wave; each card is sized for one insect in one session;
 every card has checkable acceptance criteria; a card may depend only on cards in the same or an earlier wave;
 tester cards depend on the coder cards they test. Use only the castes listed.
 Priority: use "normal" by default. Use "high" only when other work waits on the card or it is risky, "critical" only for
 an urgent fix, "low" for nice-to-haves. Priority decides how much model effort a card gets, so over-using "high" wastes tokens.
 Don't say whether the plan needs the user's approval; the hive decides that from its own rules.`,
+    servicesSection(o.services ?? []),
   ].join('\n\n');
   const task = [
     `# Goal\n${o.goal}`,

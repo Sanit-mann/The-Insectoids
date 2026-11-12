@@ -2,6 +2,8 @@ import type { EngineCard, EngineId } from '@insectoids/shared';
 import { RefreshCw } from 'lucide-react';
 import { type KeyboardEvent, useState } from 'react';
 import { EngineCardView } from '@/components/connections/EngineCardView';
+import { ServicesTab } from '@/components/connections/ServicesTab';
+import { VaultTab } from '@/components/connections/VaultTab';
 import { defaultEngine } from '@/components/connections/engine-names';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { Button } from '@/components/ui/button';
@@ -17,21 +19,14 @@ const TABS: Array<{ id: TabId; label: string; later?: { when: string; what: stri
     label: 'API providers',
     later: { when: 'Phase 2 · step A4', what: 'Any OpenAI-compatible endpoint (OpenRouter, FreeLLMAPI, Ollama, LM Studio), with keys kept in the Vault.' },
   },
-  {
-    id: 'services',
-    label: 'Services',
-    later: { when: 'Phase 2 · step A3', what: 'GitHub and web search for the hive, reached only through the local secret broker. Read-only tools stay on; anything else waits for your OK.' },
-  },
-  {
-    id: 'vault',
-    label: 'Vault',
-    later: { when: 'Phase 2 · step A3', what: 'Keys encrypted by your operating system. Agents get short-lived, card-scoped access through the broker and never see a key.' },
-  },
+  { id: 'services', label: 'Services' },
+  { id: 'vault', label: 'Vault' },
 ];
 
 /**
- * Connections (function 04; prototype Connections.dc.html). Phase 2 · A1: the Engines tab is live;
- * the other tabs say what arrives and when. Every change goes through a hive command.
+ * Connections (function 04; prototype Connections.dc.html). Engines (Phase 2 · A1), Services and Vault (A3)
+ * are live; API providers says what arrives and when. Engine changes go through hive commands, Services and
+ * Vault through the Vault API in the main process.
  */
 export function ConnectionsScreen() {
   const { snapshot, error: loadError, loading } = useHive();
@@ -125,7 +120,16 @@ export function ConnectionsScreen() {
       </div>
 
       <section aria-labelledby={`conn-tab-${tab}`} className="flex flex-col gap-4" id={`conn-panel-${tab}`} role="tabpanel">
-        {current.later ? (
+        {tab === 'services' ? (
+          <ServicesTab
+            onOpenVault={() => {
+              setTab('vault');
+              requestAnimationFrame(() => document.getElementById('conn-tab-vault')?.focus());
+            }}
+          />
+        ) : tab === 'vault' ? (
+          <VaultTab />
+        ) : current.later ? (
           <div className="flex flex-col gap-2 rounded-2xl border border-dashed border-line bg-surface p-6" data-testid={`later-${tab}`}>
             <h2 className="m-0 font-display text-lg font-semibold">
               {current.label} <span className="text-sm font-normal text-muted">· Later ({current.later.when})</span>

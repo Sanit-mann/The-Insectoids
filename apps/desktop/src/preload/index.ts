@@ -7,6 +7,7 @@ import {
   ChangesViewSchema,
   CommandResultSchema,
   HIVE_IPC,
+  IntegrationViewSchema,
   type HiveApi,
   type HivePush,
   HivePushSchema,
@@ -18,6 +19,12 @@ import {
   type SetupApi,
   SetupResultSchema,
   SetupStateSchema,
+  SecretMetaSchema,
+  ServiceTestResultSchema,
+  VAULT_IPC,
+  type VaultApi,
+  VaultResultSchema,
+  VaultStatusSchema,
 } from '@insectoids/shared';
 
 /** Electron prefixes errors from main with "Error invoking remote method '…': Error: "; the UI shows plain words. */
@@ -59,12 +66,31 @@ const setup: SetupApi = {
   restart: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.restart)),
 };
 
+/** Vault and Services: keys go in once and never come back; replies are metadata only. */
+const vault: VaultApi = {
+  status: async () => VaultStatusSchema.parse(await invoke(VAULT_IPC.vaultStatus)),
+  list: async () => SecretMetaSchema.array().parse(await invoke(VAULT_IPC.vaultList)),
+  add: async (input) => {
+    const raw = (await invoke(VAULT_IPC.vaultAdd, input)) as { ref?: unknown };
+    const r = VaultResultSchema.parse(raw);
+    const ref = SecretMetaSchema.shape.ref.safeParse(raw?.ref);
+    return r.ok && ref.success ? { ...r, ref: ref.data } : r;
+  },
+  remove: async (ref) => VaultResultSchema.parse(await invoke(VAULT_IPC.vaultRemove, ref)),
+  services: async () => IntegrationViewSchema.array().parse(await invoke(VAULT_IPC.servicesList)),
+  saveService: async (i) => VaultResultSchema.parse(await invoke(VAULT_IPC.servicesSave, i)),
+  setServiceEnabled: async (id, enabled) => VaultResultSchema.parse(await invoke(VAULT_IPC.servicesSetEnabled, { id, enabled })),
+  removeService: async (id) => VaultResultSchema.parse(await invoke(VAULT_IPC.servicesRemove, id)),
+  testService: async (id) => ServiceTestResultSchema.parse(await invoke(VAULT_IPC.servicesTest, id)),
+};
+
 // The only door from the UI to the main process. Every reply is validated.
 const api: InsectoidsApi = {
   appInfo: async () => AppInfoSchema.parse(await invoke(IPC.appInfo)),
   brainStatus: async () => BrainStatusSchema.parse(await invoke(IPC.brainStatus)),
   hive,
   setup,
+  vault,
 };
 
 contextBridge.exposeInMainWorld('insectoids', api);

@@ -27,6 +27,7 @@ import {
   Library,
   type ModelTiers,
   type Plan,
+  type ServiceAccess,
   claudeAdapter,
   demoEngine,
   fakeAdapter,
@@ -85,6 +86,8 @@ export interface HiveManagerOptions {
   project?: string;
   /** Safety preset limits. Default: Balanced. */
   limits?: HiveLimits;
+  /** Outside services through the secret broker in main (Phase 2 A3). Absent: cards run without services. */
+  services?: ServiceAccess;
   push: (p: HivePush) => void;
   log?: (line: string) => void;
   /** Foreman tick interval. Default 1000 ms (500 ms with the demo engine). */
@@ -394,6 +397,7 @@ export class HiveManager {
       approveEveryPlan: this.#limits.approveEveryPlan,
       castes: ['coder', 'tester'],
       ...(this.#brainAccess() ? { brainAccess: this.#brainAccess()! } : {}),
+      ...(this.#o.services ? { services: this.#o.services } : {}),
       onEvent: (e) => this.#onHiveEvent(e),
     });
     if (this.#paused) hive.pause(this.#pausedReason ?? 'Paused.');
@@ -571,11 +575,18 @@ export class HiveManager {
     };
   }
 
+  /** Integrations live in the goal's plan (the taskboard doesn't store them). */
+  #cardIntegrations(c: BoardCard): string[] {
+    const plan = this.#o.brain.goals.get(c.goalId)?.plan as { waves?: Array<{ cards?: Array<{ id?: string; integrations?: unknown }> }> } | null | undefined;
+    const card = plan?.waves?.flatMap((w) => w.cards ?? []).find((p) => `${c.goalId}.${p.id}` === c.id);
+    return Array.isArray(card?.integrations) ? card.integrations.filter((x): x is string => typeof x === 'string') : [];
+  }
+
   #cardView(c: BoardCard): CardView {
     const undo = this.#project?.undo.get(c.goalId);
     return {
       id: c.id, goalId: c.goalId, wave: c.wave, title: c.title, brief: c.brief, caste: c.caste, priority: c.priority,
-      acceptance: c.acceptance, dependsOn: c.dependsOn, status: c.status, claimedBy: c.claimedBy ?? null,
+      acceptance: c.acceptance, dependsOn: c.dependsOn, integrations: this.#cardIntegrations(c), status: c.status, claimedBy: c.claimedBy ?? null,
       leaseExpiresAt: c.leaseExpiresAt ?? null, attempts: c.attempts, maxAttempts: c.maxAttempts, escalated: c.escalated,
       result: c.result ?? null,
       undone: c.status === 'done' && Boolean(undo && (undo.goalReset || undo.cards.has(c.id))),

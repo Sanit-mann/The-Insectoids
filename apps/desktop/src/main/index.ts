@@ -2,16 +2,21 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, session, shell } from 'electron';
+import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, safeStorage, session, shell } from 'electron';
 import { CommandResultSchema, HIVE_IPC, type HivePush, HiveSnapshotSchema, IPC } from '@insectoids/shared';
 import { buildAppInfo } from './app-info';
 import { AppSettingsStore, checkBrainFolder, limitsFor } from './app-settings';
 import { BrainHost } from './brain-host';
+import { Broker } from './broker';
+import { handleBrokerRequest } from './broker-requests';
 import { resolveDoorPaths, resolveLibraryDir } from './doors';
 import { registerHiveIpc } from './hive-ipc';
 import { isAllowedExternalUrl, isTrustedRendererUrl } from './security';
 import { registerSetupIpc } from './setup';
+import { ServicesStore, type UrlRules } from './services';
 import { type TrayState, createTray } from './tray';
+import { Vault } from './vault';
+import { registerVaultIpc } from './vault-ipc';
 
 const APP_NAME = 'The Insectoids';
 const here = dirname(fileURLToPath(import.meta.url));
@@ -38,6 +43,17 @@ let brainHost: BrainHost | null = null;
 let settings: AppSettingsStore | null = null;
 /** True while the Brain is being moved to another folder (the old host is stopping, the new one starting). */
 let switchingBrain = false;
+/** The Vault, outside services and the secret broker (Phase 2 A3) live in main only. */
+let vault: Vault | null = null;
+let services: ServicesStore | null = null;
+let broker: Broker | null = null;
+
+/** e2e only: a fake upstream on http://127.0.0.1 may stand in for a service. Never in a normal run. */
+function testUrlRules(): UrlRules {
+  if (!isE2E || process.env['INSECTOIDS_E2E_LOOPBACK_SERVICES'] !== '1') return {};
+  const github = process.env['INSECTOIDS_E2E_GITHUB_BASE'];
+  return { allowLoopbackHttp: true, ...(github ? { baseOverrides: { github } } : {}) };
+}
 
 function showWindow(): void {
   if (!mainWindow) return;
@@ -115,6 +131,10 @@ function startBrain(brainDir: string): BrainHost {
       limits: limitsFor(settings?.preset ?? 'balanced'),
     },
     onPush: forwardPush,
+    onHostRequest: async (method, params) => {
+      if (!broker) throw new Error('The secret broker is not running.');
+      return handleBrokerRequest(broker, method, params);
+    },
     onStatus: (s) => {
       scheduleTrayUpdate();
       // A (re)started Brain has fresh data: the window re-reads everything.
@@ -219,6 +239,7 @@ function registerIpc(): void {
     ...(testPickedFolder ? { testPickedFolder } : {}),
   });
   registerHiveIpc({ host: () => brainHost, window: () => mainWindow, assertTrustedSender });
+  registerVaultIpc({ vault: vault!, services: services!, broker: broker!, assertTrustedSender });
   ipcMain.handle(IPC.brainStatus, (event) => {
     assertTrustedSender(event);
     return brainHost?.status ?? { state: 'starting', message: 'Starting the Brain…' };
@@ -240,6 +261,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showWindow);
   app.on('before-quit', (event) => {
     quitting = true;
+    void broker?.close();
     // Let the Brain close its database cleanly before the app exits.
     if (brainHost) {
       const host = brainHost;
@@ -249,7 +271,7 @@ if (!app.requestSingleInstanceLock()) {
     }
   });
 
-  void app.whenReady().then(() => {
+  void app.whenReady().then(async () => {
     // The app asks for no browser permissions (camera, mic, location, …).
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 
@@ -258,6 +280,12 @@ if (!app.requestSingleInstanceLock()) {
     if (isE2E && process.env['INSECTOIDS_E2E_ONBOARDED'] === '1' && settings.value.onboarding.completedAt === undefined) {
       settings.update((s) => ({ ...s, onboarding: { completedAt: Date.now() } }));
     }
+    const userData = app.getPath('userData');
+    vault = new Vault({ dir: userData, crypto: safeStorage });
+    services = new ServicesStore({ dir: userData, rules: testUrlRules() });
+    const v = vault;
+    broker = new Broker({ services, reveal: (ref) => v.reveal(ref), log: (line) => console.log(line) });
+    await broker.start();
     registerIpc();
     brainHost = startBrain(settings.brainDir);
     mainWindow = createWindow();
