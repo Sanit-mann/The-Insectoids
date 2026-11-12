@@ -22,6 +22,12 @@ Requires Node.js 24+. pnpm is pinned in `package.json` and provided by Corepack:
 corepack enable pnpm
 ```
 
+On Windows, if that fails with `EPERM` (Node is installed in `C:\Program Files`, which needs admin rights), put the `pnpm` command in your user npm folder instead. Run this in PowerShell:
+
+```powershell
+corepack enable pnpm --install-directory "$env:APPDATA\npm"
+```
+
 ```bash
 pnpm install
 ```

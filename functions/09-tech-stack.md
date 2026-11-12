@@ -124,6 +124,7 @@ Implements 01–08. The build order is set in function 10 (roadmap).
 - **D4 (2026-11-12) — Updates:** the app checks online for new versions (download only; nothing about the user is sent), with an off switch in Settings and a "restart to update" prompt. Updates are never forced.
 - **D5 (2026-11-12) — Engines without pre-action hooks** run only in container mode, or with every command needing approval, until they support hooks the command guard can use.
 - **D6 (2026-11-12) — Embedding model** (~25–90 MB) is downloaded during setup, with its size shown first.
+- **D8 (2026-11-12, amendment during Phase 1) — Brain uses Node's built-in `node:sqlite`, not `better-sqlite3`.** Verified inside Electron 45 (Node 24.22, SQLite 3.53.4, FTS5 works). No native module to rebuild per Electron version or platform. Wrapped in a small adapter so `better-sqlite3` remains a drop-in fallback if `node:sqlite` changes. `sqlite-vec` (Phase 2) will be loaded through `node:sqlite`'s extension loading.
 - **D7 (2026-11-12) — Build here:** the app is built in `D:\The Insectoids` as a pnpm monorepo next to `functions/`, `design/` and `library/`, using the repository layout above.
 
 ## Change log
