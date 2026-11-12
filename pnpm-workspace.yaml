@@ -6,3 +6,5 @@ packages:
 allowBuilds:
   electron: true
   esbuild: true
+  # protobufjs (via onnxruntime-web) only prints a version-scheme warning on install; not needed.
+  protobufjs: false
