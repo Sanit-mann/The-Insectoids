@@ -103,6 +103,29 @@ Each step ends in something that works and is tested. Core services are built te
   - **Safety:** ids are validated (no `..`, no leading `-`); git runs with no shell and no prompts.
 
   Respects the user's git line-ending setting (`core.autocrlf`).
+- **Step 4 Command guard: done (2026-11-12).** `packages/reflexes`, 116 tests, POSIX and Windows paths.
+  - **Shell parser:** separators, pipes, quotes, redirections, `$(…)`, backticks, `<(…)`, `bash -c` / `cmd /c` / `powershell -Command` nesting. It fails safe: anything unparseable becomes "ask".
+  - **Always blocked:**
+    - deleting outside the workspace, the workspace root, or linked dependencies;
+    - writing outside the workspace or into git internals;
+    - force-push or deleting remote refs;
+    - git on another repo (`-C`, `--git-dir`);
+    - links pointing outside the workspace;
+    - disk formatting, `dd` to devices, power and system changes (registry, services, execution policy, `setx`);
+    - piping into shells or `iex`, `eval`, encoded PowerShell;
+    - `sudo` and friends;
+    - protected files (`.env*` except examples, keys, SSH/AWS/GnuPG/Azure/Kube/Docker credentials, `.npmrc`, browser profiles);
+    - user no-go folders.
+  - **Needs approval:** push, new or global dependencies, publish and deploy, destructive database commands, remote copies, scheduled tasks.
+  - **Bypass tests:**
+    - escaped and full-path command names, `env` and variable prefixes, `..` tricks;
+    - command substitution and backticks;
+    - profile edits;
+    - symlinks, including a real directory junction on disk resolved with `fsRealpath`.
+
+    They found and fixed 3 real gaps: git global options hiding the subcommand, link creation, and writing through links.
+  - **Claude Code adapter:** maps Bash/PowerShell, Read/Write/Edit/MultiEdit/Notebook, Glob/Grep, WebFetch/WebSearch (caste network policy: none / docs-and-package sites / web, https only) and MCP tools. "Ask" becomes a deny telling the insect to block its card for approval. `runHook` fails closed on a bad input or missing policy.
+  - **Honest limit:** this is one safety layer, not a sandbox. Untrusted code runs in container mode (06-D4); engines without hooks are restricted (09-D5).
 
 ## Not in Phase 1 (by design)
 Other engines and providers, secret broker, embeddings and meaning search, code map, Brain graph, library activation, Cadence, containers. See Phase 2+.
