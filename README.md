@@ -97,8 +97,6 @@ Compared with the projects that inspired it (credited below), it adds strict wor
  Agents reach it through MCP or the `brain` command, with a token scoped to their project.
 ```
 
-![The Queen planning a goal: two cards in one wave, waiting for your approval](design/screenshots/phase-1-demo-01-queen-plan.png)
-
 ![Hive monitor: each agent run with the model and effort that actually ran, tokens, cost and live output](design/screenshots/phase-1-demo-09-hive-done.png)
 
 ## Run it
