@@ -95,9 +95,11 @@ const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0
 
 /** Turn free text into a safe FTS5 query: words become quoted terms; OR/AND/NOT stay operators. */
 function toFtsQuery(query: string): string {
+  // Punctuation splits words the same way the FTS tokenizer does ("hello.txt" -> "hello" "txt"),
+  // so a pasted sentence or file name still matches. Deleting it instead would search for "hellotxt".
   const parts = query
     .split(/\s+/)
-    .map((t) => (/^(OR|AND|NOT)$/.test(t) ? t : t.replace(/[^\p{L}\p{N}_]/gu, '')))
+    .flatMap((t) => (/^(OR|AND|NOT)$/.test(t) ? [t] : t.split(/[^\p{L}\p{N}_]+/u)))
     .filter(Boolean)
     .map((t) => (/^(OR|AND|NOT)$/.test(t) ? t : `"${t}"`));
   while (parts.length && /^(OR|AND|NOT)$/.test(parts[0]!)) parts.shift();
@@ -311,6 +313,18 @@ export class Brain {
       ids.push(rec.id);
     }
     return { text: lines.join('\n'), ids, truncated: ids.length < hits.length };
+  }
+
+  /** Newest records on a shelf (plus global), for browsing without a search query (App 07, Brain screen). */
+  recent(opts: { shelf: string; kinds?: RecordKind[]; limit?: number }): SearchHit[] {
+    const params: Array<string | number> = [opts.shelf, GLOBAL_SHELF];
+    const kinds = opts.kinds?.length ? `AND kind IN (${opts.kinds.map(() => '?').join(', ')})` : '';
+    if (opts.kinds?.length) params.push(...opts.kinds);
+    params.push(Math.min(Math.max(opts.limit ?? 50, 1), 200));
+    const rows = this.#db
+      .prepare(`SELECT id, kind, shelf, title, summary FROM records WHERE shelf IN (?, ?) AND archived = 0 ${kinds} ORDER BY updated_at DESC, id LIMIT ?`)
+      .all(...params) as unknown as Array<Omit<SearchHit, 'score' | 'kind'> & { kind: string }>;
+    return rows.map((r) => ({ ...r, kind: r.kind as RecordKind, score: 0 }));
   }
 
   /** The few hundred tokens every agent loads first (Memory 01, tiered reading step 1). */

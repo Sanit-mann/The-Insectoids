@@ -1,0 +1,108 @@
+import { type BrowserWindow, type IpcMainInvokeEvent, dialog, ipcMain } from 'electron';
+import {
+  BrainHitViewSchema,
+  BrainRecordViewSchema,
+  BrainSearchRequestSchema,
+  ChangesRequestSchema,
+  ChangesViewSchema,
+  CommandResultSchema,
+  HIVE_IPC,
+  HiveCommandSchema,
+  HiveSnapshotSchema,
+  ProjectViewSchema,
+} from '@insectoids/shared';
+import type { BrainHost } from './brain-host';
+
+interface Deps {
+  host: () => BrainHost | null;
+  window: () => BrowserWindow | null;
+  assertTrustedSender: (event: IpcMainInvokeEvent) => void;
+}
+
+/** Same rule as every id in the hive contract. */
+const RecordId = ChangesRequestSchema.shape.cardId;
+
+/**
+ * The hive's IPC (App 07 / Phase 1 Step 8). Every input is validated before it reaches the host,
+ * and every reply is validated before it reaches the renderer.
+ */
+export function registerHiveIpc(d: Deps): void {
+  const host = (): BrainHost => {
+    const h = d.host();
+    if (!h) throw new Error('The Brain is not running.');
+    return h;
+  };
+  const brain = () => {
+    const c = host().client;
+    if (!c) throw new Error(host().status.message);
+    return c;
+  };
+  const handle = (channel: string, fn: (arg: unknown) => Promise<unknown>): void => {
+    ipcMain.handle(channel, async (event, arg: unknown) => {
+      d.assertTrustedSender(event);
+      return fn(arg);
+    });
+  };
+
+  handle(HIVE_IPC.snapshot, async () => HiveSnapshotSchema.parse(await host().call('snapshot')));
+
+  handle(HIVE_IPC.command, async (arg) => {
+    const cmd = HiveCommandSchema.parse(arg);
+    return CommandResultSchema.parse(await host().call('command', cmd));
+  });
+
+  handle(HIVE_IPC.changes, async (arg) => ChangesViewSchema.parse(await host().call('changes', ChangesRequestSchema.parse(arg))));
+
+  handle(HIVE_IPC.brainSearch, async (arg) => {
+    const req = BrainSearchRequestSchema.parse(arg);
+    if (!req.query) {
+      return BrainHitViewSchema.array().parse(await host().call('brainRecent', req.kinds ? { kinds: req.kinds } : {}));
+    }
+    const project = ProjectViewSchema.nullable().parse(await host().call('project'));
+    // As the user: the project's shelf plus global (Memory 01-D2).
+    const hits = await brain().search({ query: req.query, shelf: project?.shelf ?? 'global', limit: 30, ...(req.kinds ? { kinds: req.kinds } : {}) });
+    return BrainHitViewSchema.array().parse(hits.map(({ id, kind, shelf, title, summary }) => ({ id, kind, shelf, title, summary })));
+  });
+
+  handle(HIVE_IPC.brainRecord, async (arg) => {
+    const id = RecordId.parse(arg);
+    const c = brain();
+    const rec = await c.get(id);
+    if (!rec) return null;
+    const [history, links] = await Promise.all([c.history(id), c.links(id)]);
+    const titled = await Promise.all(
+      links.map(async (l) => {
+        const other = await c.get(l.id);
+        return other ? { id: l.id, rel: l.rel, direction: l.direction, title: other.title } : null;
+      }),
+    );
+    return BrainRecordViewSchema.parse({
+      id: rec.id,
+      kind: rec.kind,
+      shelf: rec.shelf,
+      owner: rec.owner,
+      title: rec.title,
+      body: rec.body,
+      summary: rec.summary,
+      trust: rec.trust,
+      source: rec.source,
+      version: rec.version,
+      archived: rec.archived,
+      createdAt: rec.createdAt,
+      updatedAt: rec.updatedAt,
+      history: history.map(({ version, change, title, trust, changedBy, changedAt }) => ({ version, change, title, trust, changedBy, changedAt })),
+      links: titled.filter((l) => l !== null),
+    });
+  });
+
+  handle(HIVE_IPC.pickProject, async () => {
+    const win = d.window();
+    const options = { title: 'Choose your project folder', properties: ['openDirectory' as const] };
+    const res = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+    const path = res.filePaths[0];
+    if (res.canceled || !path) return null;
+    const r = CommandResultSchema.parse(await host().call('command', { type: 'setProject', path }));
+    if (!r.ok) throw new Error(r.error);
+    return ProjectViewSchema.nullable().parse(await host().call('project'));
+  });
+}

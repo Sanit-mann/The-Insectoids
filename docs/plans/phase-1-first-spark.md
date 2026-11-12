@@ -200,6 +200,31 @@ Each step ends in something that works and is tested. Core services are built te
     - Packaged-app door paths (`resources/doors`) are a Phase 3 TODO.
     - A host crash/restart isn't covered by e2e.
     - Not yet run through the real Claude CLI; that comes with the Step 10 demo or the opt-in smoke test.
+- **Step 8 UI: done (2026-11-12).** Built by four parallel workers on a shared contract (`packages/shared/src/hive-api.ts`) and one renderer store (`lib/hive-store.ts`). 403 unit tests and 25 e2e tests pass.
+  - **The Hive moved into the brain-host utilityProcess** (`HiveManager`), so `brain.db` has exactly one writer.
+    - **Project:** the folder picker; saved in `settings.json`.
+    - **Hive runtime:** one `Workspace` + `Hive`, with a Foreman tick that never overlaps.
+    - **Read model:** activity log (300 lines) and agent lanes (model and effort as reported by the engine, tokens, cost, last 200 output lines).
+    - **IPC:** typed RPC between main and the host over parentPort (30 s timeout). Pushes (`changed`, `agent-output`) are batched every 100 ms and forwarded to the window. Every IPC payload is checked with zod on both sides.
+    - **Engine:** Claude Code reports missing / outdated / signed-out / ready with the fix in plain words, and re-checks every 60 s. `INSECTOIDS_ENGINE=fake` runs a scripted demo (`harness/src/hive/demo.ts`) for e2e tests and token-free demos.
+    - **Hive additions:** cancel goal, undo card/goal, undo merge and redo merge (each with approval; `Workspace.redoMainMerge` reverts the undo commit), and run lifecycle events.
+    - **Approvals:** acting on an approval happens before the decision is recorded, so a failed merge stays waiting; deciding twice is refused.
+    - **Tray:** shows working / idle / paused and how many approvals are waiting, with Pause and Resume.
+  - **Screens** (each source library noted in its component's top comment):
+    - **Queen chat** (Kokonut `ai-prompt` composer, `ai-tool-approval` plan card with inline Approve/Deny, `empty-state` project picker, `inline-alert` for errors and the engine-not-ready state);
+    - **Approval inbox** (filter chips, keyboard list; Kokonut `hold-button` hold-to-approve for destructive items);
+    - **Taskboard** (Cult `kanban-board`, read-only, goal and wave switchers, card detail);
+    - **Hive monitor** (Kokonut `ai-agent-lanes` timeline, lanes table, live read-only output, throttled screen-reader updates);
+    - **Changes & undo** (Kokonut `ai-diff-review`, `undo-button`, and the merge panel: not merged → waiting → merged → undo → merge again);
+    - **Brain reader** (search, kind filters, trust badges, versions, links; the graph is Phase 2);
+    - also the live side panel, a top-bar status pill, and an approvals badge on the rail.
+  - **Found and fixed during integration:**
+    - **Guard hook environment:** the hook ran with `ELECTRON_RUN_AS_NODE` in Claude's environment, so every insect shell command inherited it. Any project that starts Electron (this one included) would have broken. Now a per-hook launcher (`main/hook-launcher.ts`, `<userData>/hooks/guard-hook.cmd`) sets it for the hook alone; the MCP door and `brain` CLI already set it themselves. Tested through `cmd.exe` from a path containing a space and a `%`.
+    - **Brain search:** punctuation was deleted, so "hello.txt" became "hellotxt" and pasted sentences found nothing. Punctuation now splits words the way the FTS index does; a regression test was added.
+  - **Still to verify:**
+    - Real Claude Code through the new hook launcher (Step 10 demo). If the launcher fails, the hook's `onFailure: block` stops every tool, which is safe.
+    - Door and library paths for the packaged app (Phase 3).
+  - **Screenshots:** `design/screenshots/phase-1-step8-*.png`.
 - **Brain research note: ruvector (2026-11-12, for Phase 2).** We reviewed github.com/ruvnet/ruvector against our Brain spec.
   - **Verdict:** don't take it as a dependency.
   - **Why not:**

@@ -2,13 +2,14 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, session, shell, type Tray } from 'electron';
-import { IPC } from '@insectoids/shared';
+import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, session, shell } from 'electron';
+import { CommandResultSchema, HIVE_IPC, type HivePush, HiveSnapshotSchema, IPC } from '@insectoids/shared';
 import { buildAppInfo } from './app-info';
 import { BrainHost } from './brain-host';
-import { resolveDoorPaths } from './doors';
+import { resolveDoorPaths, resolveLibraryDir } from './doors';
+import { registerHiveIpc } from './hive-ipc';
 import { isAllowedExternalUrl, isTrustedRendererUrl } from './security';
-import { createTray } from './tray';
+import { type TrayState, createTray } from './tray';
 
 const APP_NAME = 'The Insectoids';
 const here = dirname(fileURLToPath(import.meta.url));
@@ -28,7 +29,8 @@ app.setName(APP_NAME);
 if (isE2E) app.setPath('userData', mkdtempSync(join(tmpdir(), 'insectoids-e2e-')));
 
 let mainWindow: BrowserWindow | null = null;
-let tray: Tray | null = null;
+let tray: ReturnType<typeof createTray> | null = null;
+let trayTimer: NodeJS.Timeout | null = null;
 let quitting = false;
 let brainHost: BrainHost | null = null;
 
@@ -99,13 +101,55 @@ function startBrain(): BrainHost {
     entry: join(here, 'brain-host.js'),
     dbPath: join(app.getPath('userData'), 'brain', 'brain.db'),
     doors: resolveDoorPaths({ mainDir: here, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath, execPath: process.execPath }),
+    hive: {
+      userDataDir: app.getPath('userData'),
+      libraryDir: resolveLibraryDir({ mainDir: here, isPackaged: app.isPackaged, resourcesPath: process.resourcesPath }),
+      // fake = the scripted demo engine (no AI calls, no tokens): e2e tests and demos.
+      engine: process.env['INSECTOIDS_ENGINE'] === 'fake' ? 'fake' : 'claude',
+      ...(isE2E && process.env['INSECTOIDS_E2E_PROJECT'] ? { project: process.env['INSECTOIDS_E2E_PROJECT'] } : {}),
+    },
+    onPush: forwardPush,
+    onStatus: () => scheduleTrayUpdate(),
     log: (line) => console.log(line),
   });
   host.start();
   return host;
 }
 
+/** Hive pushes go to the window; a "changed" also refreshes the tray. */
+function forwardPush(push: HivePush): void {
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(HIVE_IPC.event, push);
+  if (push.type === 'changed') scheduleTrayUpdate();
+}
+
+function scheduleTrayUpdate(): void {
+  if (trayTimer || !tray) return;
+  trayTimer = setTimeout(() => {
+    trayTimer = null;
+    void refreshTray();
+  }, 500);
+}
+
+async function refreshTray(): Promise<void> {
+  if (!tray || !brainHost || brainHost.status.state !== 'ready') return;
+  try {
+    const s = HiveSnapshotSchema.parse(await brainHost.call('snapshot'));
+    const state: TrayState = { working: s.hive.working, paused: s.hive.paused, approvals: s.approvals.filter((a) => a.status === 'waiting').length };
+    tray.update(state);
+  } catch {
+    // The tray keeps its last state; the next change retries.
+  }
+}
+
+async function hiveCommand(cmd: { type: 'pause'; reason?: string } | { type: 'resume' }): Promise<void> {
+  if (!brainHost) return;
+  const r = CommandResultSchema.parse(await brainHost.call('command', cmd).catch((e: unknown) => ({ ok: false, error: String(e) })));
+  if (!r.ok) console.log(`[hive] ${cmd.type} failed: ${r.error}`);
+  scheduleTrayUpdate();
+}
+
 function registerIpc(): void {
+  registerHiveIpc({ host: () => brainHost, window: () => mainWindow, assertTrustedSender });
   ipcMain.handle(IPC.brainStatus, (event) => {
     assertTrustedSender(event);
     return brainHost?.status ?? { state: 'starting', message: 'Starting the Brain…' };
@@ -146,6 +190,8 @@ if (!app.requestSingleInstanceLock()) {
     tray = createTray({
       iconPath: trayIcon,
       onOpen: showWindow,
+      onPause: () => void hiveCommand({ type: 'pause', reason: 'Paused from the tray.' }),
+      onResume: () => void hiveCommand({ type: 'resume' }),
       onQuit: () => {
         quitting = true;
         app.quit();

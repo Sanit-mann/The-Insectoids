@@ -38,7 +38,7 @@ export const SCREENS: readonly ScreenDef[] = [
   { id: 'approvals', label: 'Approvals', icon: Inbox, phase: 1, blurb: 'Everything the hive is waiting on you for.' },
   { id: 'taskboard', label: 'Taskboard', icon: Columns3, phase: 1, blurb: 'Task cards by wave and status. Insects pull cards for their caste.' },
   { id: 'hive', label: 'Hive', icon: Hexagon, phase: 1, blurb: 'Every agent: task, model, effort, tokens and live output.' },
-  { id: 'brain', label: 'Brain', icon: Brain, phase: 2, blurb: 'The shared memory: decisions, files, tasks, facts and how they link.' },
+  { id: 'brain', label: 'Brain', icon: Brain, phase: 1, blurb: 'The shared memory: decisions, files, tasks, facts and how they link.' },
   { id: 'changes', label: 'Changes', icon: GitBranch, phase: 1, blurb: 'What each card changed, undo, and merging into your main branch.' },
   { id: 'library', label: 'Library', icon: BookOpen, phase: 2, blurb: 'Agents, skills and tools: active and dormant.' },
   { id: 'connections', label: 'Connections', icon: Plug, phase: 2, blurb: 'AI engines, API providers, services and the vault.' },

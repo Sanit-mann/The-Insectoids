@@ -124,6 +124,19 @@ export class Workspace {
     return this.#serial(() => this.#undoMainMergeImpl(goalId, approval, target));
   }
 
+  /**
+   * Re-applies a goal on the user's branch after `undoMainMerge` (needs approval). A plain second merge
+   * would change nothing (git already counts the goal as merged), so this reverts the undo commit.
+   */
+  redoMainMerge(goalId: string, approval: Approval, target = 'main'): Promise<void> {
+    return this.#serial(() => this.#redoMainMergeImpl(goalId, approval, target));
+  }
+
+  /** What has been undone for a goal: card ids reverted on the hive branch, and whether the goal was reset. */
+  undoState(goalId: string): Promise<{ cards: string[]; goalReset: boolean }> {
+    return this.#serial(() => this.#undoStateImpl(goalId));
+  }
+
   diffCard(goalId: string, cardId: string): Promise<{ files: FileChange[]; patch: string }> {
     return this.#serial(() => this.#diffCardImpl(goalId, cardId));
   }
@@ -245,6 +258,8 @@ export class Workspace {
     }
     const sha = await this.#git(this.#repo, ['rev-parse', 'HEAD']);
     await this.#git(this.#repo, ['update-ref', this.#ref(goalId, 'main-merge'), sha]);
+    // main-last: the newest commit that applied or un-applied this goal on the user's branch.
+    await this.#git(this.#repo, ['update-ref', this.#ref(goalId, 'main-last'), sha]);
     return sha;
   }
 
@@ -253,9 +268,36 @@ export class Workspace {
     if (!approval.approvedBy) throw new ApprovalRequiredError(`Undoing goal ${goalId} in ${target}`);
     assertId(goalId);
     await this.#assertUserCheckoutReady(target);
-    const sha = await this.#git(this.#repo, ['rev-parse', this.#ref(goalId, 'main-merge')]);
+    const last = await this.#tryGit(this.#repo, ['rev-parse', '--verify', '--quiet', this.#ref(goalId, 'main-last')]);
+    const sha = last ?? (await this.#git(this.#repo, ['rev-parse', this.#ref(goalId, 'main-merge')]));
+    // The first undo reverts the merge commit (-m 1); after a redo, it reverts the redo commit.
+    const parents = (await this.#git(this.#repo, ['rev-list', '--parents', '-n', '1', sha])).split(' ').length - 1;
     const identity = await this.#userIdentityOrHive();
-    await this.#git(this.#repo, [...identity, 'revert', '-m', '1', '--no-edit', sha]);
+    await this.#git(this.#repo, [...identity, 'revert', ...(parents > 1 ? ['-m', '1'] : []), '--no-edit', sha]);
+    await this.#git(this.#repo, ['update-ref', this.#ref(goalId, 'main-last'), await this.#git(this.#repo, ['rev-parse', 'HEAD'])]);
+  }
+
+  async #redoMainMergeImpl(goalId: string, approval: Approval, target = 'main'): Promise<void> {
+    if (!approval.approvedBy) throw new ApprovalRequiredError(`Redoing goal ${goalId} in ${target}`);
+    assertId(goalId);
+    await this.#assertUserCheckoutReady(target);
+    const last = await this.#git(this.#repo, ['rev-parse', this.#ref(goalId, 'main-last')]);
+    const merge = await this.#git(this.#repo, ['rev-parse', this.#ref(goalId, 'main-merge')]);
+    if (last === merge) throw new Error(`Goal ${goalId} is already applied on ${target}; there is nothing to redo.`);
+    const identity = await this.#userIdentityOrHive();
+    await this.#git(this.#repo, [...identity, 'revert', '--no-edit', last]);
+    await this.#git(this.#repo, ['update-ref', this.#ref(goalId, 'main-last'), await this.#git(this.#repo, ['rev-parse', 'HEAD'])]);
+  }
+
+  async #undoStateImpl(goalId: string): Promise<{ cards: string[]; goalReset: boolean }> {
+    assertId(goalId);
+    const undone = await this.#git(this.#repo, ['for-each-ref', '--format=%(refname)', `refs/insectoids/goals/${goalId}/cards/`]);
+    const cards = undone
+      .split('\n')
+      .map((r) => /\/cards\/([^/]+)\/undone$/.exec(r.trim())?.[1])
+      .filter((c): c is string => Boolean(c));
+    const archived = await this.#git(this.#repo, ['for-each-ref', '--count=1', '--format=%(refname)', `refs/insectoids/archive/${goalId}/`]);
+    return { cards, goalReset: archived.trim().length > 0 };
   }
 
   async #diffCardImpl(goalId: string, cardId: string): Promise<{ files: FileChange[]; patch: string }> {

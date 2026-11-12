@@ -127,6 +127,13 @@ describe('links: a graph from real connections only', () => {
 });
 
 describe('search and tiered reading (Memory 01-D7)', () => {
+  it('finds a record by a pasted sentence with punctuation and file names', () => {
+    const { id } = brain.write({ kind: 'task', shelf: 'site', title: 'Goal: Say hello: add a hello.txt and a README note', body: 'Say hello.' }, user);
+    expect(brain.search('Say hello: add a hello.txt and a README note', { shelf: 'site' }).map((h) => h.id)).toEqual([id]);
+    expect(brain.search('hello.txt', { shelf: 'site' }).map((h) => h.id)).toEqual([id]);
+    expect(brain.search('... !!!', { shelf: 'site' })).toEqual([]);
+  });
+
   beforeEach(() => {
     brain.write({ kind: 'decision', shelf: 'site', title: 'Use Astro for the blog', body: 'Static pages and Markdown posts.' }, user);
     brain.write({ kind: 'fact', shelf: 'site', title: 'Brand font', body: 'The brand font is Satoshi.' }, user);
@@ -164,5 +171,19 @@ describe('search and tiered reading (Memory 01-D7)', () => {
     expect(card).toContain('Use Astro for the blog');
     expect(card).not.toContain('Ghost blog');
     expect(Math.ceil(card.length / 4)).toBeLessThanOrEqual(300);
+  });
+});
+
+describe('recent records (Brain screen browsing)', () => {
+  it('lists the newest records on the shelf plus global, never other projects or archived ones', () => {
+    const a = brain.write({ kind: 'task', shelf: 'site', title: 'A', body: 'a' }, user).id;
+    clock += 10;
+    const g = brain.write({ kind: 'fact', shelf: 'global', title: 'G', body: 'g' }, user).id;
+    clock += 10;
+    brain.write({ kind: 'task', shelf: 'shop', title: 'S', body: 's' }, user);
+    const gone = brain.write({ kind: 'task', shelf: 'site', title: 'Old', body: 'o' }, user).id;
+    brain.archive(gone, user);
+    expect(brain.recent({ shelf: 'site' }).map((h) => h.id)).toEqual([g, a]);
+    expect(brain.recent({ shelf: 'site', kinds: ['task'] }).map((h) => h.id)).toEqual([a]);
   });
 });

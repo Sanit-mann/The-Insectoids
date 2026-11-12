@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import type { HiveApi } from './hive-api';
 
 /**
  * Typed contract between the renderer and the main process.
@@ -30,4 +31,5 @@ export type BrainStatus = z.infer<typeof BrainStatusSchema>;
 export interface InsectoidsApi {
   appInfo(): Promise<AppInfo>;
   brainStatus(): Promise<BrainStatus>;
+  hive: HiveApi;
 }

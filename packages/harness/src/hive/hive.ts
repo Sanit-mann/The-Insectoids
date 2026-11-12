@@ -53,13 +53,41 @@ export interface HiveEvent {
     | 'card-rejected'
     | 'engine'
     | 'budget'
-    | 'paused';
+    | 'paused'
+    | 'resumed'
+    | 'run-started'
+    | 'run-ended'
+    | 'goal-cancelled'
+    | 'card-undone'
+    | 'goal-undone'
+    | 'merge-undone'
+    | 'merge-redone';
   goalId?: string;
   cardId?: string;
   agentId?: string;
   message: string;
   engineEvent?: ClaudeEvent;
+  /** Set on run-started, engine and run-ended: which run (one agent session) this is about. */
+  run?: RunInfo;
 }
+
+/** One agent run, for the Hive monitor's lanes. */
+export interface RunInfo {
+  runId: string;
+  role: EngineRequest['role'];
+  title: string;
+  /** Planned by the router; the engine's init event reports what actually ran. */
+  model: string;
+  effort: string;
+  /** run-ended only. */
+  ok?: boolean;
+  error?: string;
+  tokens?: number;
+  costUsd?: number;
+}
+
+/** Where a goal stands on the user's branch (Workspace 06-D3, D6). */
+export type MergeState = 'not-merged' | 'awaiting-approval' | 'merged' | 'undone';
 
 interface Job {
   kind: 'insect' | 'inspector';
@@ -85,6 +113,8 @@ export class Hive {
   readonly #o: HiveOptions;
   readonly #jobs = new Map<string, Job>();
   #ants = 0;
+  #runs = 0;
+  readonly #deciding = new Set<string>();
   #paused = false;
   /** "Ask" rules the user approved, per card (Hive 02-D7). */
   readonly #approved = new Map<string, string[]>();
@@ -137,13 +167,30 @@ export class Hive {
 
   /** The user approves an item in the inbox; the hive acts on it. */
   async approve(approvalId: string): Promise<void> {
-    const a = this.#o.brain.approvals.decide(approvalId, 'approved', { type: 'user' });
-    await this.#act(a, true);
+    await this.#decide(approvalId, true);
   }
 
   async deny(approvalId: string): Promise<void> {
-    const a = this.#o.brain.approvals.decide(approvalId, 'denied', { type: 'user' });
-    await this.#act(a, false);
+    await this.#decide(approvalId, false);
+  }
+
+  /**
+   * Acts first, then records the decision: if the action fails (e.g. a merge meets uncommitted work in
+   * the project), the item stays waiting and the error goes back to the user instead of a false "approved".
+   */
+  async #decide(approvalId: string, yes: boolean): Promise<void> {
+    const { approvals } = this.#o.brain;
+    const a = approvals.get(approvalId);
+    if (!a) throw new Error(`No approval ${approvalId}`);
+    if (a.status !== 'waiting') throw new Error('This was already decided.');
+    if (this.#deciding.has(approvalId)) throw new Error('Already working on this decision.');
+    this.#deciding.add(approvalId);
+    try {
+      await this.#act(a, yes);
+      approvals.decide(approvalId, yes ? 'approved' : 'denied', { type: 'user' });
+    } finally {
+      this.#deciding.delete(approvalId);
+    }
   }
 
   /** Watchdog breaker: stop every agent now and pause dispatching. */
@@ -155,6 +202,97 @@ export class Hive {
 
   resume(): void {
     this.#paused = false;
+    this.#emit({ type: 'resumed', message: 'Hive resumed.' });
+  }
+
+  /** The user stops a goal: its agents stop, its open approvals are closed, nothing is merged. */
+  async cancelGoal(goalId: string): Promise<void> {
+    const { brain } = this.#o;
+    const goal = brain.goals.get(goalId);
+    if (!goal) throw new Error(`No goal ${goalId}`);
+    if (goal.status === 'done' || goal.status === 'cancelled') return;
+    const jobs = [...this.#jobs.values()].filter((j) => j.cardId.startsWith(`${goalId}.`));
+    for (const j of jobs) j.stop();
+    await Promise.allSettled(jobs.map((j) => j.done));
+    for (const a of brain.approvals.list({ status: 'waiting', goalId })) brain.approvals.decide(a.id, 'denied', { type: 'user' });
+    brain.goals.setStatus(goalId, 'cancelled');
+    this.#emit({ type: 'goal-cancelled', goalId, message: 'Goal cancelled.' });
+  }
+
+  /** Revert one verified card on the goal's hive branch; history is kept (Workspace 06-D6). */
+  async undoCard(cardId: string): Promise<void> {
+    const { brain, workspace } = this.#o;
+    const card = brain.taskboard.get(cardId);
+    if (!card) throw new Error(`No card ${cardId}`);
+    if (card.status !== 'done') throw new Error(`Only verified cards can be undone; ${local(cardId)} is ${card.status}.`);
+    if (this.mergeState(card.goalId) === 'merged') throw new Error('This goal is already in your main branch. Undo the merge first.');
+    await workspace.undoCard(card.goalId, wsId(card));
+    brain.write({ kind: 'outcome', shelf: this.#o.shelf, title: `Undid ${local(cardId)}: ${card.title}`, body: 'Reverted on the hive branch by the user.', source: cardId }, { type: 'user' });
+    this.#emit({ type: 'card-undone', goalId: card.goalId, cardId, message: card.title });
+  }
+
+  /** Reset the goal's hive branch to its checkpoint (the old tip is archived, never deleted). */
+  async undoGoal(goalId: string): Promise<void> {
+    const { brain, workspace } = this.#o;
+    const goal = brain.goals.get(goalId);
+    if (!goal) throw new Error(`No goal ${goalId}`);
+    if (this.mergeState(goalId) === 'merged') throw new Error('This goal is already in your main branch. Undo the merge first.');
+    if (!['done', 'cancelled', 'stuck'].includes(goal.status)) await this.cancelGoal(goalId);
+    await workspace.undoGoal(goalId);
+    brain.write({ kind: 'outcome', shelf: this.#o.shelf, title: `Undid goal: ${goal.title}`, body: `The hive branch was reset to its checkpoint.`, source: goalId }, { type: 'user' });
+    this.#emit({ type: 'goal-undone', goalId, message: goal.title });
+  }
+
+  /** Ask the user to take a merged goal back out of main (destructive, so hold-to-approve in the UI). */
+  requestUndoMerge(goalId: string): void {
+    this.#requestMergeFlip(goalId, 'undo-merge');
+  }
+
+  /** Ask the user to put an undone goal back into main. */
+  requestRedoMerge(goalId: string): void {
+    this.#requestMergeFlip(goalId, 'redo-merge');
+  }
+
+  /**
+   * Where the goal stands on the user's branch, from its merge approvals (newest decision wins;
+   * denied ones change nothing).
+   */
+  mergeState(goalId: string): MergeState {
+    const merges = this.#o.brain.approvals
+      .list({ goalId })
+      .filter((a) => a.kind === 'merge')
+      .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+    if (merges.some((a) => a.status === 'waiting')) return 'awaiting-approval';
+    for (const a of merges) {
+      if (a.status !== 'approved') continue;
+      const action = (a.payload as { action?: string } | null)?.action;
+      if (action === 'undo-merge') return 'undone';
+      if (action === 'merge-goal' || action === 'redo-merge') return 'merged';
+    }
+    return 'not-merged';
+  }
+
+  #requestMergeFlip(goalId: string, action: 'undo-merge' | 'redo-merge'): void {
+    const goal = this.#o.brain.goals.get(goalId);
+    if (!goal) throw new Error(`No goal ${goalId}`);
+    const state = this.mergeState(goalId);
+    const need = action === 'undo-merge' ? 'merged' : 'undone';
+    if (state !== need) {
+      throw new Error(action === 'undo-merge' ? `"${goal.title}" is not in your main branch (${state}).` : `"${goal.title}" has no undone merge to redo (${state}).`);
+    }
+    const undo = action === 'undo-merge';
+    this.#ask({
+      goalId,
+      kind: 'merge',
+      title: undo ? `Undo "${goal.title}" in your main branch` : `Put "${goal.title}" back into your main branch`,
+      from: 'You',
+      whyItNeedsYou: 'Your main branch changes only with your approval (Workspace D3).',
+      ifYouSayYes: undo
+        ? 'A new commit on main reverses this goal. Nothing is deleted; you can put it back later.'
+        : 'A new commit on main re-applies this goal exactly as it was merged.',
+      destructive: undo,
+      payload: { action, goalId },
+    });
   }
 
   /** One Foreman pass. */
@@ -198,6 +336,7 @@ export class Hive {
       const result = await this.#runEngine(goal.id, undefined, {
         role: 'queen',
         agentId: 'Queen',
+        title: `Plan: ${goal.title}`,
         cwd: this.#o.repoDir,
         system: base.system,
         task,
@@ -305,6 +444,7 @@ export class Hive {
         result = await this.#runEngine(goal.id, card.id, {
           role: card.caste,
           agentId,
+          title: card.title,
           cwd: cardPath,
           system: prompt.system,
           task: prompt.task,
@@ -386,6 +526,7 @@ export class Hive {
       const result = await this.#runEngine(goal.id, card.id, {
         role: 'inspector',
         agentId: 'Inspector',
+        title: `Verify: ${card.title}`,
         cwd: cardPath,
         system: prompt.system,
         task: prompt.task,
@@ -460,6 +601,14 @@ export class Hive {
       brain.goals.setStatus(p.goalId, 'done');
       brain.write({ kind: 'outcome', shelf: this.#o.shelf, title: `Goal ${yes ? 'merged' : 'finished without merging'}: ${brain.goals.get(p.goalId)!.title}`, body: yes ? 'Merged into main.' : `Left on branch hive/${p.goalId}.` }, { type: 'user' });
       this.#emit({ type: 'goal-done', goalId: p.goalId, message: yes ? 'Merged into main.' : 'Finished; not merged.' });
+    } else if ((p.action === 'undo-merge' || p.action === 'redo-merge') && p.goalId) {
+      if (!yes) return;
+      const goal = brain.goals.get(p.goalId)!;
+      if (p.action === 'undo-merge') await workspace.undoMainMerge(p.goalId, { approvedBy: 'user' });
+      else await workspace.redoMainMerge(p.goalId, { approvedBy: 'user' });
+      const undo = p.action === 'undo-merge';
+      brain.write({ kind: 'outcome', shelf: this.#o.shelf, title: `${undo ? 'Undid' : 'Re-applied'} goal in main: ${goal.title}`, body: undo ? 'Reverted on main by a new commit.' : 'Re-applied on main by a new commit.', source: p.goalId }, { type: 'user' });
+      this.#emit({ type: undo ? 'merge-undone' : 'merge-redone', goalId: p.goalId, message: goal.title });
     } else if (p.action === 'raise-budget' && p.goalId) {
       if (yes) {
         const g = brain.goals.get(p.goalId)!;
@@ -496,16 +645,38 @@ export class Hive {
   }
 
   async #runWith(goalId: string, cardId: string | undefined, req: EngineRequest, onStop?: (stop: () => void) => void): Promise<EngineResult> {
-    const run = this.#o.engine.run({
-      ...req,
-      onEvent: (e) => {
-        req.onEvent?.(e);
-        this.#emit({ type: 'engine', goalId, ...(cardId ? { cardId } : {}), agentId: req.agentId, message: e.kind, engineEvent: e });
-      },
+    const info: RunInfo = {
+      runId: `${req.agentId}#${++this.#runs}`,
+      role: req.role,
+      title: req.title ?? req.agentId,
+      model: req.route.model,
+      effort: req.route.effort,
+    };
+    const ids = { goalId, ...(cardId ? { cardId } : {}), agentId: req.agentId };
+    this.#emit({ type: 'run-started', ...ids, message: info.title, run: info });
+    let result: EngineResult;
+    try {
+      const run = this.#o.engine.run({
+        ...req,
+        onEvent: (e) => {
+          req.onEvent?.(e);
+          this.#emit({ type: 'engine', ...ids, message: e.kind, engineEvent: e, run: info });
+        },
+      });
+      onStop?.(run.stop);
+      result = await run.done;
+    } catch (err) {
+      this.#emit({ type: 'run-ended', ...ids, message: 'crash', run: { ...info, ok: false, error: 'crash' } });
+      throw err;
+    }
+    const tokens = runTokens(result.usage);
+    this.#o.brain.goals.addSpend(goalId, tokens, result.costUsd);
+    this.#emit({
+      type: 'run-ended',
+      ...ids,
+      message: result.ok ? 'ok' : (result.error ?? 'error'),
+      run: { ...info, ...(result.model ? { model: result.model } : {}), ok: result.ok, ...(result.error ? { error: result.error } : {}), tokens, costUsd: result.costUsd },
     });
-    onStop?.(run.stop);
-    const result = await run.done;
-    this.#o.brain.goals.addSpend(goalId, runTokens(result.usage), result.costUsd);
     return result;
   }
 

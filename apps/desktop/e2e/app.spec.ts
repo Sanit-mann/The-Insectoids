@@ -23,22 +23,24 @@ test.afterAll(async () => {
   await app?.close();
 });
 
-test('opens with the rail and an empty Queen screen', async () => {
+test('opens with the rail and asks for a project first', async () => {
   await expect(win).toHaveTitle('The Insectoids');
   const nav = win.getByRole('navigation', { name: 'Main' });
   await expect(nav).toBeVisible();
   await expect(nav.getByRole('button')).toHaveCount(10);
   await expect(nav.getByRole('button', { name: 'Queen' })).toHaveAttribute('aria-current', 'page');
-  await expect(win.getByRole('heading', { name: 'Give the hive its first goal' })).toBeVisible();
+  // No project yet (this spec launches without one): the Queen asks for a folder before anything else.
+  await expect(win.getByRole('heading', { name: 'Choose a project for the hive' })).toBeVisible();
   await expect(win.getByRole('complementary', { name: 'Hive status' })).toBeVisible();
 });
 
-test('shows the brand logo in the rail and on the Queen screen', async () => {
+test('shows the brand logo, and it loads under the CSP', async () => {
   const marks = win.getByTestId('brand-mark');
-  await expect(marks).toHaveCount(2);
+  await expect(marks.first()).toBeVisible();
   // naturalWidth is 0 when an image fails to load (e.g. blocked by the Content-Security-Policy).
   const loaded = await marks.evaluateAll((imgs) => imgs.map((img) => (img as unknown as { naturalWidth: number }).naturalWidth > 0));
-  expect(loaded).toEqual([true, true]);
+  expect(loaded.length).toBeGreaterThan(0);
+  expect(loaded.every(Boolean)).toBe(true);
 });
 
 test('the Brain runs in its own process and reports ready', async () => {
@@ -51,6 +53,8 @@ test('the Brain runs in its own process and reports ready', async () => {
   // The `brain` CLI launchers insects get on their PATH.
   expect(existsSync(join(userData, 'bin', 'brain.cmd'))).toBe(true);
   expect(existsSync(join(userData, 'bin', 'brain'))).toBe(true);
+  // The guard hook launcher (keeps ELECTRON_RUN_AS_NODE out of Claude's environment).
+  expect(existsSync(join(userData, 'hooks', process.platform === 'win32' ? 'guard-hook.cmd' : 'guard-hook'))).toBe(true);
 });
 
 test('the renderer reaches the main process through the validated bridge', async () => {
@@ -66,11 +70,11 @@ test('the renderer has no Node access', async () => {
 });
 
 test('switches screens from the rail', async () => {
-  await win.getByRole('button', { name: 'Taskboard' }).click();
-  await expect(win.getByRole('heading', { level: 1, name: 'Taskboard' })).toBeVisible();
-  await expect(win.getByText('Arrives in Phase 1')).toBeVisible();
+  await win.getByRole('button', { name: 'Library' }).click();
+  await expect(win.getByRole('heading', { level: 1, name: 'Library' })).toBeVisible();
+  await expect(win.getByText('Arrives in Phase 2')).toBeVisible();
   await win.getByRole('button', { name: 'Queen' }).click();
-  await expect(win.getByRole('heading', { name: 'Give the hive its first goal' })).toBeVisible();
+  await expect(win.getByRole('heading', { name: 'Choose a project for the hive' })).toBeVisible();
 });
 
 test('toggles between dark and light themes', async () => {

@@ -214,6 +214,36 @@ describe('merging into your main branch needs your approval (Workspace 06-D3)', 
     await ws.undoMainMerge('G-1', { approvedBy: 'user' });
     expect(existsSync(join(repo, 'pricing.txt'))).toBe(false);
   });
+
+  it('undo, redo, undo, redo: each step flips the goal on main, always with approval', async () => {
+    await ws.mergeIntoMain('G-1', { approvedBy: 'user' });
+    await expect(ws.redoMainMerge('G-1', { approvedBy: 'user' })).rejects.toThrow(/already applied/);
+    await expect(ws.redoMainMerge('G-1', { approvedBy: null })).rejects.toThrow(ApprovalRequiredError);
+    for (let i = 0; i < 2; i++) {
+      await ws.undoMainMerge('G-1', { approvedBy: 'user' });
+      expect(existsSync(join(repo, 'pricing.txt'))).toBe(false);
+      await ws.redoMainMerge('G-1', { approvedBy: 'user' });
+      expect(read(repo, 'pricing.txt')).toBe('three plans\n');
+    }
+    expect(git(repo, 'status', '--porcelain')).toBe('');
+  });
+});
+
+describe('undo state', () => {
+  it('reports undone cards and a reset goal', async () => {
+    await ws.startGoal('G-1');
+    for (const id of ['C-01', 'C-02']) {
+      const c = await ws.createCard('G-1', id);
+      writeFileSync(join(c.path, `${id}.txt`), id);
+      await ws.commitCard('G-1', id, { message: id, insect: 'Ant-1' });
+      await ws.mergeCard('G-1', id, id);
+    }
+    expect(await ws.undoState('G-1')).toEqual({ cards: [], goalReset: false });
+    await ws.undoCard('G-1', 'C-02');
+    expect(await ws.undoState('G-1')).toEqual({ cards: ['C-02'], goalReset: false });
+    await ws.undoGoal('G-1');
+    expect(await ws.undoState('G-1')).toEqual({ cards: ['C-02'], goalReset: true });
+  });
 });
 
 describe('changes view', () => {

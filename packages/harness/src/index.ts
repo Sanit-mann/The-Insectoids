@@ -8,3 +8,4 @@ export * from './hive/hive';
 export * from './hive/prompts';
 export * from './hive/protocol';
 export * from './hive/router';
+export * from './hive/demo';

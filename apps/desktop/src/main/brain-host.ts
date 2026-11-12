@@ -1,8 +1,8 @@
 import { randomBytes } from 'node:crypto';
 import { type UtilityProcess, utilityProcess } from 'electron';
 import { BrainClient, makeEndpoint } from '@insectoids/brain-service';
-import type { BrainStatus } from '@insectoids/shared';
-import type { DoorPaths, FromHost, ToHost } from '../brain-host/messages';
+import type { BrainStatus, HivePush } from '@insectoids/shared';
+import type { DoorPaths, FromHost, HiveSetup, HostMethod, ToHost } from '../brain-host/messages';
 
 /** Restart delays after a crash: quick at first, then capped so a broken host doesn't spin. */
 const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
@@ -10,6 +10,8 @@ const BACKOFF_MS = [1_000, 2_000, 5_000, 10_000, 30_000];
 const HEALTHY_AFTER_MS = 60_000;
 /** Give a starting host this long to open the Brain and listen. */
 const START_TIMEOUT_MS = 20_000;
+/** A host RPC that takes longer than this fails (the host keeps working; the UI re-reads on the next push). */
+const RPC_TIMEOUT_MS = 30_000;
 
 export const restartDelay = (attempt: number): number => BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)]!;
 
@@ -18,6 +20,9 @@ export interface BrainHostOptions {
   entry: string;
   dbPath: string;
   doors: DoorPaths;
+  hive: HiveSetup;
+  /** Hive pushes (changed / agent-output), forwarded to the window. */
+  onPush?: (p: HivePush) => void;
   onStatus?: (s: BrainStatus) => void;
   log?: (line: string) => void;
 }
@@ -38,6 +43,8 @@ export class BrainHost {
   #stopping = false;
   #retry: NodeJS.Timeout | null = null;
   #startTimer: NodeJS.Timeout | null = null;
+  #rpcId = 0;
+  readonly #pending = new Map<number, { resolve: (v: unknown) => void; reject: (e: Error) => void; timer: NodeJS.Timeout }>();
 
   constructor(o: BrainHostOptions) {
     this.#o = o;
@@ -62,7 +69,7 @@ export class BrainHost {
     proc.on('message', (m: FromHost) => void this.#onMessage(m));
     proc.on('exit', (code) => this.#onExit(proc, code));
     proc.once('spawn', () => {
-      const msg: ToHost = { type: 'start', dbPath: this.#o.dbPath, endpoint: this.endpoint, masterToken: this.#masterToken, doors: this.#o.doors };
+      const msg: ToHost = { type: 'start', dbPath: this.#o.dbPath, endpoint: this.endpoint, masterToken: this.#masterToken, doors: this.#o.doors, hive: this.#o.hive };
       proc.postMessage(msg);
     });
     this.#startTimer = setTimeout(() => {
@@ -96,7 +103,36 @@ export class BrainHost {
     });
   }
 
+  /** Call the hive in the host (typed RPC over parentPort). Rejects when the host is down or slow. */
+  call(method: HostMethod, params?: unknown): Promise<unknown> {
+    const proc = this.#proc;
+    if (!proc || this.#status.state !== 'ready') return Promise.reject(new Error(this.#status.message));
+    const id = ++this.#rpcId;
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.#pending.delete(id);
+        reject(new Error(`The hive did not answer within ${RPC_TIMEOUT_MS / 1000} s.`));
+      }, RPC_TIMEOUT_MS);
+      this.#pending.set(id, { resolve, reject, timer });
+      const msg: ToHost = { type: 'rpc', id, method, ...(params === undefined ? {} : { params }) };
+      proc.postMessage(msg);
+    });
+  }
+
   async #onMessage(m: FromHost): Promise<void> {
+    if (m.type === 'push') {
+      this.#o.onPush?.(m.push);
+      return;
+    }
+    if (m.type === 'rpc-result') {
+      const p = this.#pending.get(m.id);
+      if (!p) return;
+      this.#pending.delete(m.id);
+      clearTimeout(p.timer);
+      if (m.ok) p.resolve(m.result);
+      else p.reject(new Error(m.error));
+      return;
+    }
     if (m.type === 'failed') {
       this.#o.log?.(`[brain] failed to start: ${m.message}`);
       this.#set({ state: 'failed', message: `The Brain could not start: ${m.message}` });
@@ -124,6 +160,7 @@ export class BrainHost {
     this.#clearStartTimer();
     this.#client?.close();
     this.#client = null;
+    this.#failPending('The Brain host stopped.');
     if (this.#stopping) return;
     if (this.#readyAt && Date.now() - this.#readyAt > HEALTHY_AFTER_MS) this.#attempt = 0;
     this.#readyAt = 0;
@@ -134,6 +171,14 @@ export class BrainHost {
       this.#retry = null;
       this.start();
     }, delay);
+  }
+
+  #failPending(message: string): void {
+    for (const p of this.#pending.values()) {
+      clearTimeout(p.timer);
+      p.reject(new Error(message));
+    }
+    this.#pending.clear();
   }
 
   #clearStartTimer(): void {

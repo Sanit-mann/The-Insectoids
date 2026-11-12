@@ -34,7 +34,10 @@ export function Rail({ active, onSelect, approvals }: RailProps) {
             <Icon size={18} strokeWidth={1.8} aria-hidden="true" />
             {label}
             {id === 'approvals' && approvals > 0 && (
-              <span className="ml-auto rounded-full bg-honey px-2 text-xs font-semibold text-honey-ink">{approvals}</span>
+              <span className="ml-auto rounded-full bg-honey px-2 text-xs font-semibold text-honey-ink" data-testid="approvals-badge">
+                {approvals}
+                <span className="sr-only"> waiting for you</span>
+              </span>
             )}
           </button>
         );

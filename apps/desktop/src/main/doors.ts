@@ -23,3 +23,11 @@ export function resolveDoorPaths(o: { mainDir: string; isPackaged: boolean; reso
     brainCli: join(packages, 'brain-cli', 'dist', 'brain.mjs'),
   };
 }
+
+/**
+ * The agents/skills library the hive builds prompts from. Dev: the repo's `library/` folder.
+ * TODO(Phase 3, packaging): ship it in resources/library.
+ */
+export function resolveLibraryDir(o: { mainDir: string; isPackaged: boolean; resourcesPath: string }): string {
+  return o.isPackaged ? join(o.resourcesPath, 'library') : join(o.mainDir, '..', '..', '..', '..', 'library');
+}

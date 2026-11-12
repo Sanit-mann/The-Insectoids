@@ -11,6 +11,8 @@ import type { Route } from './router';
 export interface EngineRequest {
   role: 'queen' | 'inspector' | Caste;
   agentId: string;
+  /** What this run works on, for display (goal or card title). */
+  title?: string;
   /** Folder the agent works in. */
   cwd: string;
   system: string;
