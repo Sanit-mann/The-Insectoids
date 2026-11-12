@@ -11,8 +11,8 @@ interface TrayOptions {
  * Hive status and Pause arrive with the hive itself in Phase 1.
  */
 export function createTray({ iconPath, onOpen, onQuit }: TrayOptions): Tray {
-  const icon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
-  const tray = new Tray(icon);
+  // No resizing here: the icon files already hold pre-rendered small sizes (see scripts/make-icons.mjs).
+  const tray = new Tray(nativeImage.createFromPath(iconPath));
   tray.setToolTip('The Insectoids · hive idle');
   tray.setContextMenu(
     Menu.buildFromTemplate([

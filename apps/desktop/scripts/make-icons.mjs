@@ -1,7 +1,7 @@
 // Builds every app icon from the brand logo (design/brand/as.png).
 //   resources/icon.png      512 px window icon
 //   resources/icon.ico      Windows icon (16-256 px, PNG-compressed entries)
-//   resources/tray.png      32 px tray icon (Electron scales to 16 px at 100%)
+//   resources/tray.png      16 px tray icon for macOS/Linux, plus tray@2x.png (32 px); Windows uses icon.ico
 //   src/renderer/src/assets/logo-*.png   in-app logo (rail 26 px, Queen screen 64 px, each at 1x and 2x)
 //   design/brand/icon-preview.png        small sizes zoomed in, on dark and light backgrounds
 // Usage: pnpm --filter @insectoids/desktop icons
@@ -202,9 +202,10 @@ const png = (s) => encode(imgs.get(s));
 mkdirSync(at('../resources/'), { recursive: true });
 mkdirSync(at('../src/renderer/src/assets/'), { recursive: true });
 writeFileSync(at('../resources/icon.png'), png(512));
-writeFileSync(at('../resources/tray.png'), png(32));
+writeFileSync(at('../resources/tray.png'), png(16));
+writeFileSync(at('../resources/tray@2x.png'), png(32));
 writeFileSync(at('../resources/icon.ico'), ico([16, 24, 32, 48, 64, 128, 256].map((size) => ({ size, data: png(size) }))));
 // In-app logo at the exact sizes the UI shows it (1x and 2x), so small sizes get the thickened lines.
 for (const s of [26, 52, 64, 128]) writeFileSync(at(`../src/renderer/src/assets/logo-${s}.png`), png(s));
 writeFileSync(at('../../../design/brand/icon-preview.png'), preview([16, 24, 32, 48].map((size) => ({ size, img: imgs.get(size) }))));
-console.log(`master ${master.w}px square, lines ${stroke}px; wrote icon.png, icon.ico, tray.png, logo-26/52/64/128.png, icon-preview.png`);
+console.log(`master ${master.w}px square, lines ${stroke}px; wrote icon.png, icon.ico, tray.png, tray@2x.png, logo-26/52/64/128.png, icon-preview.png`);

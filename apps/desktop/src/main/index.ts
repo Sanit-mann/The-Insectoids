@@ -14,6 +14,11 @@ const rendererDir = join(here, '../renderer');
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
 const resourcesDir = app.isPackaged ? process.resourcesPath : join(here, '../../resources');
 const isE2E = process.env['INSECTOIDS_E2E'] === '1';
+// Windows draws title bar, taskbar and tray icons at 16-32 px: the .ico carries hand-tuned small
+// sizes and Windows picks the one matching the display scale. Elsewhere, PNG (tray@2x.png is picked up automatically).
+const isWindows = process.platform === 'win32';
+const appIcon = join(resourcesDir, isWindows ? 'icon.ico' : 'icon.png');
+const trayIcon = join(resourcesDir, isWindows ? 'icon.ico' : 'tray.png');
 
 app.setName(APP_NAME);
 // Test runs get a throwaway profile: they never touch the real one, and the single-instance
@@ -40,7 +45,7 @@ function createWindow(): BrowserWindow {
     minHeight: 640,
     show: false,
     backgroundColor: '#0F0E0B',
-    icon: join(resourcesDir, 'icon.png'),
+    icon: appIcon,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(here, '../preload/index.cjs'),
@@ -105,7 +110,7 @@ if (!app.requestSingleInstanceLock()) {
     registerIpc();
     mainWindow = createWindow();
     tray = createTray({
-      iconPath: join(resourcesDir, 'tray.png'),
+      iconPath: trayIcon,
       onOpen: showWindow,
       onQuit: () => {
         quitting = true;
