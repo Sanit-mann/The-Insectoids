@@ -41,6 +41,8 @@ export const estimateTokens = (text: string): number => Math.ceil(text.length / 
 const HIVE_RULES = `## Hive rules for this run
 - You are one agent in The Insectoids hive. You never talk to the user; only the Queen does.
 - Work only inside the current folder (your card's workspace). Never push, publish, or install new dependencies yourself.
+- Don't commit, merge or switch branches: leave your changes uncommitted. The hive commits them for you when you finish,
+  with your name and the card on the commit.
 - A safety guard checks every tool call. If it says something needs the user's approval, do not retry or work around it:
   stop and end with "STATUS: BLOCKED: <what you need and why>".
 - Keep your messages compact: facts, file paths, commands and results.`;

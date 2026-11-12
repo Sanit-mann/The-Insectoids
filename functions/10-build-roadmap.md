@@ -65,7 +65,7 @@ Turn functions 01–09 into an order of work: the smallest version that proves t
   - command guard;
   - protected paths;
   - approvals.
-- **Vault** for any keys (safeStorage).
+- ~~**Vault** for any keys (safeStorage).~~ Moved to Phase 2 (2026-11-12): nothing in Phase 1 stores keys (Claude Code keeps its own login), so the Vault ships with its first user, API providers.
 - **Library:** core agents and skills loaded for the Queen, Coder, Tester and Inspector.
 - **UI:**
   - Queen chat with plan approval;
@@ -87,6 +87,7 @@ Turn functions 01–09 into an order of work: the smallest version that proves t
   6. The Brain shows the decisions, tasks and outcomes.
 
 ### Phase 2 — The Full Hive
+- **Vault** (safeStorage) for API keys, arriving with API providers (moved from Phase 1).
 - **All castes and managers:**
   - all 8 castes and all 6 managers;
   - managers' LLM "brain" side and periodic reviews;
@@ -164,3 +165,4 @@ Sequences everything in 01–09.
 - 2026-11-12 — Created: guiding rules, four phases with demos, questions.
 - 2026-11-12 — User delegated Q1–Q5 → D2–D6. Git repository initialised locally (`main`), with `.gitignore` (excludes Brain databases, vault, env files, worktrees) and `.gitattributes` (LF line endings).
 - 2026-11-12 — First local commit `1fe0aa8`. **Finalized by user;** Phase 0 started on branch `phase-0-foundation`.
+- 2026-11-12 — **Phase 1 "First Spark" complete** (branch `phase-1-first-spark`, see [docs/plans/phase-1-first-spark.md](../docs/plans/phase-1-first-spark.md)). The real end-to-end demo passed twice with Claude Code. The Vault moved from Phase 1 to Phase 2 with the user's agreement, because nothing in Phase 1 stores keys. Published to GitHub as v0.0.1.

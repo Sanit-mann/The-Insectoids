@@ -47,6 +47,11 @@ const SYSTEM = new Set(['diskpart', 'fdisk', 'parted', 'regedit', 'bcdedit', 'se
 const SCHEDULERS = new Set(['crontab', 'schtasks', 'at', 'register-scheduledtask']);
 const DB_CLIENTS = new Set(['psql', 'mysql', 'mariadb', 'sqlite3', 'sqlcmd', 'mongo', 'mongosh', 'duckdb', 'cockroach']);
 const REMOTE = new Set(['scp', 'sftp', 'ftp', 'nc', 'ncat', 'netcat', 'telnet', 'ssh']);
+/** git subcommands that create commits or move branches: only the harness does these in a card workspace. */
+const HIVE_OWNED_GIT: ReadonlySet<string> = new Set([
+  'commit', 'merge', 'rebase', 'cherry-pick', 'revert', 'am', 'pull', 'commit-tree', 'update-ref', 'switch',
+]);
+
 const PUBLISH_TOOLS: Array<[string, RegExp]> = [
   ['npm', /^(publish|unpublish|deprecate)$/],
   ['pnpm', /^publish$/],
@@ -225,6 +230,12 @@ function checkSegment(seg: Segment, ctx: GuardContext, depth: number): Verdict {
     const sub = (args[i] ?? '').toLowerCase();
     const rest = args.slice(i + 1);
     const restLower = rest.map((a) => a.toLowerCase());
+    // The harness is the single committer (Workspace 06): it commits each card with the hive identity and
+    // Insect:/Card: trailers, then merges. An insect's own commits or branch moves would skip that trail.
+    const newBranch = sub === 'checkout' && restLower.some((a) => /^(-b|-B|--orphan)$/i.test(a));
+    if (HIVE_OWNED_GIT.has(sub) || newBranch) {
+      return block('hive-commits', `"git ${sub}${newBranch ? ' -b' : ''}" is the hive's job: leave your changes uncommitted on this card's branch and the hive commits them with your name when you finish.`);
+    }
     if (sub === 'push') {
       // Force-pushing or deleting remote refs rewrites shared history: blocked. Any push needs approval.
       if (restLower.some((a) => /^(--force|-f|--force-with-lease.*|--force-if-includes|--mirror|--delete|-d|--prune)$/.test(a)) || rest.some((a) => a.startsWith('+') || a.startsWith(':'))) {

@@ -247,6 +247,31 @@ Each step ends in something that works and is tested. Core services are built te
     - `setup-backend.spec.ts` covers presets → insect cap, answers in the Brain, the secret refusal, the real Brain folder switch (`INSECTOIDS_E2E_PICK_FOLDER` replaces the dialog in tests only) and finish.
   - **Found in screenshots:** on the Balanced card, the "Recommended" badge pushed "Selected" outside the card. Fixed by wrapping the card header.
   - **Screenshots:** `design/screenshots/phase-1-step9-*.png`.
+- **Step 10 Phase 1 demo: done (2026-11-12). The Phase 1 goal works end to end with real Claude Code.**
+  - **Runner:** `apps/desktop/e2e/phase1-demo.spec.ts`, opt-in.
+    - `INSECTOIDS_DEMO=real` uses Claude Code; `=fake` is a token-free dry run of the same flow. It never runs in the normal suite.
+    - Sample project: `tiny-text`, a dependency-free Node library with one function and passing tests (`e2e/support/sample-project.ts`).
+    - Output goes to `demo-runs/<time>/` (gitignored): sample project, screenshots, `summary.json`, activity log, every agent's output.
+  - **Real run (11:31 UTC):** PASSED in 1.8 min, 83k tokens, **$0.53** (estimate was $1.5–4).
+    - **Plan:** the goal ("add `slugify(text)` … tests … README") was typed into the real Queen composer. The Queen (claude-opus-5-5, high) planned 1 wave with 2 cards (coder + tester), giving both cards one exact definition of the function, in 30 s. Under the Careful preset the plan waited for approval.
+    - **Work:** the coder (Ant-01) and tester (Ant-02) ran on claude-sonnet-5-5 in their own worktrees, 20 s each. The Inspector verified each card against every "done means" item, with evidence from `node --test`, the diff and `git status`. 0 retries.
+    - **No user approvals were needed for blocked actions,** and no guard denials appear in any output.
+    - **Merge, undo, merge again:** merge approved → `node --test` 10/10 on `main`. Undo approved → `main` matched the start exactly. Merge again approved → 10/10 again. Files: `src/index.js`, `README.md`, `test/slugify.test.js`.
+    - **Brain:** the goal task, both "verified" outcomes, and the merged / undone / re-applied outcomes.
+    - **Guard hook launcher:** works with the real CLI.
+    - **Screenshots:** `design/screenshots/phase-1-demo-*.png`.
+  - **Findings to fix:**
+    1. **Insects commit by themselves. FIXED (2026-11-12).** The coder ran `git commit` in its worktree, with Claude's own `Co-Authored-By` line. The hive still merged correctly, but these commits skipped the single committer's hive identity and the `Insect:` / `Card:` trailers.
+       - **Guard:** now blocks (`hive-commits`) every git command that creates commits or moves branches in a card workspace: `commit` (incl. `--amend`), `merge`, `rebase`, `cherry-pick`, `revert`, `am`, `pull`, `commit-tree`, `update-ref`, `switch`, `checkout -b/-B/--orphan`. It also catches them after global options and inside nested shells. The message tells the insect to leave changes uncommitted.
+       - **Hive rules:** now say "don't commit, merge or switch branches; the hive commits them for you".
+       - **Tests:** 15 new table tests. Read-only git (`status`, `diff`, `log`, `stash`, `checkout -- file`) stays allowed.
+       - **Confirmed with real Claude (run 2, 11:49 UTC):**
+         - PASSED in 1.6 min, 82k tokens, $0.51, 2 cards, 0 retries; tests passed on `main` after the merge and after the redo.
+         - Both card commits are authored by "The Insectoids" with `Insect:` / `Card:` trailers.
+         - No insect tried to commit, so the hive rule alone was enough; the guard stays as the backstop.
+         - The merge / undo / redo commits on `main` carry the project's own git identity, since the user approved them.
+    2. **Effort:** every insect and Inspector run shows effort `high`. The router asks for `medium` on normal-priority cards, so check whether the Queen marked the cards high or the engine reports a different effort than was requested.
+    3. **Plan card wording:** the Queen's plan summary is long for a chat card, and its text claimed "auto-approved" under the Careful preset. Ask for a short summary line, and keep approval wording out of the Queen's text (the hive decides it).
 - **Brain research note: ruvector (2026-11-12, for Phase 2).** We reviewed github.com/ruvnet/ruvector against our Brain spec.
   - **Verdict:** don't take it as a dependency.
   - **Why not:**

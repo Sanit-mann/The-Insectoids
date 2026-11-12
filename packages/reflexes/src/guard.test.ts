@@ -26,8 +26,10 @@ describe('ordinary work inside the workspace is allowed (Workspace 06-D5 auto mo
     'npm ci',
     'npm install',
     'git status',
-    'git add -A && git commit -m "Add pricing page"',
-    'git checkout -b feature',
+    'git add -A && git diff --cached --stat',
+    'git checkout -- src/app.ts',
+    'git log --oneline -5 && git diff HEAD~1',
+    'git stash && git stash pop',
     'rm -rf dist',
     'rm -rf ./build/cache',
     'mkdir -p src/components && echo "x" > src/components/a.ts',
@@ -90,6 +92,31 @@ describe('always blocked, whatever the AI asks (Workspace 06-D5)', () => {
     ['cmd delete outside', 'cmd /c "rd /s /q C:\\Users\\sam"'],
   ])('blocks on Windows: %s', (_label, cmd) => {
     expect(decide(cmd, win)).toBe('block');
+  });
+});
+
+describe('the hive is the single committer (Workspace 06): insects never commit or move branches', () => {
+  it.each([
+    ['commit', 'git commit -m "Add pricing page"'],
+    ['commit after add', 'git add -A && git commit -m "x"'],
+    ['amend', 'git commit --amend --no-edit'],
+    ['commit via global option', 'git -c user.name=x commit -m y'],
+    ['merge', 'git merge other'],
+    ['rebase', 'git rebase main'],
+    ['cherry-pick', 'git cherry-pick abc123'],
+    ['revert', 'git revert HEAD'],
+    ['pull', 'git pull'],
+    ['plumbing commit', 'git commit-tree HEAD^{tree} -m x'],
+    ['move a ref', 'git update-ref refs/heads/main HEAD'],
+    ['switch branch', 'git switch -c feature'],
+    ['new branch via checkout', 'git checkout -b feature'],
+    ['nested in a shell', 'bash -c "git commit -am x"'],
+  ])('blocks %s: %s', (_label, cmd) => {
+    expect(evaluateCommand(cmd, posix)).toMatchObject({ decision: 'block', rule: 'hive-commits', reason: expect.stringMatching(/hive commits them/) });
+  });
+
+  it('blocks on Windows too', () => {
+    expect(evaluateCommand('git commit -m x; if ($?) { git log }', win)).toMatchObject({ decision: 'block', rule: 'hive-commits' });
   });
 });
 

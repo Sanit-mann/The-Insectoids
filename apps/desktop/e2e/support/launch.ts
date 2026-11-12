@@ -27,6 +27,8 @@ export interface LaunchOptions {
    * false: a true first run (the setup wizard shows).
    */
   onboarded?: boolean;
+  /** Use this existing git repo as the project (kept after close). Overrides `project`. */
+  repo?: string;
   /** Extra environment for the app. */
   env?: Record<string, string>;
 }
@@ -55,7 +57,8 @@ export function makeRepo(): string {
  * wave 1 "Write hello.txt" (coder) + "Check hello.txt" (tester), wave 2 "Write README note" (coder).
  */
 export async function launchApp(opts: LaunchOptions = {}): Promise<LaunchedApp> {
-  const repo = opts.project === 'none' ? '' : makeRepo();
+  const ownRepo = !opts.repo;
+  const repo = opts.repo ?? (opts.project === 'none' ? '' : makeRepo());
   // GitHub's Linux runners block Chromium's OS sandbox; disable it there only, for tests.
   const ciLinux = Boolean(process.env['CI']) && process.platform === 'linux';
   const app = await electron.launch({
@@ -77,7 +80,7 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<LaunchedApp> 
     repo,
     close: async () => {
       await app.close().catch(() => {});
-      if (repo) rmSync(join(repo, '..'), { recursive: true, force: true, maxRetries: 3 });
+      if (repo && ownRepo) rmSync(join(repo, '..'), { recursive: true, force: true, maxRetries: 3 });
     },
   };
 }

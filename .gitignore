@@ -30,3 +30,6 @@ playwright-report/
 .DS_Store
 Thumbs.db
 *.log
+
+# Phase 1 demo runs (sample projects, screenshots, summaries)
+demo-runs/
