@@ -18,6 +18,8 @@ import {
   type BrainAccess,
   type Engine,
   type EngineAdapter,
+  type GeminiAuth,
+  type GeminiInstall,
   EngineRegistry,
   type EngineRequest,
   Hive,
@@ -28,6 +30,7 @@ import {
   claudeAdapter,
   demoEngine,
   fakeAdapter,
+  geminiAdapter,
   headlineFrom,
   plannedAdapters,
   routeCard,
@@ -89,6 +92,9 @@ export interface HiveManagerOptions {
   /** Tests: replace Claude detection (and the sign-in check, with `auth`). */
   detect?: () => Promise<ClaudeInstall>;
   auth?: (command: string) => Promise<{ loggedIn: boolean }>;
+  /** Tests: replace Gemini CLI detection and its sign-in check. Without them a test machine's own install would be checked. */
+  geminiDetect?: () => Promise<GeminiInstall>;
+  geminiAuth?: () => GeminiAuth;
   /** Tests: a custom engine instead of the demo or Claude. */
   engineOverride?: Engine;
   now?: () => number;
@@ -196,14 +202,28 @@ export class HiveManager {
       ...(this.#o.detect ? { detect: this.#o.detect } : {}),
       ...(this.#o.auth ? { auth: this.#o.auth } : {}),
     });
-    if (!scripted) return [claude, ...plannedAdapters()];
-    const { create: _never, ...listed } = claude;
-    void _never;
-    const listedOnly: EngineAdapter = {
-      ...listed,
+    const gemini = geminiAdapter({
+      // Guarded tools over MCP: Gemini CLI's own hooks fail open, so its built-in tools are denied by policy
+      // and every change goes through these. Without the bundle Gemini only gets read-only work.
+      hiveTools: doors?.hiveTools ?? null,
+      runBase: join(this.#o.userDataDir, 'hive', 'gemini-runs'),
+      ...(this.#o.geminiDetect ? { detect: this.#o.geminiDetect } : {}),
+      ...(this.#o.geminiAuth ? { auth: this.#o.geminiAuth } : {}),
+    });
+    if (!scripted) return [claude, gemini, ...plannedAdapters()];
+    const listedOnly = (a: EngineAdapter): EngineAdapter => ({
+      id: a.id,
+      name: a.name,
+      vendor: a.vendor,
+      capabilities: a.capabilities,
+      models: a.models,
+      availableIn: a.availableIn,
+      install: a.install,
+      signIn: a.signIn,
+      privacyNote: a.privacyNote,
       detect: async () => ({ state: 'missing', version: null, message: 'Not checked: the scripted engine runs everything here.' }),
-    };
-    return [scripted, listedOnly, ...plannedAdapters()];
+    });
+    return [scripted, listedOnly(claude), listedOnly(gemini), ...plannedAdapters()];
   }
 
   /** Restore the project and start checking the engine. Never throws: problems become activity lines. */

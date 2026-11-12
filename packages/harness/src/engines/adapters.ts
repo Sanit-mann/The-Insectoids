@@ -1,4 +1,8 @@
+import { existsSync } from 'node:fs';
 import { type ClaudeInstall, checkClaudeAuth, detectClaude } from '../claude/detect';
+import { type GeminiAuth, type GeminiInstall, checkGeminiAuth, detectGemini, hasMachinePolicies, machinePolicyDir } from '../gemini/detect';
+import { GeminiEngine } from '../gemini/engine';
+import type { runGemini } from '../gemini/run';
 import { ClaudeEngine, type Engine } from '../hive/engine';
 import type { EngineAdapter, EngineDetection } from './registry';
 
@@ -61,6 +65,87 @@ export function claudeAdapter(o: ClaudeAdapterOptions): EngineAdapter {
   };
 }
 
+export interface GeminiAdapterOptions {
+  /** The hive tools MCP bundle (guarded shell and file tools). Missing → Gemini gets read-only work only. */
+  hiveTools: string | null;
+  /** Where per-run settings and policies are written (outside every workspace). */
+  runBase: string;
+  /** Tests: replace detection, the sign-in check, the machine-policy check and the runner. */
+  detect?: () => Promise<GeminiInstall>;
+  auth?: () => GeminiAuth;
+  machinePolicies?: () => boolean;
+  run?: typeof runGemini;
+  exists?: (path: string) => boolean;
+  platform?: NodeJS.Platform;
+}
+
+/**
+ * Gemini CLI (Google). Its pre-tool hooks fail open, so the guard doesn't rely on them: every built-in tool
+ * is denied by a per-run admin policy and changes go through the hive's guarded MCP tools.
+ */
+export function geminiAdapter(o: GeminiAdapterOptions): EngineAdapter {
+  const exists = o.exists ?? existsSync;
+  const hasTools = (): boolean => Boolean(o.hiveTools && exists(o.hiveTools));
+  let install: Extract<GeminiInstall, { status: 'installed' }> | null = null;
+  let engine: { key: string; engine: Engine } | null = null;
+  return {
+    id: 'gemini',
+    name: 'Gemini CLI',
+    vendor: 'Google',
+    get capabilities() {
+      return { guard: hasTools() ? ('policy-and-tools' as const) : ('read-only' as const), mcp: true, effort: EFFORTS, reportsCost: false };
+    },
+    models: { strongest: 'pro', standard: 'flash', light: 'flash-lite' },
+    availableIn: null,
+    install: { command: 'npm install -g @google/gemini-cli', note: "Google's official package. Needs Node.js 20 or newer. The hive never runs it without you." },
+    signIn: { command: 'gemini', note: 'Run it once in a terminal and choose "Login with Google". The hive never sees your login.' },
+    privacyNote: 'Gemini CLI keeps its own chat logs in your user folder (~/.gemini/tmp). The hive turns its usage statistics off and never lets it spend AI credits.',
+    async detect(): Promise<EngineDetection> {
+      install = null;
+      const found = await (o.detect ?? (() => detectGemini()))();
+      if (found.status === 'missing') {
+        return { state: 'missing', version: null, message: 'Gemini CLI is not installed. Install it with npm; the hive checks again every minute.' };
+      }
+      if (found.status === 'outdated') {
+        return { state: 'outdated', version: found.version, message: `Gemini CLI ${found.version} is older than ${found.minimum}. Update it with npm.` };
+      }
+      if (found.status === 'no-node') return { state: 'missing', version: found.version, message: found.reason };
+      if ((o.machinePolicies ?? (() => hasMachinePolicies(o.platform)))()) {
+        return {
+          state: 'missing',
+          version: found.version,
+          message: `This computer has its own Gemini CLI admin policies (${machinePolicyDir(o.platform)}). They would replace the hive's safety policy, so the hive won't run Gemini here.`,
+        };
+      }
+      const auth = (o.auth ?? (() => checkGeminiAuth()))();
+      if (!auth.signedIn) {
+        return { state: 'signed-out', version: found.version, message: 'Gemini CLI is not signed in. Run "gemini" in a terminal and choose "Login with Google"; the hive checks again every minute.' };
+      }
+      install = found;
+      const how = auth.method === 'oauth-personal' ? ' (signed in with Google)' : '';
+      return {
+        state: 'ready',
+        version: found.version,
+        message: hasTools()
+          ? `Gemini CLI ${found.version} is ready${how}.`
+          : `Gemini CLI ${found.version} is ready${how}, for read-only work only: the hive tools aren't built (run "pnpm build:doors").`,
+      };
+    },
+    create(): Engine {
+      if (!install) throw new Error('Gemini CLI is not ready.');
+      const tools = hasTools() ? o.hiveTools : null;
+      const key = `${install.node}|${install.script}|${tools ?? ''}`;
+      if (engine?.key !== key) {
+        engine = {
+          key,
+          engine: new GeminiEngine({ node: install.node, script: install.script, hiveTools: tools, runBase: o.runBase, ...(o.run ? { run: o.run } : {}) }),
+        };
+      }
+      return engine.engine;
+    },
+  };
+}
+
 /** A scripted engine (e2e tests and token-free demos). Always ready; guarded by the same hook rules in spirit. */
 export function fakeAdapter(engine: Engine, o: { name?: string; message?: string } = {}): EngineAdapter {
   const name = o.name ?? 'Demo engine';
@@ -83,18 +168,6 @@ export function fakeAdapter(engine: Engine, o: { name?: string; message?: string
 /** Engines the hive knows about but can't run yet in this build (shown on the Connections screen). */
 export function plannedAdapters(): EngineAdapter[] {
   return [
-    {
-      id: 'gemini',
-      name: 'Gemini CLI',
-      vendor: 'Google',
-      // Planned: built-in side-effect tools denied by a per-run policy; the hive's guarded tools instead.
-      capabilities: { guard: null, mcp: true, effort: EFFORTS, reportsCost: false },
-      models: { strongest: 'pro', standard: 'flash', light: 'flash-lite' },
-      availableIn: 'Phase 2 · step A2',
-      install: { command: 'npm install -g @google/gemini-cli', note: "Google's official package. Needs Node.js 20 or newer." },
-      signIn: { command: 'gemini', note: 'Run it once in a terminal and choose "Login with Google". The hive never sees your login.' },
-      privacyNote: 'Gemini CLI keeps its own chat logs in your user folder (~/.gemini/tmp). The hive turns its usage statistics off for its runs.',
-    },
     {
       id: 'codex',
       name: 'Codex CLI',

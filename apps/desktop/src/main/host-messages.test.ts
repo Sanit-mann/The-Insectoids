@@ -4,7 +4,7 @@ import { resolveLibraryDir } from './doors';
 
 describe('host messages (main <-> Brain host)', () => {
   it('accepts only well-formed start and rpc messages', () => {
-    const doors = { runtime: { command: 'x', env: {} }, guardHook: 'g', brainMcp: 'm', brainCli: 'c' };
+    const doors = { runtime: { command: 'x', env: {} }, guardHook: 'g', brainMcp: 'm', brainCli: 'c', hiveTools: 'h' };
     const hive = { userDataDir: '/u', libraryDir: '/l', engine: 'fake' };
     expect(isStartMessage({ type: 'start', dbPath: 'a', endpoint: 'b', masterToken: 'c', doors, hive })).toBe(true);
     expect(isStartMessage({ type: 'start', dbPath: 'a', endpoint: 'b', masterToken: 'c', doors })).toBe(false);

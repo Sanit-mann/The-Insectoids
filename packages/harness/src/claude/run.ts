@@ -41,6 +41,8 @@ export interface RunResult {
   text: string;
   usage: Usage;
   costUsd: number;
+  /** true when the engine reported no cost and costUsd is the hive's estimate from tokens (Gemini CLI). */
+  costEstimated?: boolean;
   numTurns: number;
   durationMs: number;
   exitCode: number | null;
@@ -57,7 +59,7 @@ const EMPTY_USAGE: Usage = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 };
 const AUTH_HINT = /(\/login|api key|not logged in|authenticat|unauthori[sz]ed|credit balance)/i;
 
 /** Ends the process and everything it started (its shells and tools). */
-function killTree(child: ChildProcess): void {
+export function killTree(child: ChildProcess): void {
   if (child.pid === undefined || child.exitCode !== null) return;
   if (process.platform === 'win32') {
     spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' });

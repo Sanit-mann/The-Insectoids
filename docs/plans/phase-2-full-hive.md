@@ -207,3 +207,27 @@ Three milestones, each ending in something the user can try.
 
     The API providers, Services and Vault tabs show "Later". Hive lanes now name the engine that ran them.
   - **Fixed after the screenshot:** unsupported engines said when they're coming twice. Screenshot: `design/screenshots/phase-2-a1-connections.png`.
+- **A2 Gemini CLI adapter: built (2026-11-12); the real smoke test is waiting for the user's go-ahead.** 490 unit tests and 45 e2e tests pass.
+  - **Install:** Gemini CLI 0.66.0 was installed with the user's consent. Gemini **updated itself to 0.68.0** when the user ran it to sign in (its own auto-update). Every flag was verified in that 0.68.0 bundle, so the minimum is 0.68.0, and hive runs now set `general.enableAutoUpdate: false`. 0.68.0 is younger than our 2-week rule; that's the user's call.
+  - **`packages/hive-tools-mcp` (new, 13 tests):** guarded `read_file`, `list_dir`, `glob`, `search`, `write_file`, `edit_file` and `run_shell`.
+    - **Guard:** runs inside before every action; reads outside the workspace are refused too; any error refuses.
+    - **Shell:** PowerShell on Windows (real exit codes), `/bin/sh` elsewhere.
+    - **Child processes:** never inherit `ELECTRON_RUN_AS_NODE`, the guard policy or the Brain token. Timeouts kill the whole process tree.
+  - **Gemini adapter** (`packages/harness/src/gemini/`, 21 tests):
+    - **Detection:** finds the install and reads the sign-in type only; the credentials file is never opened.
+    - **Per-run config:** a system settings file, `-e none`, only the `hive` and `brain` MCP servers, `--skip-trust`, a unique context file name, usage statistics off, overage never, auto-update off, turn limit.
+    - **Stream reader:** converts Gemini's stream into the hive's events. Cost is estimated from a price table and marked as estimated.
+    - **Exit codes:** 41 auth, 53 turn limit, 54 tool error, 55 untrusted folder.
+  - **Differences from the 0.68.0 research that changed the design:**
+    - Gemini **blocks `ELECTRON_RUN_AS_NODE`** in MCP server env, so Gemini and its MCP servers run on the system Node.js (≥ 20), never on the app's executable.
+    - Server env values are expanded (`$VAR`, `%VAR%`), so runs with such values are refused.
+    - The guard hook layer is dropped: Gemini's tool names don't fit our hook, and hooks are switched off entirely for hive runs (`hooksConfig.enabled: false`), the user's own included.
+  - **Safety layers:**
+    1. A per-run **admin policy** denies every built-in Gemini tool and allows only the `hive` and `brain` MCP servers.
+    2. The **hive tools** run the guard inside themselves.
+    3. **Without the hive tools bundle**, Gemini is read-only (plan mode, built-in reads only, secret files denied) and refuses writer roles.
+    4. **Machine admin policies** (which would override ours) make Gemini report itself unusable.
+  - **Real detection** (no prompt sent): ready, signed in with Google, Node 24.15, guard `policy-and-tools`.
+  - **Notes:**
+    - In Gemini runs, the `brain` CLI isn't reachable from the hive shell (its token is scrubbed); the Brain MCP door works.
+    - A blocked engine (machine policies, unsafe env) shows as "missing" with the reason in its message; the contract has no separate "blocked" state yet.

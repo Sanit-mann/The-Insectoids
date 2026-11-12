@@ -12,6 +12,8 @@ export interface DoorPaths {
   guardHook: string;
   brainMcp: string;
   brainCli: string;
+  /** Guarded shell and file tools over MCP, for engines without a fail-closed hook (Gemini CLI). */
+  hiveTools: string;
 }
 
 /** What the hive host needs besides the Brain (Phase 1 Step 8: the Hive lives in this process). */

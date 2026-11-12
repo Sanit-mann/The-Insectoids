@@ -1,0 +1,24 @@
+{
+  "name": "@insectoids/hive-tools-mcp",
+  "version": "0.0.0",
+  "private": true,
+  "license": "MIT",
+  "description": "Guarded shell and file tools over MCP, for engines whose own pre-tool hooks can't fail closed (Gemini CLI).",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json",
+    "build": "rolldown src/bin/hive-tools-mcp.ts --file dist/hive-tools-mcp.mjs --format esm --platform node"
+  },
+  "dependencies": {
+    "@insectoids/reflexes": "workspace:*",
+    "@insectoids/shared": "workspace:*",
+    "@modelcontextprotocol/sdk": "1.32.2",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "rolldown": "1.2.19"
+  }
+}

@@ -28,7 +28,7 @@ const signedOut: EngineDetection = { state: 'signed-out', version: '1.0.0', mess
 
 describe('engine registry (Connections 04-D2, Phase 2 A1)', () => {
   it('keeps the user\'s order, with unknown ids ignored and the rest appended', () => {
-    const r = new EngineRegistry([adapter('claude', ready), adapter('gemini', ready), ...plannedAdapters().filter((a) => a.id !== 'gemini')]);
+    const r = new EngineRegistry([adapter('claude', ready), adapter('gemini', ready), ...plannedAdapters()]);
     expect(r.order).toEqual(['claude', 'gemini', 'codex', 'opencode']);
     r.setOrder(['opencode', 'gemini', 'fake', 'gemini']);
     expect(r.order).toEqual(['opencode', 'gemini', 'claude', 'codex']);
@@ -43,13 +43,12 @@ describe('engine registry (Connections 04-D2, Phase 2 A1)', () => {
 
   it('shows "checking" before the first detection and "unsupported" for engines without an adapter', async () => {
     const r = new EngineRegistry([adapter('claude', ready), ...plannedAdapters()]);
-    expect(r.cards().map((c) => [c.id, c.state])).toEqual([['claude', 'checking'], ['gemini', 'unsupported'], ['codex', 'unsupported'], ['opencode', 'unsupported']]);
+    expect(r.cards().map((c) => [c.id, c.state])).toEqual([['claude', 'checking'], ['codex', 'unsupported'], ['opencode', 'unsupported']]);
     await r.detectAll();
     const cards = r.cards();
     expect(cards[0]).toMatchObject({ id: 'claude', state: 'ready', version: '1.0.0', enabled: true });
-    expect(cards[1]).toMatchObject({ id: 'gemini', state: 'unsupported', availableIn: 'Phase 2 · step A2' });
-    expect(cards[1]!.install?.command).toBe('npm install -g @google/gemini-cli');
-    expect(cards[1]!.privacyNote).toMatch(/chat logs/);
+    expect(cards[1]).toMatchObject({ id: 'codex', state: 'unsupported' });
+    expect(cards[1]!.install?.command).toBe('npm install -g @openai/codex');
   });
 
   it('a detection that throws becomes "missing" with the reason', async () => {

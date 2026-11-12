@@ -13,6 +13,7 @@ describe('resolveDoorPaths', () => {
       guardHook: join(repo, 'packages', 'reflexes', 'dist', 'guard-hook.mjs'),
       brainMcp: join(repo, 'packages', 'brain-mcp', 'dist', 'brain-mcp.mjs'),
       brainCli: join(repo, 'packages', 'brain-cli', 'dist', 'brain.mjs'),
+      hiveTools: join(repo, 'packages', 'hive-tools-mcp', 'dist', 'hive-tools-mcp.mjs'),
     });
   });
 

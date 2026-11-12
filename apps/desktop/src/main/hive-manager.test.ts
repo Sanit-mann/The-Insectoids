@@ -47,6 +47,8 @@ function make(extra: Partial<Options> & { realEngine?: boolean } = {}): HiveMana
     ...(realEngine ? {} : { engineOverride: demoEngine({ queenMs: 5, insectMs: 30, inspectorMs: 5 }) }),
     push: (p) => pushes.push(p),
     tickMs: 20,
+    // Never the machine's real Gemini CLI: it may be installed and signed in, and would spend real quota.
+    geminiDetect: async () => ({ status: 'missing' }),
     ...rest,
   });
   return manager;
@@ -181,12 +183,14 @@ describe('engine registry (Phase 2 A1)', () => {
     expect(s.engines.map((e) => [e.id, e.state])).toEqual([
       ['fake', 'fake'],
       ['claude', 'missing'],
-      ['gemini', 'unsupported'],
+      ['gemini', 'missing'],
       ['codex', 'unsupported'],
       ['opencode', 'unsupported'],
     ]);
     expect(s.engines[1]!.message).toMatch(/Not checked/);
-    expect(s.engines.find((e) => e.id === 'gemini')).toMatchObject({ availableIn: 'Phase 2 · step A2', guard: null, reportsCost: false });
+    // Gemini CLI is a real engine since A2; with the scripted engine it is listed but never checked or run.
+    expect(s.engines.find((e) => e.id === 'gemini')).toMatchObject({ state: 'missing', availableIn: null, guard: 'read-only', reportsCost: false });
+    expect(s.engines.find((e) => e.id === 'gemini')!.message).toMatch(/Not checked/);
     expect(s.engine).toMatchObject({ state: 'fake', name: 'Test engine' });
   });
 
@@ -217,6 +221,9 @@ describe('engine registry (Phase 2 A1)', () => {
     await m.init();
     await until('ready', () => snap(m).engine.state === 'ready');
     expect(await m.command({ type: 'setEngineEnabled', engineId: 'claude', enabled: false })).toEqual({ ok: true });
+    // Gemini CLI is a real engine too (not installed in this test): it is still on, so it is the default view.
+    expect(snap(m).engine).toMatchObject({ state: 'missing', name: 'Gemini CLI' });
+    expect(await m.command({ type: 'setEngineEnabled', engineId: 'gemini', enabled: false })).toEqual({ ok: true });
     expect(snap(m).engine).toMatchObject({ state: 'missing', name: 'No AI engine' });
     expect(await m.command({ type: 'submitGoal', text: 'Hello there' })).toMatchObject({ ok: false, error: expect.stringMatching(/switched off/) });
   });

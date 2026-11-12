@@ -11,3 +11,8 @@ export * from './hive/router';
 export * from './hive/demo';
 export * from './engines/registry';
 export * from './engines/adapters';
+export * from './gemini/args';
+export * from './gemini/detect';
+export * from './gemini/engine';
+export * from './gemini/run';
+export * from './gemini/stream';

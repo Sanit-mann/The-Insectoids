@@ -18,18 +18,20 @@ const snap = (): Promise<HiveSnapshot> => launched.win.evaluate(() => (globalThi
 const command = (c: Parameters<AppWindow['insectoids']['hive']['command']>[0]) =>
   launched.win.evaluate((x) => (globalThis as unknown as AppWindow).insectoids.hive.command(x), c);
 
-test('lists every engine: the scripted one ready, Claude Code listed but not run, the rest coming later', async () => {
+test('lists every engine: the scripted one ready, Claude Code and Gemini CLI listed but not run, the rest coming later', async () => {
   await expect.poll(async () => (await snap()).engines.every((e) => e.state !== 'checking'), { timeout: 15_000 }).toBe(true);
   const s = await snap();
   expect(s.engines.map((e) => [e.id, e.state])).toEqual([
     ['fake', 'fake'],
     ['claude', 'missing'],
-    ['gemini', 'unsupported'],
+    ['gemini', 'missing'],
     ['codex', 'unsupported'],
     ['opencode', 'unsupported'],
   ]);
   const gemini = s.engines.find((e) => e.id === 'gemini')!;
-  expect(gemini).toMatchObject({ vendor: 'Google', availableIn: 'Phase 2 · step A2', reportsCost: false });
+  // A real engine since A2: guarded by the per-run policy plus the hive tools; never checked or run in scripted mode.
+  expect(gemini).toMatchObject({ vendor: 'Google', availableIn: null, guard: 'policy-and-tools', reportsCost: false, models: { strongest: 'pro', standard: 'flash', light: 'flash-lite' } });
+  expect(gemini.message).toMatch(/Not checked/);
   expect(gemini.install?.command).toBe('npm install -g @google/gemini-cli');
   expect(s.engines.find((e) => e.id === 'claude')!.signIn?.command).toBe('claude auth login');
   expect(s.engine.state).toBe('fake');
