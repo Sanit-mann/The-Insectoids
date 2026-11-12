@@ -74,12 +74,18 @@ test('moving an engine down changes the order', async () => {
   await expect.poll(() => engineOrder(launched)).toEqual(before);
 });
 
-test('tabs for later steps say so', async () => {
+test('every tab is live now; none says "Later"', async () => {
   const { win } = launched;
-  // Services and Vault went live in Phase 2 step A3 (covered by vault-services.spec.ts).
-  for (const [label, id] of [['API providers', 'providers']] as const) {
-    await win.getByRole('tab', { name: new RegExp(`^${label}`) }).click();
-    await expect(win.getByTestId(`later-${id}`)).toContainText('Later');
+  // Services and Vault went live in Phase 2 step A3, API providers in A4 (covered by their own specs).
+  for (const [label, testId] of [
+    ['API providers', 'providers-tab'],
+    ['Services', 'services-tab'],
+    ['Vault', 'vault-tab'],
+  ] as const) {
+    const tab = win.getByRole('tab', { name: new RegExp(`^${label}`) });
+    await expect(tab).not.toContainText('Later');
+    await tab.click();
+    await expect(win.getByTestId(testId)).toBeVisible();
   }
   await win.getByRole('tab', { name: 'Engines' }).click();
   await expect(win.getByTestId('engine-list')).toBeVisible();

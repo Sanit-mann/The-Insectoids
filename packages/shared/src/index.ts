@@ -6,3 +6,4 @@ export * from './ipc';
 export * from './hive-api';
 export * from './setup-api';
 export * from './vault-api';
+export * from './providers-api';

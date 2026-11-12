@@ -4,6 +4,9 @@ import { type GeminiAuth, type GeminiInstall, checkGeminiAuth, detectGemini, has
 import { GeminiEngine } from '../gemini/engine';
 import type { runGemini } from '../gemini/run';
 import { ClaudeEngine, type Engine } from '../hive/engine';
+import { type OpenCodeInstall, blockingSystemConfig, detectOpenCode } from '../opencode/detect';
+import { type LlmAccess, OpenCodeEngine, type ReadyProvider } from '../opencode/engine';
+import type { runOpenCode } from '../opencode/run';
 import type { EngineAdapter, EngineDetection } from './registry';
 
 const EFFORTS = ['low', 'medium', 'high', 'max'] as const;
@@ -191,16 +194,106 @@ export function plannedAdapters(): EngineAdapter[] {
       signIn: { command: 'codex login', note: 'Sign in with your ChatGPT account. The hive never sees your login.' },
       privacyNote: null,
     },
-    {
-      id: 'opencode',
-      name: 'OpenCode',
-      vendor: 'SST (open source)',
-      capabilities: { guard: null, mcp: true, effort: null, reportsCost: false },
-      models: null,
-      availableIn: 'Phase 2 · step A4',
-      install: { command: 'npm install -g opencode-ai', note: 'The doorway for OpenRouter, FreeLLMAPI and local models (Ollama, LM Studio).' },
-      signIn: { command: 'opencode auth login', note: 'Choose a provider and add its key in OpenCode itself; local models need none.' },
-      privacyNote: null,
-    },
   ];
+}
+
+export interface OpenCodeAdapterOptions {
+  /** The hive tools MCP bundle; null or missing file = read-only work only. */
+  hiveTools: string | null;
+  /** Runtime for the hive's MCP servers in OpenCode runs (its env reaches only those servers). */
+  runtime: { command: string; args?: string[]; env?: Record<string, string> };
+  runBase: string;
+  /** Enabled providers that passed their test, in the user's order (from main). */
+  providers: () => Promise<ReadyProvider[]>;
+  llm: LlmAccess;
+  /** Tests: replace detection, the system-config check and the run. */
+  detect?: () => Promise<OpenCodeInstall>;
+  systemConfig?: () => string | null;
+  run?: typeof runOpenCode;
+}
+
+/**
+ * OpenCode 2.x: the doorway for API providers (OpenRouter, FreeLLMAPI, Ollama, LM Studio). Its built-in
+ * tools are switched off by config and its file and shell work goes through the hive tools (guarded), and
+ * the provider's key stays in the Vault: OpenCode talks to the local broker with a per-run pass.
+ */
+export function opencodeAdapter(o: OpenCodeAdapterOptions): EngineAdapter {
+  const hasTools = (): boolean => Boolean(o.hiveTools && existsSync(o.hiveTools));
+  let install: Extract<OpenCodeInstall, { status: 'installed' }> | null = null;
+  let current: ReadyProvider | null = null;
+  let engine: { key: string; engine: Engine } | null = null;
+  return {
+    id: 'opencode',
+    name: 'OpenCode',
+    vendor: 'Anomaly (open source, MIT)',
+    get capabilities() {
+      return { guard: hasTools() ? ('policy-and-tools' as const) : ('read-only' as const), mcp: true, effort: null, reportsCost: true };
+    },
+    // The run's provider decides the models; until one is ready the tiers are placeholders.
+    get models() {
+      return current?.models ?? { strongest: 'provider-strongest', standard: 'provider-standard', light: 'provider-light' };
+    },
+    availableIn: null,
+    install: {
+      command: 'npm install -g @opencode/cli@2.2.1',
+      note: 'The official package (about 250 MB; its install step copies the program file using PowerShell). Needs Node.js. The hive never runs it without you.',
+    },
+    signIn: {
+      command: 'Connections → API providers',
+      note: 'OpenCode needs no sign-in of its own here: add an API provider (OpenRouter, FreeLLMAPI, Ollama or LM Studio) on the API providers tab. Keys stay in the Vault.',
+    },
+    privacyNote:
+      'Local providers (Ollama, LM Studio, a local FreeLLMAPI) keep everything on this computer. Remote providers see your prompts and the code the insects read.',
+    async detect(): Promise<EngineDetection> {
+      install = null;
+      const found = await (o.detect ?? (() => detectOpenCode()))();
+      if (found.status === 'missing') return { state: 'missing', version: null, message: 'OpenCode is not installed. Install it with npm; the hive checks again every minute.' };
+      if (found.status === 'outdated') {
+        return { state: 'outdated', version: found.version, message: `OpenCode ${found.version} is older than ${found.minimum}. Update it with npm.` };
+      }
+      const blocking = (o.systemConfig ?? (() => blockingSystemConfig()))();
+      if (blocking) {
+        return {
+          state: 'missing',
+          version: found.version,
+          message: `This computer has a machine-wide OpenCode config (${blocking}). It would override the hive's safety settings, so the hive won't run OpenCode here.`,
+        };
+      }
+      const providers = await o.providers().catch(() => [] as ReadyProvider[]);
+      current = providers[0] ?? null;
+      if (!current) {
+        return { state: 'signed-out', version: found.version, message: 'Add an API provider on the API providers tab, switch it on and test it; then OpenCode is ready.' };
+      }
+      install = found;
+      const where = current.local ? ' (runs on this computer)' : '';
+      return {
+        state: 'ready',
+        version: found.version,
+        message: hasTools()
+          ? `OpenCode ${found.version} is ready with ${current.label}${where}.`
+          : `OpenCode ${found.version} is ready with ${current.label}${where}, for read-only work only: the hive tools aren't built (run "pnpm build:doors").`,
+      };
+    },
+    create(): Engine {
+      if (!install) throw new Error('OpenCode is not ready.');
+      const tools = hasTools() ? o.hiveTools : null;
+      const key = `${install.command}|${(install.args ?? []).join(' ')}|${tools ?? ''}`;
+      if (engine?.key !== key) {
+        engine = {
+          key,
+          engine: new OpenCodeEngine({
+            command: install.command,
+            ...(install.args ? { commandArgs: install.args } : {}),
+            hiveTools: tools,
+            runtime: o.runtime,
+            provider: () => current,
+            llm: o.llm,
+            runBase: o.runBase,
+            ...(o.run ? { run: o.run } : {}),
+          }),
+        };
+      }
+      return engine.engine;
+    },
+  };
 }

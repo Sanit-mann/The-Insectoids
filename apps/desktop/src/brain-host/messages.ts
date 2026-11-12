@@ -39,7 +39,16 @@ export type HostMethod = 'snapshot' | 'command' | 'changes' | 'project' | 'brain
  * Requests the host makes to main (the reverse direction): the secret broker and the Vault live in
  * main, and the hive asks it for a capability token per run. No key ever crosses this channel.
  */
-export type HostRequestMethod = 'broker.available' | 'broker.issue' | 'broker.revoke';
+export type HostRequestMethod =
+  | 'broker.available'
+  | 'broker.issue'
+  | 'broker.revoke'
+  /** A4: a per-run pass for one engine run on one model provider → { baseUrl, pass }. */
+  | 'broker.issueLlm'
+  /** A4: what the broker saw for a pass → { model, input, output, cacheRead, calls }. */
+  | 'broker.llmUsage'
+  /** A4: enabled providers that passed their test, in the user's order → Array<{ id, label, local, models }>. */
+  | 'providers.ready';
 
 export type ToHost =
   | { type: 'start'; dbPath: string; endpoint: string; masterToken: string; doors: DoorPaths; hive: HiveSetup }

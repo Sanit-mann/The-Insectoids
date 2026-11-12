@@ -12,6 +12,19 @@ const strList = (v: unknown, re?: RegExp): string[] | null =>
  */
 export function handleBrokerRequest(broker: Broker, method: HostRequestMethod, params: unknown): unknown {
   const p = (params ?? {}) as Record<string, unknown>;
+  // A4 adds two LLM methods. Compared as plain strings so main also understands them before the host's
+  // HostRequestMethod type lists them.
+  const name: string = method;
+  if (name === 'broker.issueLlm') {
+    if (!isStr(p['runId']) || typeof p['providerId'] !== 'string' || !ID.test(p['providerId'])) {
+      throw new Error('An LLM pass request needs a run and a provider.');
+    }
+    return broker.issueLlm({ runId: p['runId'], providerId: p['providerId'] });
+  }
+  if (name === 'broker.llmUsage') {
+    if (!isStr(p['pass'])) throw new Error('No pass given.');
+    return broker.llmUsage(p['pass']);
+  }
   if (method === 'broker.available') return broker.available();
   if (method === 'broker.issue') {
     const integrations = strList(p['integrations'], ID);

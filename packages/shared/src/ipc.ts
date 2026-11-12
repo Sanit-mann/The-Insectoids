@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { HiveApi } from './hive-api';
 import type { SetupApi } from './setup-api';
+import type { ProvidersApi } from './providers-api';
 import type { VaultApi } from './vault-api';
 
 /**
@@ -36,4 +37,5 @@ export interface InsectoidsApi {
   hive: HiveApi;
   setup: SetupApi;
   vault: VaultApi;
+  providers: ProvidersApi;
 }

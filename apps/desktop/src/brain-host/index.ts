@@ -14,6 +14,7 @@ import { type Brain, openBrain } from '@insectoids/brain';
 import { writeBrainShims } from '@insectoids/brain-cli/shims';
 import { type BrainService, startBrainService } from '@insectoids/brain-service';
 import { HiveManager } from './hive-manager';
+import type { LlmAccess, LlmUsage, ReadyProvider } from '@insectoids/harness';
 import { writeHookLauncher } from '../main/hook-launcher';
 import type { ServiceAccess, ServiceTicket } from '@insectoids/harness';
 import { type DoorPaths, type FromHost, type HostMethod, type HostRequestMethod, type ToHost, isHostReply, isRpcMessage, isStartMessage } from './messages';
@@ -39,6 +40,22 @@ function requestMain(method: HostRequestMethod, params?: unknown): Promise<unkno
     mainPending.set(id, { resolve, reject, timer });
     send({ type: 'host-request', id, method, ...(params === undefined ? {} : { params }) });
   });
+}
+
+/** OpenCode's model providers (A4): passes and provider list from main; keys never leave main. */
+function llmAccess(): LlmAccess {
+  return {
+    issue: async (runId, providerId) => (await requestMain('broker.issueLlm', { runId, providerId })) as { baseUrl: string; pass: string },
+    usage: async (pass) => (await requestMain('broker.llmUsage', { pass })) as LlmUsage | null,
+    revoke: async (pass) => {
+      await requestMain('broker.revoke', { token: pass });
+    },
+  };
+}
+
+async function readyProviders(): Promise<ReadyProvider[]> {
+  const list = await requestMain('providers.ready');
+  return Array.isArray(list) ? (list as ReadyProvider[]) : [];
 }
 
 /** Outside services for the hive: tokens come from the broker in main; the door is the services MCP bundle. */
@@ -74,6 +91,8 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
       ...(m.hive.project ? { project: m.hive.project } : {}),
       ...(m.hive.limits ? { limits: m.hive.limits } : {}),
       services: serviceAccess(m.doors),
+      llm: llmAccess(),
+      providers: readyProviders,
       push: (push) => send({ type: 'push', push }),
       log: (line) => console.log(line),
     });

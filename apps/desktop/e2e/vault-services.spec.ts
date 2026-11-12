@@ -120,9 +120,9 @@ test('a custom REST service can be added, is checked first, and can be removed',
   await expect(card).toHaveCount(0, { timeout: 10_000 });
 });
 
-test('API providers still says Later', async () => {
+test('the API providers tab (live since A4) never shows the key either', async () => {
   const { win } = launched;
   await tab(win, 'API providers').click();
-  await expect(win.getByTestId('later-providers')).toContainText('Later');
+  await expect(win.getByTestId('providers-tab')).toBeVisible();
   await pageNeverShowsKey(win);
 });

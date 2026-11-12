@@ -272,3 +272,38 @@ Three milestones, each ending in something the user can try.
     - Uses Kokonut `hold-button` and `inline-alert`, and shadcn `button`.
     - An e2e test proves the planted key never appears in the page text or any input.
   - **Screenshots:** `design/screenshots/phase-2-a3-services.png`, `phase-2-a3-vault.png`.
+- **A4 API providers + OpenCode: built (2026-11-12); the real run waits for an OpenCode install and a provider.** Built by three parallel workers after a research pass. 545 unit tests and 58 e2e tests pass. OpenCode isn't installed; everything is tested against a fake OpenCode binary and a fake OpenAI-compatible server, with made-up keys.
+  - **Research:** OpenCode is alive, MIT-licensed and renamed (`anomalyco/opencode`). **Version 2 is a rewrite**, now `@opencode/cli`. The pinned version is **2.2.1**, the newest at least 2 weeks old; the 2.x line changes fast and breaks in minor versions.
+  - **Providers** (main, `providers.json`; contract `packages/shared/src/providers-api.ts`):
+    - Presets: OpenRouter, FreeLLMAPI (with its personal-use note), Ollama, LM Studio, and any OpenAI-compatible service.
+    - Remote providers need https; local ones (127.0.0.1 / localhost) may use http and are badged "nothing leaves this PC".
+    - The test lists models through the broker.
+    - Keys stay in the Vault; providers in use can't be removed or switched off.
+  - **Broker LLM route** (`/llm/<provider>/…`):
+    - **Passes:** one provider per pass; the broker swaps in the Vault key, so the engine only holds a 2-hour pass, revoked when the run ends.
+    - **Paths:** only `/chat/completions`, `/completions`, `/models`, `/responses` and `/embeddings`.
+    - **Streaming:** streams pass straight through. The key is redacted even when it's split across chunks; one call at a time per pass; 10-minute timeout; the upstream call is cancelled when the engine disconnects.
+    - **Usage:** records the model that actually answered and the tokens, which is the hive's source of truth.
+  - **OpenCode adapter** (`packages/harness/src/opencode/`), verified against the 2.2.1 source:
+    - **Run:** `run --standalone`, so it never uses the user's shared background service.
+    - **Config:**
+      - passed as text through an environment variable;
+      - the user's config, project config, machine config (`ProgramData` redirected per run; refuses on macOS/Linux if a system config exists), plugins and auto-update are all kept out;
+      - the session database is in memory.
+    - **Tools:**
+      - deny-all permissions plus our own `hive` agent;
+      - the built-in tool plugins never load;
+      - provider and MCP policies allow only ours;
+      - the only tools left are the guarded `hive`, `brain` and `services` MCP tools;
+      - read-only fallback.
+    - **Never** passes `--auto`, `--yolo` or `--dangerously-skip-permissions`; a test checks this.
+    - **Two new risks found in the source and closed:**
+      - OpenCode substitutes `{env:…}` / `{file:…}` anywhere in its config, so the prompt goes only on stdin and such values are refused.
+      - A card title starting with `-` could have been read as a flag, so leading dashes are stripped.
+    - **Host:** a pass per run through `broker.issueLlm`; usage read through `broker.llmUsage`; revoked in `finally`. Main answers `providers.ready` with metadata only (never a key or its handle; tested).
+  - **UI:** the API providers tab is live, with presets, a Vault key picker, a model per tier (suggestions after a test), on/off, test and hold-to-remove. **No Connections tab says "Later" any more.**
+  - **Screenshot:** `design/screenshots/phase-2-a4-providers.png`.
+  - **To run for real:**
+    - install OpenCode (`npm install -g @opencode/cli@2.2.1`, about 250 MB; its install script runs PowerShell to copy the program) with the user's consent;
+    - add a provider (a local Ollama model is free and private);
+    - then run the opt-in smoke test.

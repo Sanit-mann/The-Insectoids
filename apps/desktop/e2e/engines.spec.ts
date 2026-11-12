@@ -18,7 +18,7 @@ const snap = (): Promise<HiveSnapshot> => launched.win.evaluate(() => (globalThi
 const command = (c: Parameters<AppWindow['insectoids']['hive']['command']>[0]) =>
   launched.win.evaluate((x) => (globalThis as unknown as AppWindow).insectoids.hive.command(x), c);
 
-test('lists every engine: the scripted one ready, Claude Code and Gemini CLI listed but not run, the rest coming later', async () => {
+test('lists every engine: the scripted one ready, Claude Code, Gemini CLI and OpenCode listed but not run, Codex coming later', async () => {
   await expect.poll(async () => (await snap()).engines.every((e) => e.state !== 'checking'), { timeout: 15_000 }).toBe(true);
   const s = await snap();
   expect(s.engines.map((e) => [e.id, e.state])).toEqual([
@@ -26,7 +26,8 @@ test('lists every engine: the scripted one ready, Claude Code and Gemini CLI lis
     ['claude', 'missing'],
     ['gemini', 'missing'],
     ['codex', 'unsupported'],
-    ['opencode', 'unsupported'],
+    // A real engine since A4; in scripted mode it is listed but never checked or run.
+    ['opencode', 'missing'],
   ]);
   const gemini = s.engines.find((e) => e.id === 'gemini')!;
   // A real engine since A2: guarded by the per-run policy plus the hive tools; never checked or run in scripted mode.

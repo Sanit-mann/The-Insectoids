@@ -9,10 +9,14 @@ import { AppSettingsStore, checkBrainFolder, limitsFor } from './app-settings';
 import { BrainHost } from './brain-host';
 import { Broker } from './broker';
 import { handleBrokerRequest } from './broker-requests';
+import { readyProviders } from './ready-providers';
 import { resolveDoorPaths, resolveLibraryDir } from './doors';
 import { registerHiveIpc } from './hive-ipc';
 import { isAllowedExternalUrl, isTrustedRendererUrl } from './security';
 import { registerSetupIpc } from './setup';
+import { LlmRoute } from './llm-route';
+import { ProvidersStore } from './providers';
+import { registerProvidersIpc } from './providers-ipc';
 import { ServicesStore, type UrlRules } from './services';
 import { type TrayState, createTray } from './tray';
 import { Vault } from './vault';
@@ -47,6 +51,9 @@ let switchingBrain = false;
 let vault: Vault | null = null;
 let services: ServicesStore | null = null;
 let broker: Broker | null = null;
+/** API providers and the broker's LLM route (Phase 2 A4). */
+let providers: ProvidersStore | null = null;
+let llm: LlmRoute | null = null;
 
 /** e2e only: a fake upstream on http://127.0.0.1 may stand in for a service. Never in a normal run. */
 function testUrlRules(): UrlRules {
@@ -132,6 +139,11 @@ function startBrain(brainDir: string): BrainHost {
     },
     onPush: forwardPush,
     onHostRequest: async (method, params) => {
+      // Which API providers OpenCode may use (A4): metadata only, never a key or its handle.
+      if (method === 'providers.ready') {
+        const v = vault;
+        return providers && v ? readyProviders(providers.views((ref) => v.has(ref))) : [];
+      }
       if (!broker) throw new Error('The secret broker is not running.');
       return handleBrokerRequest(broker, method, params);
     },
@@ -239,7 +251,8 @@ function registerIpc(): void {
     ...(testPickedFolder ? { testPickedFolder } : {}),
   });
   registerHiveIpc({ host: () => brainHost, window: () => mainWindow, assertTrustedSender });
-  registerVaultIpc({ vault: vault!, services: services!, broker: broker!, assertTrustedSender });
+  registerVaultIpc({ vault: vault!, services: services!, broker: broker!, providers: providers!, assertTrustedSender });
+  registerProvidersIpc({ providers: providers!, vault: vault!, llm: llm!, assertTrustedSender });
   ipcMain.handle(IPC.brainStatus, (event) => {
     assertTrustedSender(event);
     return brainHost?.status ?? { state: 'starting', message: 'Starting the Brain…' };
@@ -284,7 +297,9 @@ if (!app.requestSingleInstanceLock()) {
     vault = new Vault({ dir: userData, crypto: safeStorage });
     services = new ServicesStore({ dir: userData, rules: testUrlRules() });
     const v = vault;
-    broker = new Broker({ services, reveal: (ref) => v.reveal(ref), log: (line) => console.log(line) });
+    providers = new ProvidersStore({ dir: userData });
+    llm = new LlmRoute({ providers, reveal: (ref) => v.reveal(ref), hasKey: (ref) => v.has(ref), log: (line) => console.log(line) });
+    broker = new Broker({ services, reveal: (ref) => v.reveal(ref), log: (line) => console.log(line), llm });
     await broker.start();
     registerIpc();
     brainHost = startBrain(settings.brainDir);

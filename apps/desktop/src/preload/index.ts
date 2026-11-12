@@ -23,6 +23,11 @@ import {
   ServiceTestResultSchema,
   VAULT_IPC,
   type VaultApi,
+  PROVIDERS_IPC,
+  ProviderResultSchema,
+  ProviderTestResultSchema,
+  ProviderViewSchema,
+  type ProvidersApi,
   VaultResultSchema,
   VaultStatusSchema,
 } from '@insectoids/shared';
@@ -84,6 +89,15 @@ const vault: VaultApi = {
   testService: async (id) => ServiceTestResultSchema.parse(await invoke(VAULT_IPC.servicesTest, id)),
 };
 
+/** API providers: metadata only; keys stay in the Vault and reach providers only through the broker. */
+const providers: ProvidersApi = {
+  list: async () => ProviderViewSchema.array().parse(await invoke(PROVIDERS_IPC.list)),
+  save: async (p) => ProviderResultSchema.parse(await invoke(PROVIDERS_IPC.save, p)),
+  setEnabled: async (id, enabled) => ProviderResultSchema.parse(await invoke(PROVIDERS_IPC.setEnabled, { id, enabled })),
+  remove: async (id) => ProviderResultSchema.parse(await invoke(PROVIDERS_IPC.remove, id)),
+  test: async (id) => ProviderTestResultSchema.parse(await invoke(PROVIDERS_IPC.test, id)),
+};
+
 // The only door from the UI to the main process. Every reply is validated.
 const api: InsectoidsApi = {
   appInfo: async () => AppInfoSchema.parse(await invoke(IPC.appInfo)),
@@ -91,6 +105,7 @@ const api: InsectoidsApi = {
   hive,
   setup,
   vault,
+  providers,
 };
 
 contextBridge.exposeInMainWorld('insectoids', api);

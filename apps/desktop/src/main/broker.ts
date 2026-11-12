@@ -2,6 +2,7 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { type IncomingMessage, type Server, type ServerResponse, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { Integration } from '@insectoids/shared';
+import type { LlmRoute, LlmUsage } from './llm-route';
 import { type ServicesStore, isAllowedBase } from './services';
 
 /**
@@ -84,6 +85,8 @@ export interface BrokerDeps {
   timeoutMs?: number;
   /** Never receives a key: lines are built from ids, methods, paths and statuses only. */
   log?: (line: string) => void;
+  /** The `/llm/<provider>/…` route for engine runs (Phase 2 A4). */
+  llm?: LlmRoute;
 }
 
 const fail = (status: number, error: string): CallResult => ({ ok: false, status, error });
@@ -145,6 +148,7 @@ export class Broker {
 
   async close(): Promise<void> {
     this.#tokens.clear();
+    this.#d.llm?.clear();
     const s = this.#server;
     this.#server = null;
     if (s) await new Promise<void>((resolve) => s.close(() => resolve()));
@@ -173,8 +177,23 @@ export class Broker {
     return { url: this.#url, token, granted, denied };
   }
 
+  /** Ends a service token or an LLM pass (the run is over). */
   revoke(token: string): void {
     this.#tokens.delete(token);
+    this.#d.llm?.revoke(token);
+  }
+
+  /** A pass for one engine run on one provider: the engine's base URL and "API key" (Phase 2 A4). */
+  issueLlm(o: { runId: string; providerId: string }): { baseUrl: string; pass: string } {
+    if (!this.#server) throw new Error('The secret broker is not running.');
+    if (!this.#d.llm) throw new Error('The broker has no LLM route.');
+    return this.#d.llm.issue(o, this.#url);
+  }
+
+  /** The model that actually answered and the tokens used, for one pass. */
+  llmUsage(pass: string): LlmUsage {
+    if (!this.#d.llm) throw new Error('The broker has no LLM route.');
+    return this.#d.llm.usage(pass);
   }
 
   /** Recent calls (no query values, no keys). */
@@ -305,6 +324,7 @@ export class Broker {
       res.end(JSON.stringify(body));
     };
     try {
+      if (this.#d.llm && (req.url ?? '').startsWith('/llm/')) return await this.#d.llm.handle(req, res);
       if (req.method !== 'POST' || req.url !== '/call') return send(404, { ok: false, status: 404, error: 'Use POST /call.' });
       // Browsers can't reach this from a web page: no CORS headers, JSON only, and a bearer token is required.
       const auth = req.headers['authorization'];

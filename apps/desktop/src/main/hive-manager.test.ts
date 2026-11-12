@@ -49,6 +49,8 @@ function make(extra: Partial<Options> & { realEngine?: boolean } = {}): HiveMana
     tickMs: 20,
     // Never the machine's real Gemini CLI: it may be installed and signed in, and would spend real quota.
     geminiDetect: async () => ({ status: 'missing' }),
+    // Real-engine tests never look for a real OpenCode on the test machine either.
+    ...(realEngine ? { opencodeDetect: async () => ({ status: 'missing' as const }) } : {}),
     ...rest,
   });
   return manager;
@@ -185,7 +187,7 @@ describe('engine registry (Phase 2 A1)', () => {
       ['claude', 'missing'],
       ['gemini', 'missing'],
       ['codex', 'unsupported'],
-      ['opencode', 'unsupported'],
+      ['opencode', 'missing'],
     ]);
     expect(s.engines[1]!.message).toMatch(/Not checked/);
     // Gemini CLI is a real engine since A2; with the scripted engine it is listed but never checked or run.
@@ -224,6 +226,9 @@ describe('engine registry (Phase 2 A1)', () => {
     // Gemini CLI is a real engine too (not installed in this test): it is still on, so it is the default view.
     expect(snap(m).engine).toMatchObject({ state: 'missing', name: 'Gemini CLI' });
     expect(await m.command({ type: 'setEngineEnabled', engineId: 'gemini', enabled: false })).toEqual({ ok: true });
+    // OpenCode is a real engine since A4 (not installed in this test) and still on.
+    expect(snap(m).engine).toMatchObject({ state: 'missing', name: 'OpenCode' });
+    expect(await m.command({ type: 'setEngineEnabled', engineId: 'opencode', enabled: false })).toEqual({ ok: true });
     expect(snap(m).engine).toMatchObject({ state: 'missing', name: 'No AI engine' });
     expect(await m.command({ type: 'submitGoal', text: 'Hello there' })).toMatchObject({ ok: false, error: expect.stringMatching(/switched off/) });
   });

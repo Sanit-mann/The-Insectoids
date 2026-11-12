@@ -17,3 +17,8 @@ export * from './gemini/detect';
 export * from './gemini/engine';
 export * from './gemini/run';
 export * from './gemini/stream';
+export * from './opencode/detect';
+export * from './opencode/config';
+export * from './opencode/stream';
+export * from './opencode/run';
+export * from './opencode/engine';

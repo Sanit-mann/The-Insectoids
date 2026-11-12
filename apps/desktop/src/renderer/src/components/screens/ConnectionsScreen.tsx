@@ -2,6 +2,7 @@ import type { EngineCard, EngineId } from '@insectoids/shared';
 import { RefreshCw } from 'lucide-react';
 import { type KeyboardEvent, useState } from 'react';
 import { EngineCardView } from '@/components/connections/EngineCardView';
+import { ProvidersTab } from '@/components/connections/ProvidersTab';
 import { ServicesTab } from '@/components/connections/ServicesTab';
 import { VaultTab } from '@/components/connections/VaultTab';
 import { defaultEngine } from '@/components/connections/engine-names';
@@ -14,19 +15,15 @@ type TabId = 'engines' | 'providers' | 'services' | 'vault';
 
 const TABS: Array<{ id: TabId; label: string; later?: { when: string; what: string } }> = [
   { id: 'engines', label: 'Engines' },
-  {
-    id: 'providers',
-    label: 'API providers',
-    later: { when: 'Phase 2 · step A4', what: 'Any OpenAI-compatible endpoint (OpenRouter, FreeLLMAPI, Ollama, LM Studio), with keys kept in the Vault.' },
-  },
+  { id: 'providers', label: 'API providers' },
   { id: 'services', label: 'Services' },
   { id: 'vault', label: 'Vault' },
 ];
 
 /**
  * Connections (function 04; prototype Connections.dc.html). Engines (Phase 2 · A1), Services and Vault (A3)
- * are live; API providers says what arrives and when. Engine changes go through hive commands, Services and
- * Vault through the Vault API in the main process.
+ * and API providers (A4) are live. Engine changes go through hive commands; Services and Vault through the
+ * Vault API, and providers through the providers API, both in the main process.
  */
 export function ConnectionsScreen() {
   const { snapshot, error: loadError, loading } = useHive();
@@ -120,7 +117,18 @@ export function ConnectionsScreen() {
       </div>
 
       <section aria-labelledby={`conn-tab-${tab}`} className="flex flex-col gap-4" id={`conn-panel-${tab}`} role="tabpanel">
-        {tab === 'services' ? (
+        {tab === 'providers' ? (
+          <ProvidersTab
+            onOpenEngines={() => {
+              setTab('engines');
+              requestAnimationFrame(() => document.getElementById('conn-tab-engines')?.focus());
+            }}
+            onOpenVault={() => {
+              setTab('vault');
+              requestAnimationFrame(() => document.getElementById('conn-tab-vault')?.focus());
+            }}
+          />
+        ) : tab === 'services' ? (
           <ServicesTab
             onOpenVault={() => {
               setTab('vault');

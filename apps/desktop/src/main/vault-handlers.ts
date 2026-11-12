@@ -9,6 +9,7 @@ import {
   VaultStatusSchema,
 } from '@insectoids/shared';
 import type { Broker } from './broker';
+import type { ProvidersStore } from './providers';
 import { type ServicesStore, testRequest } from './services';
 import type { Vault } from './vault';
 
@@ -16,6 +17,8 @@ export interface VaultDeps {
   vault: Vault;
   services: ServicesStore;
   broker: Broker;
+  /** API providers also use Vault keys (Phase 2 A4). */
+  providers?: ProvidersStore;
 }
 
 const Id = IntegrationSchema.shape.id;
@@ -42,7 +45,9 @@ export function createVaultHandlers(d: VaultDeps): Record<(typeof VAULT_IPC)[key
   return {
     [VAULT_IPC.vaultStatus]: async () => VaultStatusSchema.parse(d.vault.status()),
     [VAULT_IPC.vaultList]: async () =>
-      SecretMetaSchema.array().parse(d.vault.list().map((s) => ({ ...s, usedBy: d.services.usersOf(s.ref) }))),
+      SecretMetaSchema.array().parse(
+        d.vault.list().map((s) => ({ ...s, usedBy: [...d.services.usersOf(s.ref), ...(d.providers?.usersOf(s.ref) ?? [])] })),
+      ),
     [VAULT_IPC.vaultAdd]: async (arg) => {
       try {
         const input = VaultAddSchema.parse(arg);
@@ -55,7 +60,10 @@ export function createVaultHandlers(d: VaultDeps): Record<(typeof VAULT_IPC)[key
     [VAULT_IPC.vaultRemove]: async (arg) =>
       result(() => {
         const ref = Ref.parse(arg);
-        const users = d.services.all().filter((i) => i.enabled && i.secretRef === ref);
+        const users = [
+          ...d.services.all().filter((i) => i.enabled && i.secretRef === ref),
+          ...(d.providers?.all().filter((p) => p.enabled && p.secretRef === ref) ?? []),
+        ];
         if (users.length) {
           throw new Error(`${users.map((u) => u.label).join(', ')} still use${users.length === 1 ? 's' : ''} this key. Switch ${users.length === 1 ? 'it' : 'them'} off first.`);
         }

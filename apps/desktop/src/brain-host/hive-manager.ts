@@ -32,6 +32,10 @@ import {
   demoEngine,
   fakeAdapter,
   geminiAdapter,
+  opencodeAdapter,
+  type LlmAccess,
+  type OpenCodeInstall,
+  type ReadyProvider,
   headlineFrom,
   plannedAdapters,
   routeCard,
@@ -57,6 +61,15 @@ import { Workspace } from '@insectoids/workspace';
 import type { DoorPaths } from './messages';
 
 const run = promisify(execFile);
+
+/** Without main's broker (tests without it): OpenCode can't get a pass, so its runs refuse. */
+const NO_LLM: LlmAccess = {
+  issue: async () => {
+    throw new Error('No model-provider broker here.');
+  },
+  usage: async () => null,
+  revoke: async () => {},
+};
 
 const ACTIVITY_MAX = 300;
 const LINES_MAX = 200;
@@ -88,6 +101,9 @@ export interface HiveManagerOptions {
   limits?: HiveLimits;
   /** Outside services through the secret broker in main (Phase 2 A3). Absent: cards run without services. */
   services?: ServiceAccess;
+  /** OpenCode's model providers (Phase 2 A4): per-run broker passes and the ready providers, both from main. */
+  llm?: LlmAccess;
+  providers?: () => Promise<ReadyProvider[]>;
   push: (p: HivePush) => void;
   log?: (line: string) => void;
   /** Foreman tick interval. Default 1000 ms (500 ms with the demo engine). */
@@ -98,6 +114,9 @@ export interface HiveManagerOptions {
   /** Tests: replace Gemini CLI detection and its sign-in check. Without them a test machine's own install would be checked. */
   geminiDetect?: () => Promise<GeminiInstall>;
   geminiAuth?: () => GeminiAuth;
+  /** Tests: replace OpenCode detection and the machine-wide config check. */
+  opencodeDetect?: () => Promise<OpenCodeInstall>;
+  opencodeSystemConfig?: () => string | null;
   /** Tests: a custom engine instead of the demo or Claude. */
   engineOverride?: Engine;
   now?: () => number;
@@ -213,7 +232,18 @@ export class HiveManager {
       ...(this.#o.geminiDetect ? { detect: this.#o.geminiDetect } : {}),
       ...(this.#o.geminiAuth ? { auth: this.#o.geminiAuth } : {}),
     });
-    if (!scripted) return [claude, gemini, ...plannedAdapters()];
+    const opencode = opencodeAdapter({
+      // Built-in tools off by config; file and shell work through the guarded hive tools; the provider key
+      // stays in main (OpenCode talks to the broker with a per-run pass).
+      hiveTools: doors?.hiveTools ?? null,
+      runtime: doors?.runtime ?? { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
+      runBase: join(this.#o.userDataDir, 'hive', 'opencode-runs'),
+      providers: this.#o.providers ?? (async () => []),
+      llm: this.#o.llm ?? NO_LLM,
+      ...(this.#o.opencodeDetect ? { detect: this.#o.opencodeDetect } : {}),
+      ...(this.#o.opencodeSystemConfig ? { systemConfig: this.#o.opencodeSystemConfig } : {}),
+    });
+    if (!scripted) return [claude, gemini, ...plannedAdapters(), opencode];
     const listedOnly = (a: EngineAdapter): EngineAdapter => ({
       id: a.id,
       name: a.name,
@@ -226,7 +256,8 @@ export class HiveManager {
       privacyNote: a.privacyNote,
       detect: async () => ({ state: 'missing', version: null, message: 'Not checked: the scripted engine runs everything here.' }),
     });
-    return [scripted, listedOnly(claude), listedOnly(gemini), ...plannedAdapters()];
+    // In tests, OpenCode is real only when the test gave it its own detection (a stand-in binary).
+    return [scripted, listedOnly(claude), listedOnly(gemini), ...plannedAdapters(), this.#o.opencodeDetect ? opencode : listedOnly(opencode)];
   }
 
   /** Restore the project and start checking the engine. Never throws: problems become activity lines. */
