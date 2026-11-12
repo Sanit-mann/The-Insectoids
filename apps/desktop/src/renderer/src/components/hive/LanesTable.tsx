@@ -1,6 +1,7 @@
 import type { AgentView } from '@insectoids/shared';
 import type { KeyboardEvent } from 'react';
 import { StatusDot } from '@/components/StatusDot';
+import { engineName } from '@/components/connections/engine-names';
 import { cn } from '@/lib/utils';
 import { LANE_LABEL, agentName, formatDuration, formatTokens, formatUsd, laneDot, modelLabel, roleLabel } from './format';
 
@@ -32,7 +33,7 @@ export function LanesTable({ agents, selectedId, onSelect, now }: LanesTableProp
           <tr className="border-b border-line">
             <th scope="col" className="px-3.5 py-2.5 font-normal">Agent</th>
             <th scope="col" className="px-3 py-2.5 font-normal">Task</th>
-            <th scope="col" className="px-3 py-2.5 font-normal">Model · effort</th>
+            <th scope="col" className="px-3 py-2.5 font-normal">Engine · model · effort</th>
             <th scope="col" className="px-3 py-2.5 text-right font-normal">Tokens</th>
             <th scope="col" className="px-3 py-2.5 text-right font-normal">Cost</th>
             <th scope="col" className="px-3 py-2.5 font-normal">Status</th>
@@ -69,7 +70,10 @@ export function LanesTable({ agents, selectedId, onSelect, now }: LanesTableProp
                 <td className="max-w-[280px] truncate px-3 py-2.5 text-muted" title={a.title}>
                   {a.title}
                 </td>
-                <td className="px-3 py-2.5 font-mono text-xs text-muted">{modelLabel(a)}</td>
+                <td className="px-3 py-2.5 text-xs text-muted">
+                  {engineName(a.engine) ? <span className="mr-1.5 rounded border border-line px-1.5 py-0.5 font-sans text-[11px]">{engineName(a.engine)}</span> : null}
+                  <span className="font-mono">{modelLabel(a)}</span>
+                </td>
                 <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">{formatTokens(a.tokens)}</td>
                 <td className="px-3 py-2.5 text-right font-mono text-xs tabular-nums">{formatUsd(a.costUsd)}</td>
                 <td className="px-3 py-2.5">

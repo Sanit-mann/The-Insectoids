@@ -48,6 +48,47 @@ export const EngineViewSchema = z.object({
 });
 export type EngineView = z.infer<typeof EngineViewSchema>;
 
+/** Every engine the hive knows about (Connections 04-D2). 'fake' is the scripted test engine. */
+export const EngineIdSchema = z.enum(['claude', 'gemini', 'codex', 'opencode', 'fake']);
+export type EngineId = z.infer<typeof EngineIdSchema>;
+
+/**
+ * One engine on the Connections screen (Phase 2 A1).
+ * The hive never runs an engine the user switched off, and never one whose guard can't be enforced.
+ */
+export const EngineCardSchema = z.object({
+  id: EngineIdSchema,
+  name: z.string(),
+  vendor: z.string(),
+  /** unsupported = known but no adapter in this build yet (see availableIn). */
+  state: z.enum(['ready', 'missing', 'outdated', 'signed-out', 'checking', 'fake', 'unsupported']),
+  version: z.string().nullable(),
+  /** Plain words, including the fix when not ready. */
+  message: z.string(),
+  /** The user can switch an engine off; the hive then never routes work to it. */
+  enabled: z.boolean(),
+  /** e.g. "Phase 2 · step A2" for engines whose adapter comes later; null when supported. */
+  availableIn: z.string().nullable(),
+  /**
+   * How the command guard protects this engine's runs:
+   * hook = a pre-tool hook that fails closed (Claude Code);
+   * policy-and-tools = built-in side-effect tools denied by policy, the hive's guarded tools instead (Gemini CLI);
+   * read-only = only read-only work (castes that don't change files).
+   */
+  guard: z.enum(['hook', 'policy-and-tools', 'read-only']).nullable(),
+  /** Whether the engine reports cost itself; otherwise the hive estimates it from tokens. */
+  reportsCost: z.boolean(),
+  /** The engine's model names by tier. */
+  models: z.object({ strongest: z.string(), standard: z.string(), light: z.string() }).nullable(),
+  /** Official install command, shown for the user to copy or run with consent (04-D6). */
+  install: z.object({ command: z.string(), note: z.string() }).nullable(),
+  /** How to sign in, in the engine's own login (the hive never sees passwords or tokens). */
+  signIn: z.object({ command: z.string(), note: z.string() }).nullable(),
+  /** Anything the user should know about privacy with this engine (e.g. it keeps its own chat logs). */
+  privacyNote: z.string().nullable(),
+});
+export type EngineCard = z.infer<typeof EngineCardSchema>;
+
 export const PlanViewSchema = z.object({
   /** One short line for the plan card. */
   headline: z.string(),
@@ -136,7 +177,9 @@ export const AgentViewSchema = z.object({
   goalId: z.string().nullable(),
   cardId: z.string().nullable(),
   title: z.string(),
-  /** Model and effort that actually ran (App 07 principle 3); null until the engine reports it. */
+  /** Which engine ran it. */
+  engine: EngineIdSchema.nullable(),
+  /** Model as reported by the engine (App 07 principle 3) and the effort the hive asked for; null until known. */
   model: z.string().nullable(),
   effort: z.string().nullable(),
   status: LaneStatusSchema,
@@ -164,7 +207,10 @@ export type ActivityView = z.infer<typeof ActivityViewSchema>;
 export const HiveSnapshotSchema = z.object({
   /** null until the user picks a project folder. */
   project: ProjectViewSchema.nullable(),
+  /** The engine the hive uses by default (the first enabled, ready one in the user's order). */
   engine: EngineViewSchema,
+  /** Every known engine, in the user's preference order (Connections screen). */
+  engines: z.array(EngineCardSchema),
   hive: z.object({
     paused: z.boolean(),
     pausedReason: z.string().nullable(),
@@ -194,8 +240,12 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('deny'), approvalId: Id }),
   z.object({ type: z.literal('pause'), reason: z.string().max(200).optional() }),
   z.object({ type: z.literal('resume') }),
-  /** Check the AI engine again now (e.g. right after the user signed in). */
+  /** Check the AI engines again now (e.g. right after the user signed in). */
   z.object({ type: z.literal('checkEngine') }),
+  /** Switch an engine on or off for the hive. */
+  z.object({ type: z.literal('setEngineEnabled'), engineId: EngineIdSchema, enabled: z.boolean() }),
+  /** The user's preference order (first = default). Unknown ids are ignored; missing ones keep their place at the end. */
+  z.object({ type: z.literal('setEngineOrder'), order: z.array(EngineIdSchema).max(5) }),
   z.object({ type: z.literal('cancelGoal'), goalId: Id }),
   /** Revert one card's changes on the hive branch (history kept). */
   z.object({ type: z.literal('undoCard'), goalId: Id, cardId: Id }),

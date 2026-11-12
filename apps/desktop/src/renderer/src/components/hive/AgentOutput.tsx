@@ -1,6 +1,7 @@
 import type { AgentView } from '@insectoids/shared';
 import { Hand } from 'lucide-react';
 import { useLayoutEffect, useRef } from 'react';
+import { engineName } from '@/components/connections/engine-names';
 import { StatusDot } from '@/components/StatusDot';
 import { LANE_LABEL, agentName, formatTokens, formatUsd, laneDot, modelLabel, roleLabel } from './format';
 
@@ -33,6 +34,12 @@ export function AgentOutput({ agent }: { agent: AgentView }) {
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         <span>{LANE_LABEL[agent.status]}</span>
         <span className="text-muted">·</span>
+        {engineName(agent.engine) ? (
+          <>
+            <span>{engineName(agent.engine)}</span>
+            <span className="text-muted">·</span>
+          </>
+        ) : null}
         <span className="font-mono">{modelLabel(agent)}</span>
         <span className="text-muted">·</span>
         <span className="font-mono">{formatTokens(agent.tokens)} tokens</span>

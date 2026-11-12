@@ -13,38 +13,41 @@ import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
 import type { Brain, BoardCard, Goal } from '@insectoids/brain';
 import {
-  ClaudeEngine,
   type ClaudeEvent,
   type ClaudeInstall,
   type BrainAccess,
   type Engine,
+  type EngineAdapter,
+  EngineRegistry,
   type EngineRequest,
-  type EngineResult,
-  type EngineRun,
   Hive,
   type HiveEvent,
   Library,
   type ModelTiers,
   type Plan,
-  checkClaudeAuth,
+  claudeAdapter,
   demoEngine,
-  detectClaude,
+  fakeAdapter,
   headlineFrom,
+  plannedAdapters,
+  routeCard,
 } from '@insectoids/harness';
-import type {
-  ActivityView,
-  AgentView,
-  ApprovalView,
-  CardView,
-  ChangesView,
-  CommandResult,
-  EngineView,
-  GoalView,
-  HiveCommand,
-  HivePush,
-  HiveSnapshot,
-  LaneStatus,
-  ProjectView,
+import {
+  type ActivityView,
+  type AgentView,
+  type ApprovalView,
+  type CardView,
+  type ChangesView,
+  type CommandResult,
+  type EngineView,
+  type GoalView,
+  type HiveCommand,
+  type HivePush,
+  type HiveSnapshot,
+  type LaneStatus,
+  type ProjectView,
+  type EngineId,
+  EngineIdSchema,
 } from '@insectoids/shared';
 import { Workspace } from '@insectoids/workspace';
 import type { DoorPaths } from './messages';
@@ -83,12 +86,18 @@ export interface HiveManagerOptions {
   log?: (line: string) => void;
   /** Foreman tick interval. Default 1000 ms (500 ms with the demo engine). */
   tickMs?: number;
-  /** Tests: replace Claude detection. */
+  /** Tests: replace Claude detection (and the sign-in check, with `auth`). */
   detect?: () => Promise<ClaudeInstall>;
   auth?: (command: string) => Promise<{ loggedIn: boolean }>;
   /** Tests: a custom engine instead of the demo or Claude. */
   engineOverride?: Engine;
   now?: () => number;
+}
+
+/** The host's own settings file (the project and engine choices); app-wide settings live in main's app.json. */
+interface HostSettings {
+  projectPath?: string;
+  engines?: { order: EngineId[]; disabled: EngineId[] };
 }
 
 interface ProjectState {
@@ -138,24 +147,10 @@ export function engineLines(e: ClaudeEvent): string[] {
   }
 }
 
-/** Engine that defers to whatever is ready right now; runs fail as "signed out" until then (the Hive pauses). */
-class SwitchEngine implements Engine {
-  current: Engine | null = null;
-  run(req: EngineRequest): EngineRun {
-    if (this.current) return this.current.run(req);
-    const result: EngineResult = {
-      ok: false, error: 'auth', model: req.route.model, models: [], sessionId: null, text: '', stderrTail: 'Claude Code is not ready.',
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, costUsd: 0, numTurns: 0, durationMs: 0, exitCode: null,
-    };
-    return { done: Promise.resolve(result), stop: () => {} };
-  }
-}
-
 export class HiveManager {
   readonly #o: HiveManagerOptions;
   readonly #now: () => number;
-  readonly #engine = new SwitchEngine();
-  #engineView: EngineView;
+  readonly #engines: EngineRegistry;
   #engineTimer: NodeJS.Timeout | null = null;
   #project: ProjectState | null = null;
   #paused = false;
@@ -177,20 +172,43 @@ export class HiveManager {
     this.#o = o;
     this.#now = o.now ?? Date.now;
     this.#limits = { ...(o.limits ?? DEFAULT_LIMITS) };
-    if (o.engineOverride) {
-      this.#engine.current = o.engineOverride;
-      this.#engineView = { state: 'fake', name: 'Test engine', version: null, message: 'A scripted test engine.' };
-    } else if (o.engine === 'fake') {
-      this.#engine.current = demoEngine();
-      this.#engineView = { state: 'fake', name: 'Demo engine', version: null, message: 'Scripted demo: no AI calls and no tokens are used.' };
-    } else {
-      this.#engineView = { state: 'checking', name: 'Claude Code', version: null, message: 'Checking for Claude Code…' };
-    }
+    this.#engines = new EngineRegistry(this.#adapters(), this.#readSettings().engines ?? {});
+  }
+
+  /**
+   * The engines this hive knows. With the scripted engine (tests, e2e, demos) it is the only one that can
+   * run: Claude Code is listed but never checked or run there, so a test can never spend real tokens.
+   */
+  #adapters(): EngineAdapter[] {
+    const scripted = this.#o.engineOverride
+      ? fakeAdapter(this.#o.engineOverride, { name: 'Test engine', message: 'A scripted test engine.' })
+      : this.#o.engine === 'fake'
+        ? fakeAdapter(demoEngine())
+        : null;
+    const doors = this.#o.doors;
+    const claude = claudeAdapter({
+      // The guard hook runs on the app's own executable as Node through a launcher that sets
+      // ELECTRON_RUN_AS_NODE for the hook alone. It is never put in Claude's environment: shell
+      // commands an insect runs would inherit it and any project that starts Electron would break.
+      // (The MCP door gets it through its server env, the brain CLI through its shim.)
+      hook: doors?.hookLauncher ?? { command: doors?.runtime.command ?? process.execPath, args: [doors?.guardHook ?? ''] },
+      promptDir: join(this.#o.userDataDir, 'hive', 'prompts'),
+      ...(this.#o.detect ? { detect: this.#o.detect } : {}),
+      ...(this.#o.auth ? { auth: this.#o.auth } : {}),
+    });
+    if (!scripted) return [claude, ...plannedAdapters()];
+    const { create: _never, ...listed } = claude;
+    void _never;
+    const listedOnly: EngineAdapter = {
+      ...listed,
+      detect: async () => ({ state: 'missing', version: null, message: 'Not checked: the scripted engine runs everything here.' }),
+    };
+    return [scripted, listedOnly, ...plannedAdapters()];
   }
 
   /** Restore the project and start checking the engine. Never throws: problems become activity lines. */
   async init(): Promise<void> {
-    if (this.#o.engine === 'claude' && !this.#o.engineOverride) void this.#checkEngine();
+    void this.#checkEngines();
     const path = this.#o.project ?? this.#readSettings().projectPath;
     if (!path) return;
     try {
@@ -240,12 +258,18 @@ export class HiveManager {
     if (cmd.type === 'setProject') return this.#setProject(cmd.path);
     if (cmd.type === 'pause') return this.#pause(cmd.reason ?? 'Paused by you.');
     if (cmd.type === 'resume') return this.#resume();
-    if (cmd.type === 'checkEngine') return this.#recheckEngine();
+    if (cmd.type === 'checkEngine') return this.#recheckEngines();
+    if (cmd.type === 'setEngineEnabled') return this.#setEngineEnabled(cmd.engineId, cmd.enabled);
+    if (cmd.type === 'setEngineOrder') {
+      this.#engines.setOrder(cmd.order);
+      return this.#saveEnginePrefs();
+    }
     const p = this.#mustProject();
     switch (cmd.type) {
       case 'submitGoal': {
-        if (this.#engineView.state !== 'ready' && this.#engineView.state !== 'fake') {
-          throw new Error(`${this.#engineView.name} is not ready: ${this.#engineView.message}`);
+        if (!this.#engines.defaultEngine()) {
+          const view = this.#engineView();
+          throw new Error(`${view.name} is not ready: ${view.message}`);
         }
         // Planning can take minutes with a real engine: start it and return. The goal shows up at once.
         void p.hive.submitGoal(cmd.text, cmd.budgetTokens ? { budgetTokens: cmd.budgetTokens } : {}).catch((err: unknown) => {
@@ -337,7 +361,8 @@ export class HiveManager {
     const hive = new Hive({
       brain: this.#o.brain,
       workspace,
-      engine: this.#engine,
+      engine: this.#engines.engine(),
+      route: (input) => this.#engines.route(input, routeCard),
       library: new Library(this.#o.libraryDir),
       repoDir: root,
       dataDir: join(data, 'projects', view.shelf),
@@ -406,58 +431,49 @@ export class HiveManager {
 
   // ---- engine ----------------------------------------------------------------------------------
 
-  /** "Check again" (e.g. right after signing in): re-check Claude Code now instead of waiting a minute. */
-  async #recheckEngine(): Promise<void> {
-    // The demo and test engines are always ready.
-    if (this.#o.engine === 'fake' || this.#o.engineOverride) return;
+  /** "Check again" (e.g. right after signing in): re-check every engine now instead of waiting a minute. */
+  async #recheckEngines(): Promise<void> {
     if (this.#engineTimer) clearTimeout(this.#engineTimer);
     this.#engineTimer = null;
-    await this.#checkEngine();
+    await this.#checkEngines();
   }
 
-  async #checkEngine(): Promise<void> {
+  async #checkEngines(): Promise<void> {
     if (this.#disposed) return;
-    const detect = this.#o.detect ?? (() => detectClaude());
-    const auth = this.#o.auth ?? ((c: string) => checkClaudeAuth(c));
-    let view: EngineView;
-    try {
-      const install = await detect();
-      if (install.status === 'missing') {
-        view = { state: 'missing', name: 'Claude Code', version: null, message: 'Claude Code is not installed. Install it from claude.com/claude-code; the hive checks again every minute.' };
-      } else if (install.status === 'unsupported') {
-        view = { state: 'missing', name: 'Claude Code', version: null, message: install.reason };
-      } else if (install.status === 'outdated') {
-        view = { state: 'outdated', name: 'Claude Code', version: install.version, message: `Claude Code ${install.version} is older than ${install.minimum}. Run "claude update" in a terminal.` };
-      } else if (!(await auth(install.command)).loggedIn) {
-        view = { state: 'signed-out', name: 'Claude Code', version: install.version, message: 'Claude Code is signed out. Run "claude auth login" in a terminal; the hive checks again every minute.' };
-      } else {
-        view = { state: 'ready', name: 'Claude Code', version: install.version, message: `Claude Code ${install.version} is ready.` };
-        this.#engine.current = this.#claudeEngine(install.command);
-      }
-    } catch (err) {
-      view = { state: 'missing', name: 'Claude Code', version: null, message: `Could not check Claude Code: ${err instanceof Error ? err.message : String(err)}` };
-    }
-    const was = this.#engineView.state;
-    this.#engineView = view;
-    if (view.state !== 'ready') this.#engine.current = null;
-    if (was !== view.state) this.#changed('engine');
-    if (view.state !== 'ready' && !this.#disposed) {
-      this.#engineTimer = setTimeout(() => void this.#checkEngine(), ENGINE_RECHECK_MS);
+    if (await this.#engines.detectAll()) this.#changed('engine');
+    if (this.#engines.anyEnabledNotReady && !this.#disposed) {
+      if (this.#engineTimer) clearTimeout(this.#engineTimer);
+      this.#engineTimer = setTimeout(() => void this.#checkEngines(), ENGINE_RECHECK_MS);
       this.#engineTimer.unref?.();
     }
   }
 
-  #claudeEngine(command: string): Engine {
-    const doors = this.#o.doors;
-    return new ClaudeEngine({
-      claude: command,
-      // The guard hook runs on the app's own executable as Node through a launcher that sets
-      // ELECTRON_RUN_AS_NODE for the hook alone. It is never put in Claude's environment: shell
-      // commands an insect runs would inherit it and any project that starts Electron would break.
-      // (The MCP door gets it through its server env, the brain CLI through its shim.)
-      hook: doors?.hookLauncher ?? { command: doors?.runtime.command ?? process.execPath, args: [doors?.guardHook ?? ''] },
-      promptDir: join(this.#o.userDataDir, 'hive', 'prompts'),
-    });
+  #setEngineEnabled(id: EngineId, enabled: boolean): void {
+    if (!enabled && this.#engines.isEnabled(id) && this.#engines.isReady(id)) {
+      const otherReady = this.#engines.order.some((e) => e !== id && this.#engines.isEnabled(e) && this.#engines.isReady(e));
+      const busy = this.#goals().some((g) => g.status === 'running' || g.status === 'planning');
+      if (!otherReady && busy) {
+        throw new Error(`${this.#engines.adapter(id)?.name ?? id} is the only engine ready and a goal is running. Pause or finish the goal first, or switch on another engine.`);
+      }
+    }
+    this.#engines.setEnabled(id, enabled);
+    this.#saveEnginePrefs();
+    if (enabled) void this.#checkEngines();
+  }
+
+  #saveEnginePrefs(): void {
+    this.#writeSettings({ engines: this.#engines.prefs() });
+  }
+
+  /** The default engine as the Queen and setup screens show it (the first enabled, ready one, or why none is). */
+  #engineView(): EngineView {
+    const cards = this.#engines.cards();
+    const ready = this.#engines.defaultEngine();
+    const card = ready ? cards.find((c) => c.id === ready.id) : cards.find((c) => c.enabled && c.state !== 'unsupported');
+    if (!card) {
+      return { state: 'missing', name: 'No AI engine', version: null, message: 'Every AI engine is switched off. Switch one on in Connections.' };
+    }
+    return { state: card.state === 'unsupported' ? 'missing' : card.state, name: card.name, version: card.version, message: card.message };
   }
 
   // ---- read model ------------------------------------------------------------------------------
@@ -494,7 +510,8 @@ export class HiveManager {
     const finished = lanes.filter((l) => l.status !== 'working' && l.status !== 'blocked').sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0)).slice(0, FINISHED_LANES_MAX);
     return {
       project: p?.view ?? null,
-      engine: this.#engineView,
+      engine: this.#engineView(),
+      engines: this.#engines.cards(),
       hive: { paused: this.#paused, pausedReason: this.#pausedReason, insectCap: this.#limits.insectCap, working: this.#working() },
       goals: goals.map((g) => this.#goalView(g)),
       cards,
@@ -594,6 +611,7 @@ export class HiveManager {
         goalId: e.goalId ?? null,
         cardId: e.cardId ?? null,
         title: r.title,
+        engine: EngineIdSchema.safeParse(r.engine).success ? (r.engine as EngineId) : null,
         model: r.model,
         effort: r.effort,
         status: 'working',
@@ -691,16 +709,21 @@ export class HiveManager {
     return join(this.#o.userDataDir, 'settings.json');
   }
 
-  #readSettings(): { projectPath?: string } {
+  #readSettings(): HostSettings {
     try {
-      const raw = JSON.parse(readFileSync(this.#settingsPath(), 'utf8')) as { projectPath?: unknown };
-      return typeof raw.projectPath === 'string' ? { projectPath: raw.projectPath } : {};
+      const raw = JSON.parse(readFileSync(this.#settingsPath(), 'utf8')) as { projectPath?: unknown; engines?: { order?: unknown; disabled?: unknown } };
+      const ids = (v: unknown): EngineId[] =>
+        Array.isArray(v) ? v.flatMap((x) => (EngineIdSchema.safeParse(x).success ? [x as EngineId] : [])) : [];
+      return {
+        ...(typeof raw.projectPath === 'string' ? { projectPath: raw.projectPath } : {}),
+        ...(raw.engines && typeof raw.engines === 'object' ? { engines: { order: ids(raw.engines.order), disabled: ids(raw.engines.disabled) } } : {}),
+      };
     } catch {
       return {};
     }
   }
 
-  #writeSettings(next: { projectPath: string }): void {
+  #writeSettings(next: Partial<HostSettings>): void {
     mkdirSync(this.#o.userDataDir, { recursive: true });
     writeFileSync(this.#settingsPath(), JSON.stringify({ ...this.#readSettings(), ...next }, null, 2));
   }

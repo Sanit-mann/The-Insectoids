@@ -183,3 +183,27 @@ Three milestones, each ending in something the user can try.
     - The Queen's prompt now says to use normal priority by default, with "high" only when other work waits on a card or it is risky.
   - **Plan card:** the Queen writes a one-line `headline` (older plans derive it from the summary's first sentence), and the long summary sits behind "Details". The prompt tells her not to write approval wording, since the hive decides that.
   - **Brain crash:** a new e2e test (`brain-crash.spec.ts`) kills the Brain host process. A new process starts, the saved data is still there, and the hive accepts a goal. Passes 3/3 repeated.
+- **A1 Engine registry + Connections screen: done (2026-11-12).** Built by two parallel workers on a shared contract (`EngineCardSchema`, `snapshot.engines`, `setEngineEnabled` / `setEngineOrder`). 456 unit tests and 45 e2e tests pass.
+  - **Harness:**
+    - **Adapters:** each `EngineAdapter` declares its capabilities (how the guard protects runs, MCP, effort levels, whether cost is reported), models by tier, install and sign-in text and a privacy note.
+    - **Registry:** `EngineRegistry` keeps the user's order, on/off switches and detections; `RegistryEngine` sends each run to the adapter its route names (`Route.engine`).
+    - **Adapters today:** Claude Code (real), the scripted test engine, and Gemini CLI, Codex and OpenCode listed as "not available yet", with real install text.
+  - **Routing rule (`pickEngine`):** the first engine in the user's order that is on, ready and guarded. An engine that's only safe read-only never gets work that changes files (the Inspector counts as a writer). Per-caste routing and learning come in A5.
+  - **Host:**
+    - The registry replaces the single engine.
+    - Engines are checked at start and every 60 s while any enabled one isn't ready.
+    - Order and on/off switches are saved.
+    - Switching off the only ready engine is refused while a goal runs.
+    - In scripted mode Claude can never run, so no test can spend real tokens.
+  - **Connections screen** (shadcn `button`, Kokonut `inline-alert`; custom accessible switch, since Kokonut's `switch-button` is a theme toggle). One card per engine:
+    - state and version;
+    - a "Default" badge;
+    - safety in plain words;
+    - cost reported or estimated;
+    - models by tier;
+    - privacy note;
+    - copyable install and sign-in commands;
+    - an on/off switch and Move up / Move down.
+
+    The API providers, Services and Vault tabs show "Later". Hive lanes now name the engine that ran them.
+  - **Fixed after the screenshot:** unsupported engines said when they're coming twice. Screenshot: `design/screenshots/phase-2-a1-connections.png`.

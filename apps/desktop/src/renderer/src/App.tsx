@@ -5,6 +5,7 @@ import { Rail } from '@/components/Rail';
 import { ApprovalsScreen } from '@/components/screens/ApprovalsScreen';
 import { BrainScreen } from '@/components/screens/BrainScreen';
 import { ChangesScreen } from '@/components/screens/ChangesScreen';
+import { ConnectionsScreen } from '@/components/screens/ConnectionsScreen';
 import { HiveScreen } from '@/components/screens/HiveScreen';
 import { QueenScreen } from '@/components/screens/QueenScreen';
 import { SettingsScreen } from '@/components/screens/SettingsScreen';
@@ -25,6 +26,7 @@ const LIVE: Partial<Record<ScreenId, () => ReactNode>> = {
   changes: () => <ChangesScreen />,
   brain: () => <BrainScreen />,
   settings: () => <SettingsScreen />,
+  connections: () => <ConnectionsScreen />,
 };
 
 export function App() {

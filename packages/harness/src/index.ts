@@ -9,3 +9,5 @@ export * from './hive/prompts';
 export * from './hive/protocol';
 export * from './hive/router';
 export * from './hive/demo';
+export * from './engines/registry';
+export * from './engines/adapters';

@@ -8,7 +8,7 @@ import { type BrainAccess, type BrainTicket, brainWriteAccess } from './brain-ac
 import type { Engine, EngineRequest, EngineResult } from './engine';
 import { type Library, brainRules, inspectorPrompt, insectPrompt, queenPrompt } from './prompts';
 import { type Plan, parsePlan, parseStatus, parseVerdict } from './protocol';
-import { type ModelTiers, budgetState, routeCard, runTokens } from './router';
+import { type ModelTiers, type Route, type RouteInput, budgetState, routeCard, runTokens } from './router';
 
 export interface HiveOptions {
   brain: Brain;
@@ -22,6 +22,11 @@ export interface HiveOptions {
   shelf: string;
   home: string;
   models: ModelTiers;
+  /**
+   * Picks the engine, model and effort for a run (e.g. an EngineRegistry across several engines).
+   * Default: `routeCard` on `models`, all on Claude Code.
+   */
+  route?: (input: RouteInput) => Route;
   /** Most insects working at once (Hive 02-D7, set by the user). */
   insectCap: number;
   /** Castes this hive has (Phase 1: coder, tester). */
@@ -81,6 +86,8 @@ export interface RunInfo {
   runId: string;
   role: EngineRequest['role'];
   title: string;
+  /** Which engine runs it. */
+  engine: string;
   /** Planned by the router; the engine's init event reports what actually ran. */
   model: string;
   effort: string;
@@ -128,6 +135,10 @@ export class Hive {
 
   constructor(o: HiveOptions) {
     this.#o = { leaseMs: 20 * 60_000, defaultBudgetTokens: 2_000_000, ...o };
+  }
+
+  #route(input: RouteInput): Route {
+    return this.#o.route ? this.#o.route(input) : routeCard(input, this.#o.models);
   }
 
   get paused(): boolean {
@@ -358,7 +369,7 @@ export class Hive {
         cwd: this.#o.repoDir,
         system: base.system,
         task,
-        route: routeCard({ role: 'queen', priority: 'normal', attempts: 0 }, this.#o.models),
+        route: this.#route({ role: 'queen', priority: 'normal', attempts: 0 }),
         guard: { workspace: scratch, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
       });
       if (!result.ok) return null;
@@ -466,7 +477,7 @@ export class Hive {
           cwd: cardPath,
           system: prompt.system,
           task: prompt.task,
-          route: routeCard({ role: card.caste, priority: card.priority, attempts: card.attempts }, this.#o.models),
+          route: this.#route({ role: card.caste, priority: card.priority, attempts: card.attempts }),
           guard: {
             workspace: cardPath,
             home: this.#o.home,
@@ -548,7 +559,7 @@ export class Hive {
         cwd: cardPath,
         system: prompt.system,
         task: prompt.task,
-        route: routeCard({ role: 'inspector', priority: card.priority, attempts: 0 }, this.#o.models),
+        route: this.#route({ role: 'inspector', priority: card.priority, attempts: 0 }),
         guard: { workspace: cardPath, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
       }, (stop) => (stopRun = stop));
 
@@ -667,6 +678,7 @@ export class Hive {
       runId: `${req.agentId}#${++this.#runs}`,
       role: req.role,
       title: req.title ?? req.agentId,
+      engine: req.route.engine,
       model: req.route.model,
       effort: req.route.effort,
     };

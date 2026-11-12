@@ -1,4 +1,4 @@
-import type { Caste, Priority } from '@insectoids/shared';
+import type { Caste, EngineId, Priority } from '@insectoids/shared';
 import type { Effort } from '../claude/args';
 import type { Usage } from '../claude/stream';
 
@@ -17,6 +17,8 @@ export interface RouteInput {
 }
 
 export interface Route {
+  /** Which engine runs it (Connections 04-D2). */
+  engine: EngineId;
   model: string;
   effort: Effort;
   maxTurns: number;
@@ -33,8 +35,8 @@ const MIN = 60_000;
  * pick by role and priority, then on each retry raise effort first and the model tier next.
  * Learning from outcomes comes in Phase 2.
  */
-export function routeCard(input: RouteInput, models: ModelTiers): Route {
-  if (input.role === 'queen') return { model: models.strongest, effort: 'high', maxTurns: 30, maxBudgetUsd: 3, timeoutMs: 15 * MIN };
+export function routeCard(input: RouteInput, models: ModelTiers, engine: EngineId = 'claude'): Route {
+  if (input.role === 'queen') return { engine, model: models.strongest, effort: 'high', maxTurns: 30, maxBudgetUsd: 3, timeoutMs: 15 * MIN };
 
   let tier: number;
   let effort: number;
@@ -51,6 +53,7 @@ export function routeCard(input: RouteInput, models: ModelTiers): Route {
   }
   const tierName = TIERS[tier]!;
   return {
+    engine,
     model: models[tierName],
     effort: EFFORTS[effort]!,
     maxTurns: input.role === 'inspector' ? 30 : 40,
@@ -72,4 +75,36 @@ export function budgetState(spent: number, budget: number | null): BudgetState {
   if (spent >= budget) return 'stop';
   if (spent >= budget * 0.75) return 'warn';
   return 'ok';
+}
+
+/** How an engine's runs are kept behind the command guard (see EngineCard.guard). */
+export type GuardKind = 'hook' | 'policy-and-tools' | 'read-only';
+
+/** One engine as the router sees it, in the user's preference order. */
+export interface EngineCandidate {
+  id: EngineId;
+  enabled: boolean;
+  /** Ready to run now (signed in, supported version), or the scripted test engine. */
+  ready: boolean;
+  guard: GuardKind | null;
+}
+
+/** Roles that never change files or run side-effecting commands: an engine limited to read-only work may take them. */
+const READ_ONLY_ROLES: ReadonlySet<RouteInput['role']> = new Set(['queen', 'reviewer', 'researcher', 'analyst']);
+
+export const isReadOnlyRole = (role: RouteInput['role']): boolean => READ_ONLY_ROLES.has(role);
+
+/**
+ * Which engine runs a card (Phase 2 A1: the first enabled, ready engine in the user's order;
+ * per-caste routing and learning from outcomes come in A5).
+ * Never a disabled or not-ready engine, never one without a guard, and never a read-only engine for work
+ * that changes files. Null when no engine qualifies.
+ */
+export function pickEngine(role: RouteInput['role'], candidates: readonly EngineCandidate[]): EngineId | null {
+  for (const c of candidates) {
+    if (!c.enabled || !c.ready || !c.guard) continue;
+    if (c.guard === 'read-only' && !isReadOnlyRole(role)) continue;
+    return c.id;
+  }
+  return null;
 }

@@ -170,6 +170,82 @@ describe('engine state', () => {
   });
 });
 
+describe('engine registry (Phase 2 A1)', () => {
+  const install = { status: 'installed' as const, command: 'claude', version: '2.1.322' };
+
+  it('lists every known engine; with the scripted engine, Claude Code is listed but never checked or run', async () => {
+    const m = make({ project: repo });
+    await m.init();
+    await until('engines checked', () => snap(m).engines.every((e) => e.state !== 'checking'));
+    const s = snap(m);
+    expect(s.engines.map((e) => [e.id, e.state])).toEqual([
+      ['fake', 'fake'],
+      ['claude', 'missing'],
+      ['gemini', 'unsupported'],
+      ['codex', 'unsupported'],
+      ['opencode', 'unsupported'],
+    ]);
+    expect(s.engines[1]!.message).toMatch(/Not checked/);
+    expect(s.engines.find((e) => e.id === 'gemini')).toMatchObject({ availableIn: 'Phase 2 · step A2', guard: null, reportsCost: false });
+    expect(s.engine).toMatchObject({ state: 'fake', name: 'Test engine' });
+  });
+
+  it('with Claude Code: the real adapter first, then the planned engines', async () => {
+    const m = make({ engine: 'claude', realEngine: true, project: repo, detect: async () => install, auth: async () => ({ loggedIn: true }) });
+    await m.init();
+    await until('ready', () => snap(m).engine.state === 'ready');
+    expect(snap(m).engines.map((e) => e.id)).toEqual(['claude', 'gemini', 'codex', 'opencode']);
+    expect(snap(m).engines[0]).toMatchObject({ state: 'ready', guard: 'hook', reportsCost: true, models: { strongest: 'opus' } });
+  });
+
+  it('switching off and reordering persist across restarts', async () => {
+    const m = make({ engine: 'claude', realEngine: true, project: repo, detect: async () => install, auth: async () => ({ loggedIn: true }) });
+    await m.init();
+    await until('ready', () => snap(m).engine.state === 'ready');
+    expect(await m.command({ type: 'setEngineOrder', order: ['opencode', 'claude'] })).toEqual({ ok: true });
+    expect(await m.command({ type: 'setEngineEnabled', engineId: 'gemini', enabled: false })).toEqual({ ok: true });
+    await m.dispose();
+    const again = make({ engine: 'claude', realEngine: true, project: repo, detect: async () => install, auth: async () => ({ loggedIn: true }) });
+    await again.init();
+    const s = snap(again);
+    expect(s.engines.map((e) => e.id)).toEqual(['opencode', 'claude', 'gemini', 'codex']);
+    expect(s.engines.find((e) => e.id === 'gemini')!.enabled).toBe(false);
+  });
+
+  it('with every engine switched off, goals are refused with a clear reason', async () => {
+    const m = make({ engine: 'claude', realEngine: true, project: repo, detect: async () => install, auth: async () => ({ loggedIn: true }) });
+    await m.init();
+    await until('ready', () => snap(m).engine.state === 'ready');
+    expect(await m.command({ type: 'setEngineEnabled', engineId: 'claude', enabled: false })).toEqual({ ok: true });
+    expect(snap(m).engine).toMatchObject({ state: 'missing', name: 'No AI engine' });
+    expect(await m.command({ type: 'submitGoal', text: 'Hello there' })).toMatchObject({ ok: false, error: expect.stringMatching(/switched off/) });
+  });
+
+  it('refuses to switch off the only ready engine while a goal is running', async () => {
+    const m = make({ project: repo });
+    await m.init();
+    await until('engine ready', () => snap(m).engine.state === 'fake');
+    await m.command({ type: 'submitGoal', text: 'Say hello' });
+    await waiting(m, 'plan');
+    // Planning done, plan waiting: not running yet, so it may be switched off and on again.
+    expect(await m.command({ type: 'setEngineEnabled', engineId: 'fake', enabled: false })).toEqual({ ok: true });
+    expect(await m.command({ type: 'setEngineEnabled', engineId: 'fake', enabled: true })).toEqual({ ok: true });
+    const plan = await waiting(m, 'plan');
+    await m.command({ type: 'approve', approvalId: plan.id });
+    await until('running', () => snap(m).goals[0]!.status === 'running');
+    expect(await m.command({ type: 'setEngineEnabled', engineId: 'fake', enabled: false })).toMatchObject({ ok: false, error: expect.stringMatching(/only engine ready/) });
+  });
+
+  it('lanes say which engine ran them', async () => {
+    const m = make({ project: repo });
+    await m.init();
+    await until('engine ready', () => snap(m).engine.state === 'fake');
+    await m.command({ type: 'submitGoal', text: 'Say hello' });
+    await until('a lane', () => snap(m).agents.length > 0);
+    expect(snap(m).agents.every((a) => a.engine === 'fake')).toBe(true);
+  });
+});
+
 describe('safety preset limits (Onboarding 08-D7)', () => {
   it('start with the given limits, show them in the snapshot, and change them live', async () => {
     const m = make({ project: repo, limits: { insectCap: 2, goalBudgetTokens: 1_000_000, approveEveryPlan: true } });
