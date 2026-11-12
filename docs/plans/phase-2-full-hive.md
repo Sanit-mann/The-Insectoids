@@ -240,3 +240,8 @@ Three milestones, each ending in something the user can try.
       - The sign-in note on the Connections card says a paid API key is needed.
       - Gemini detection no longer runs `npm root -g` through a shell on Windows; it uses the default npm folder and a PATH scan instead (no shell anywhere).
     - **Open decision for the user:** a paid Gemini API key (works with this adapter as built, billed per use, stored in the Vault from A3), or a new Antigravity CLI adapter (would use the paid plan; needs research first), or Gemini later.
+    - **User decision (2026-11-12): leave Gemini for now.**
+      - The adapter and the hive tools stay in place and tested; the Gemini card shows why it can't run.
+      - Gemini CLI 0.68.0 stays installed and does nothing on its own.
+      - **The Phase 2 demo's "2 engines" goal is on hold** until a second engine is chosen: Antigravity CLI once it's documented, a paid Gemini API key, or an OpenCode provider (A4).
+      - **Next: A3** (Vault + secret broker).
