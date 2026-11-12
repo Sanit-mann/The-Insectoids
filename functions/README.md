@@ -1,0 +1,20 @@
+# The Insectoids — Function Index
+
+Each function of the system lives in its own file in this folder. Status values: **Draft**, **In discussion**, **Finalized**.
+
+| # | Function | Summary | Status | File |
+|---|---|---|---|---|
+| 01 | Memory (Second Brain) | One local SQLite brain for all projects (shelf per project + global). Stores files, decisions, tasks, facts, outcomes and links; agents read in tiers to save tokens. Tool-agnostic (MCP + CLI + local API), personal, stored only on the user's PC. Own editable GUI (graph, tables, approvals; globe later) + optional Obsidian export. Single safe writer. Design D1–D14 and enhancements E1–E13, E15, E16 agreed. | Finalized | [01-memory.md](01-memory.md) |
+| 02 | Hive (Agent Hierarchy & Taskboard) | Queen (strongest model, only voice to user) plans in waves onto a taskboard; caste insects pull tasks; six "reflexes + brain" managers; per-task model + effort router; hive monitor; breaker ladder. Decisions D1–D12. | Finalized | [02-hive.md](02-hive.md) |
+| 03 | Capabilities (Agents & Skills) | Caste definitions + portable SKILL.md skills. Core library built: 15 agents, 48 skills, 2 tools; 879 more dormant in the catalog, activated only when needed. Decisions D1–D9. | Finalized | [03-capabilities.md](03-capabilities.md) |
+| 04 | Connections | How the AIOS reaches AI subscriptions (CLIs), model API providers (OpenRouter, FreeLLMAPI, local) and outside services, with an encrypted vault and a secret broker so agents never see keys. Launch: Claude Code, Codex, Gemini CLI, OpenCode; OpenAI-compatible providers; services in 3 phases. Decisions D1–D7. | Finalized | [04-connections.md](04-connections.md) |
+| 05 | Cadence (Schedules & Triggers) | Work the hive does without being asked: schedules, file watches, webhooks, service and hive events, maintenance. Every cadence runs through the Queen. Communication-only trust, catch-up-once on wake, per-cadence budgets, maintenance on by default, daily digest. Decisions D1–D8. | Finalized | [05-cadence.md](05-cadence.md) |
+| 06 | Workspace & Safety | Per-card isolated workspaces, single committer/merger, hive branch, checkpoints and undo, command guard, protected paths, network rules, sandbox levels. Decisions D1–D8. | Finalized | [06-workspace-safety.md](06-workspace-safety.md) |
+| 07 | The App (Shell & UI) | One desktop app for every screen: Queen chat, approval inbox, taskboard, hive monitor, Brain, changes & undo, library, connections, cadence, budgets, settings. Chat-first, subtle hive theme, 8-screen clickable prototype and component map. Decisions D1–D9. | Finalized | [07-app-shell-ui.md](07-app-shell-ui.md) |
+| 08 | Onboarding | First-run setup: privacy promise, Brain folder, engines, providers, "about you" interview, first project, safety limits, first goal. Rerunnable. 5-minute quick setup, Queen interview, safety presets, optional sample goal. Decisions D1–D8. | Finalized | [08-onboarding.md](08-onboarding.md) |
+| 09 | Tech Stack & Architecture | Proposed: Electron + TypeScript, React UI, SQLite (FTS5 + sqlite-vec) Brain service as single writer, local embeddings, PTY harness, loopback broker, pnpm monorepo. MIT open source. Decisions D1–D7. | Finalized | [09-tech-stack.md](09-tech-stack.md) |
+| 10 | Build Roadmap | Phase 0 foundation → Phase 1 "First Spark" MVP (one goal end to end, safely) → Phase 2 full hive → Phase 3 cadence & polish → Phase 4 expansion. A demo ends each phase. Claude Code only in the MVP; dogfooding from Phase 2; local git. Decisions D1–D6. | Ready to finalize (no open questions) | [10-build-roadmap.md](10-build-roadmap.md) |
+
+## Library
+
+The agents, skills and tools themselves live in [../library/](../library/): [FORMAT.md](../library/FORMAT.md) (how they're written), [CORE-SET.md](../library/CORE-SET.md) (what's built), [catalog/CATALOG.md](../library/catalog/CATALOG.md) (everything, active and dormant), [HARVEST-REPORT.md](../library/HARVEST-REPORT.md) (where it came from), [THIRD-PARTY-NOTICES.md](../library/THIRD-PARTY-NOTICES.md) (licenses).

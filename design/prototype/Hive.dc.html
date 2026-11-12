@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Insectoids · Hive monitor</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F0E0B;color:#F1EBDD;font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#F2A93B}a:hover{color:#FFC566}
+.app{min-height:100vh;display:flex;flex-wrap:wrap;align-items:stretch}
+.rail{flex:1 1 220px;background:#13110D;border-right:1px solid #2A261E;padding:18px 12px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;font-family:'Space Grotesk',Inter,sans-serif;font-weight:700;font-size:17px;color:#F7C873}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:#CFC6B4;text-decoration:none;font-weight:500}
+.nav:hover{background:#1E1B15;color:#F1EBDD}
+.nav.on{background:#2A2418;color:#F7C873}
+.nav.off{color:#7E7666}
+.count{margin-left:auto;background:#F2A93B;color:#1A1306;border-radius:999px;padding:0 8px;font-size:12px;font-weight:600}
+.main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 24px;border-bottom:1px solid #2A261E}
+.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid #2E2A22;background:#17150F;color:#E6DECD;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px;cursor:pointer}
+.pill.on{border-color:#F2A93B;color:#F7C873}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:9px 14px;font:inherit;font-weight:600;border:1px solid #3A3428;background:#1E1B15;color:#F1EBDD;cursor:pointer;min-height:40px}
+.btn.primary{background:#F2A93B;border-color:#F2A93B;color:#1A1306}
+.muted{color:#A8A08F}
+.small{font-size:12px}
+.mono{font-family:'JetBrains Mono',monospace;font-size:12px}
+.h{font-family:'Space Grotesk',Inter,sans-serif;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+.work{background:#F2A93B}.wait{background:#6CB6F5}.block{background:#EF7A5E}.done{background:#86C98A}.idle{background:#6E675A}.pause{background:#B49CF0}
+.row{display:flex;align-items:center;gap:10px}
+.lane{display:grid;grid-template-columns:minmax(150px,1.3fr) minmax(160px,2fr) minmax(120px,1fr) minmax(90px,.7fr) minmax(90px,.8fr);gap:12px;align-items:center;text-align:left;width:100%;padding:12px 14px;border:1px solid #2A261E;border-radius:12px;background:#17150F;color:#F1EBDD;font:inherit;cursor:pointer}
+.lane:hover{border-color:#4A4232}
+.lane.sel{border-color:#F2A93B}
+.hx{width:104px;height:92px;clip-path:polygon(25% 3%,75% 3%,100% 50%,75% 97%,25% 97%,0 50%);display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;border:0;font:inherit;font-size:12px;cursor:pointer;line-height:1.25;padding:0 10px}
+.term{background:#0A0907;border:1px solid #2A261E;border-radius:12px;padding:14px;font-family:'JetBrains Mono',monospace;font-size:12px;line-height:1.6;color:#D9D1BF;white-space:pre-wrap;min-height:180px}
+</style>
+</helmet>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="brand"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2A93B" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z"/><path d="M12 7l4.33 2.5v5L12 17l-4.33-2.5v-5z"/></svg>Insectoids</div>
+    <a class="nav" href="Main.dc.html">Queen</a>
+    <a class="nav" href="Approvals.dc.html">Approvals<span class="count">3</span></a>
+    <a class="nav" href="Taskboard.dc.html">Taskboard</a>
+    <a class="nav on" href="Hive.dc.html" aria-current="page">Hive</a>
+    <a class="nav" href="Brain.dc.html">Brain</a>
+    <a class="nav" href="Changes.dc.html">Changes</a>
+    <span class="nav off">Library</span>
+    <a class="nav" href="Connections.dc.html">Connections</a>
+    <span class="nav off">Cadence</span>
+  </nav>
+
+  <main class="main">
+    <div class="top">
+      <h1 class="h" style="margin: 0; font-size: 20px">Hive monitor</h1>
+      <button type="button" class="{{ lanesCls }}" onClick="{{ showLanes }}">Lanes</button>
+      <button type="button" class="{{ hiveCls }}" onClick="{{ showHive }}">Living hive</button>
+      <span class="muted small" style="margin-left: auto">9 agents · 4 working · insect limit 6 (set by you)</span>
+      <button class="btn" type="button">Pause hive</button>
+    </div>
+
+    <div style="display: flex; flex-wrap: wrap; flex: 1; min-height: 0">
+      <div style="flex: 999 1 600px; padding: 20px; display: flex; flex-direction: column; gap: 8px; min-width: 0; box-sizing: border-box">
+        <sc-if value="{{ lanes }}" hint-placeholder-val="{{ true }}">
+          <div class="lane" style="background: transparent; border-color: transparent; cursor: default; color: #A8A08F; font-size: 12px"><span>Agent</span><span>Task</span><span>Model · effort</span><span>Tokens</span><span>Status</span></div>
+          <sc-for list="{{ agents }}" as="a" hint-placeholder-count="6">
+            <button type="button" class="{{ a.cls }}" onClick="{{ a.pick }}">
+              <span class="row"><span class="{{ a.dotCls }}"></span><span style="font-weight: 600">{{ a.name }}</span></span>
+              <span class="muted">{{ a.task }}</span>
+              <span class="mono muted">{{ a.model }}</span>
+              <span class="mono">{{ a.tokens }}</span>
+              <span>{{ a.status }}</span>
+            </button>
+          </sc-for>
+        </sc-if>
+        <sc-if value="{{ hive }}" hint-placeholder-val="{{ false }}">
+          <div class="muted small">Each cell is an agent. Colour shows status; the label always says it too.</div>
+          <div style="display: flex; flex-direction: column; align-items: center; padding: 10px 0">
+            <sc-for list="{{ hexRows }}" as="r" hint-placeholder-count="3">
+              <div style="{{ r.style }}">
+                <sc-for list="{{ r.cells }}" as="c" hint-placeholder-count="4">
+                  <button type="button" class="hx" style="{{ c.style }}" onClick="{{ c.pick }}" aria-label="{{ c.label }}"><span style="font-weight: 700">{{ c.short }}</span><span>{{ c.status }}</span></button>
+                </sc-for>
+              </div>
+            </sc-for>
+          </div>
+        </sc-if>
+        <div class="row small muted" style="flex-wrap: wrap; gap: 14px; margin-top: 8px">
+          <span class="row"><span class="dot work"></span>Working</span><span class="row"><span class="dot wait"></span>Waiting or asking</span><span class="row"><span class="dot block"></span>Blocked or stopped</span><span class="row"><span class="dot done"></span>Done</span><span class="row"><span class="dot pause"></span>Paused</span><span class="row"><span class="dot idle"></span>Idle</span>
+        </div>
+      </div>
+
+      <aside style="flex: 1 1 380px; border-left: 1px solid #2A261E; background: #13110D; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box" aria-label="Selected agent">
+        <div class="row"><span class="{{ sel.dotCls }}"></span><h2 class="h" style="margin: 0; font-size: 18px">{{ sel.name }}</h2><span class="small muted" style="margin-left: auto">{{ sel.role }}</span></div>
+        <div class="muted">{{ sel.task }}</div>
+        <div class="row small" style="flex-wrap: wrap"><span class="mono">{{ sel.model }}</span><span class="muted">·</span><span class="mono">{{ sel.tokens }} tokens</span><span class="muted">·</span><span>model reported by the engine itself</span></div>
+        <div class="small muted">Live output (read-only)</div>
+        <div class="term" role="log" aria-live="off">{{ sel.log }}</div>
+        <sc-if value="{{ canTake }}" hint-placeholder-val="{{ true }}">
+          <div class="row" style="flex-wrap: wrap"><button class="btn primary" type="button" onClick="{{ take }}">Take over</button><span class="small muted">Taking over pauses this insect's card.</span></div>
+        </sc-if>
+        <sc-if value="{{ taken }}" hint-placeholder-val="{{ false }}">
+          <div class="row" style="flex-wrap: wrap"><span class="dot pause"></span><span>You are driving. The card is paused.</span><button class="btn" type="button" onClick="{{ release }}">Hand back</button></div>
+        </sc-if>
+        <div style="border-top: 1px solid #2A261E; padding-top: 12px; display: flex; flex-direction: column; gap: 6px">
+          <div class="h" style="font-size: 14px">Watchdog breaker</div>
+          <div class="row small"><span class="dot done"></span>Steer</div>
+          <div class="row small muted"><span class="dot idle"></span>Constrain (lower model or effort, fewer tools)</div>
+          <div class="row small muted"><span class="dot idle"></span>Stop</div>
+        </div>
+      </aside>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { view: 'lanes', picked: 'Ant-07', taken: false };
+  }
+  renderVals() {
+    const s = this.state;
+    const color = { work: '#F2A93B', wait: '#6CB6F5', block: '#EF7A5E', done: '#86C98A', idle: '#4A443A', pause: '#B49CF0' };
+    const ink = { work: '#1A1306', wait: '#0B1A28', block: '#2A0E06', done: '#0F2210', idle: '#F1EBDD', pause: '#1B1030' };
+    const raw = [
+      { id: 'Queen', name: 'Queen', short: 'Queen', role: 'Queen', st: 'work', status: 'Planning', task: 'Planning wave 3', model: 'Opus · high', tokens: '212k', log: '> read outcomes for wave 2 (5 of 8 done)\n> C-14 blocked: waiting for approval\n> drafting wave 3: tests, review, docs' },
+      { id: 'Foreman', name: 'Foreman', short: 'Foreman', role: 'Manager', st: 'work', status: 'Balancing', task: 'Board balance, leases', model: 'code reflexes', tokens: '0', log: '[reflex] lease check: 4 active, 0 expired\n[reflex] insects 4/6, queue 2 open\n[reflex] no scale change' },
+      { id: 'Treasurer', name: 'Treasurer', short: 'Treasurer', role: 'Manager', st: 'idle', status: 'Idle', task: 'Budget 62% of goal', model: 'code reflexes', tokens: '0', log: '[reflex] Claude 5-hour window at 41%\n[reflex] routing C-13 to Gemini · low (writer, normal)' },
+      { id: 'Watchdog', name: 'Watchdog', short: 'Watchdog', role: 'Manager', st: 'work', status: 'Watching', task: 'Health and command guard', model: 'code reflexes', tokens: '0', log: '[guard] blocked: rm -rf ../shared (outside workspace)\n[guard] turned into an approval request' },
+      { id: 'Inspector', name: 'Inspector', short: 'Inspector', role: 'Manager', st: 'wait', status: 'Reviewing', task: 'Checking C-09 Homepage layout', model: 'Sonnet · high', tokens: '48k', log: '> running tests: 24 passed\n> checking 3 breakpoints\n> comparing with wireframe' },
+      { id: 'Ant-07', name: 'Coder · Ant-07', short: 'Ant-07', role: 'Coder', st: 'work', status: 'Working', task: 'C-08 Build the pricing page', model: 'Sonnet · medium', tokens: '96k', log: '$ npm run test -- pricing\n  ✓ plan cards render (3)\n  ✓ yearly toggle updates prices\n  … writing FAQ section' },
+      { id: 'Ant-11', name: 'Writer · Ant-11', short: 'Ant-11', role: 'Writer', st: 'work', status: 'Working', task: 'C-10 Homepage copy', model: 'Gemini · low', tokens: '31k', log: '> brand voice rules loaded\n> draft hero: 18 words\n> feature block 2 of 3' },
+      { id: 'Ant-09', name: 'Coder · Ant-09', short: 'Ant-09', role: 'Coder', st: 'block', status: 'Blocked', task: 'C-14 Blog layout · needs approval', model: 'Sonnet · medium', tokens: '22k', log: '> needs dependency: sharp\n> card set to blocked; question sent to the Queen' },
+      { id: 'Librarian', name: 'Librarian', short: 'Librarian', role: 'Manager', st: 'idle', status: 'Idle', task: 'Next audit tonight 02:00', model: 'code reflexes', tokens: '0', log: '[reflex] dedupe: 2 near-duplicate facts merged\n[schedule] Brain audit 02:00' }
+    ];
+    const agents = raw.map((a) => ({ ...a, dotCls: 'dot ' + a.st, cls: 'lane' + (a.id === s.picked ? ' sel' : ''), pick: () => this.setState({ picked: a.id, taken: false }) }));
+    const cell = (a) => ({ ...a, label: a.name + ', ' + a.status, style: 'background:' + color[a.st] + ';color:' + ink[a.st] + ';' + (a.id === s.picked ? 'outline:3px solid #FFF3D6;outline-offset:-6px;' : '') });
+    const rows = [agents.slice(0, 3), agents.slice(3, 6), agents.slice(6, 9)];
+    const hexRows = rows.map((r, i) => ({ cells: r.map(cell), style: 'display:flex;gap:8px;margin-top:' + (i ? '-20px' : '0') + ';margin-left:' + (i === 1 ? '112px' : '0') }));
+    const sel = agents.find((a) => a.id === s.picked);
+    const insect = ['Coder', 'Writer', 'Tester', 'Reviewer', 'Researcher', 'Documenter', 'Designer', 'Analyst'].indexOf(sel.role) >= 0;
+    return {
+      agents, hexRows, sel,
+      lanes: s.view === 'lanes', hive: s.view === 'hive',
+      lanesCls: 'pill' + (s.view === 'lanes' ? ' on' : ''), hiveCls: 'pill' + (s.view === 'hive' ? ' on' : ''),
+      showLanes: () => this.setState({ view: 'lanes' }), showHive: () => this.setState({ view: 'hive' }),
+      canTake: insect && !s.taken, taken: insect && s.taken,
+      take: () => this.setState({ taken: true }), release: () => this.setState({ taken: false })
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Insectoids · Changes and undo</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F0E0B;color:#F1EBDD;font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#F2A93B}a:hover{color:#FFC566}
+.app{min-height:100vh;display:flex;flex-wrap:wrap;align-items:stretch}
+.rail{flex:1 1 220px;background:#13110D;border-right:1px solid #2A261E;padding:18px 12px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;font-family:'Space Grotesk',Inter,sans-serif;font-weight:700;font-size:17px;color:#F7C873}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:#CFC6B4;text-decoration:none;font-weight:500}
+.nav:hover{background:#1E1B15;color:#F1EBDD}
+.nav.on{background:#2A2418;color:#F7C873}
+.nav.off{color:#7E7666}
+.count{margin-left:auto;background:#F2A93B;color:#1A1306;border-radius:999px;padding:0 8px;font-size:12px;font-weight:600}
+.main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 24px;border-bottom:1px solid #2A261E}
+.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid #2E2A22;background:#17150F;color:#E6DECD;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:9px 14px;font:inherit;font-weight:600;border:1px solid #3A3428;background:#1E1B15;color:#F1EBDD;cursor:pointer;min-height:40px}
+.btn.primary{background:#F2A93B;border-color:#F2A93B;color:#1A1306}
+.btn.warn{border-color:#6B3A2C;color:#F4A58F}
+.muted{color:#A8A08F}
+.small{font-size:12px}
+.mono{font-family:'JetBrains Mono',monospace;font-size:12.5px}
+.h{font-family:'Space Grotesk',Inter,sans-serif;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+.done{background:#86C98A}.wait{background:#6CB6F5}.idle{background:#6E675A}
+.row{display:flex;align-items:center;gap:10px}
+.tree{display:flex;flex-direction:column;gap:2px;text-align:left;width:100%;background:transparent;border:1px solid transparent;border-radius:10px;padding:8px 10px;color:#F1EBDD;font:inherit;cursor:pointer}
+.tree:hover{background:#1A1812}
+.tree.sel{background:#201D17;border-color:#3A3428}
+.ln{display:flex;gap:12px;padding:1px 12px;font-family:'JetBrains Mono',monospace;font-size:12.5px;white-space:pre}
+.add{background:#13261A;color:#B7E4B9}
+.del{background:#2E1712;color:#F4B3A2}
+</style>
+</helmet>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="brand"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2A93B" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z"/><path d="M12 7l4.33 2.5v5L12 17l-4.33-2.5v-5z"/></svg>Insectoids</div>
+    <a class="nav" href="Main.dc.html">Queen</a>
+    <a class="nav" href="Approvals.dc.html">Approvals<span class="count">3</span></a>
+    <a class="nav" href="Taskboard.dc.html">Taskboard</a>
+    <a class="nav" href="Hive.dc.html">Hive</a>
+    <a class="nav" href="Brain.dc.html">Brain</a>
+    <a class="nav on" href="Changes.dc.html" aria-current="page">Changes</a>
+    <span class="nav off">Library</span>
+    <a class="nav" href="Connections.dc.html">Connections</a>
+    <span class="nav off">Cadence</span>
+  </nav>
+
+  <main class="main">
+    <div class="top">
+      <h1 class="h" style="margin: 0; font-size: 20px">Changes &amp; undo</h1>
+      <span class="pill">Goal: Marketing site</span>
+      <span class="pill mono">hive/marketing-site</span>
+      <span class="muted small" style="margin-left: auto">Your main branch changes only when you approve. Checkpoints kept 30 days after the goal closes.</span>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; flex: 1; min-height: 0">
+      <div style="flex: 1 1 280px; border-right: 1px solid #2A261E; padding: 14px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box">
+        <div class="small muted" style="padding: 4px 10px">Wave 1 · verified · not yet in main</div>
+        <sc-for list="{{ cards }}" as="c" hint-placeholder-count="3">
+          <button type="button" class="{{ c.cls }}" onClick="{{ c.pick }}">
+            <span class="row"><span class="{{ c.dot }}"></span><span style="font-weight: 600">{{ c.title }}</span></span>
+            <span class="small muted">{{ c.meta }}</span>
+          </button>
+        </sc-for>
+        <div class="small muted" style="padding: 10px 10px 4px">Wave 2 · in progress</div>
+        <div class="tree" style="cursor: default"><span class="row"><span class="dot idle"></span><span class="muted">5 cards still working</span></span></div>
+      </div>
+
+      <div style="flex: 999 1 520px; padding: 20px; display: flex; flex-direction: column; gap: 14px; min-width: 0; box-sizing: border-box">
+        <div class="row" style="flex-wrap: wrap"><h2 class="h" style="margin: 0; font-size: 18px">{{ sel.title }}</h2><span class="small muted">{{ sel.meta }}</span></div>
+        <div style="border: 1px solid #2A261E; border-radius: 12px; overflow: hidden; overflow-x: auto; background: #0A0907">
+          <div class="row" style="padding: 8px 12px; border-bottom: 1px solid #2A261E; background: #17150F"><span class="mono">{{ sel.file }}</span><span class="small" style="margin-left: auto; color: #B7E4B9">{{ sel.plus }}</span><span class="small" style="color: #F4B3A2">{{ sel.minus }}</span></div>
+          <sc-for list="{{ sel.lines }}" as="l" hint-placeholder-count="8">
+            <div class="{{ l.cls }}"><span class="muted" style="width: 14px">{{ l.sign }}</span><span>{{ l.text }}</span></div>
+          </sc-for>
+        </div>
+        <div class="row" style="flex-wrap: wrap">
+          <button class="btn warn" type="button" onClick="{{ undoCard }}">Undo this card</button>
+          <button class="btn warn" type="button" onClick="{{ undoWave }}">Undo wave 1</button>
+          <button class="btn warn" type="button">Undo whole goal</button>
+          <button class="btn primary" type="button" style="margin-left: auto" onClick="{{ merge }}">Approve merge into main</button>
+        </div>
+        <sc-if value="{{ hasMsg }}" hint-placeholder-val="{{ false }}">
+          <div class="row"><span class="dot done"></span>{{ msg }}</div>
+        </sc-if>
+        <div class="small muted">Undo restores the checkpoint taken before the card started. Nothing is deleted: undone work is archived and can be brought back.</div>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { picked: 0, msg: '' };
+  }
+  renderVals() {
+    const L = (sign, text) => ({ sign, text, cls: 'ln' + (sign === '+' ? ' add' : sign === '-' ? ' del' : '') });
+    const raw = [
+      { title: 'C-03 Design direction', meta: 'Designer · Ant-03 · 2 files', file: 'src/styles/tokens.css', plus: '+18', minus: '-4',
+        lines: [L(' ', ':root {'), L('-', '  --brand: #2E5BFF;'), L('+', '  --brand: #2F5DFF;'), L('+', '  --brand-ink: #FFFFFF;'), L(' ', '  --radius: 12px;'), L('+', '  --space-section: clamp(48px, 8vw, 120px);'), L('-', '  --font-body: Arial;'), L('+', '  --font-body: Satoshi, system-ui, sans-serif;'), L(' ', '}')] },
+      { title: 'C-02 Content inventory', meta: 'Researcher · Ant-05 · 1 file', file: 'docs/content-inventory.md', plus: '+42', minus: '-0',
+        lines: [L('+', '# Content inventory'), L('+', ''), L('+', '| Page | URL | Keep? |'), L('+', '|---|---|---|'), L('+', '| Home | / | rewrite |'), L('+', '| Pricing | /pricing | rebuild |'), L('+', '| Blog | /blog | new |')] },
+      { title: 'C-04 Homepage wireframe', meta: 'Designer · Ant-03 · 3 files', file: 'src/pages/index.astro', plus: '+64', minus: '-21',
+        lines: [L(' ', '---'), L('+', 'import Hero from "../components/Hero.astro";'), L('+', 'import Features from "../components/Features.astro";'), L(' ', '---'), L('-', '<h1>Welcome</h1>'), L('+', '<Hero />'), L('+', '<Features items={3} />')] }
+    ];
+    const cards = raw.map((c, i) => ({ ...c, dot: 'dot done', cls: 'tree' + (i === this.state.picked ? ' sel' : ''), pick: () => this.setState({ picked: i, msg: '' }) }));
+    const sel = cards[this.state.picked];
+    return {
+      cards, sel, msg: this.state.msg, hasMsg: !!this.state.msg,
+      undoCard: () => this.setState({ msg: sel.title + ' undone. Restored its checkpoint; the change is archived.' }),
+      undoWave: () => this.setState({ msg: 'Wave 1 undone. 3 cards restored to their checkpoints.' }),
+      merge: () => this.setState({ msg: 'Merged wave 1 into main. You can still undo it for 30 days.' })
+    };
+  }
+}
+</script>
+</body>
+</html>

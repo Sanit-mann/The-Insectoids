@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Insectoids · Taskboard</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F0E0B;color:#F1EBDD;font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#F2A93B}a:hover{color:#FFC566}
+.app{min-height:100vh;display:flex;flex-wrap:wrap;align-items:stretch}
+.rail{flex:1 1 220px;background:#13110D;border-right:1px solid #2A261E;padding:18px 12px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;font-family:'Space Grotesk',Inter,sans-serif;font-weight:700;font-size:17px;color:#F7C873}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:#CFC6B4;text-decoration:none;font-weight:500}
+.nav:hover{background:#1E1B15;color:#F1EBDD}
+.nav.on{background:#2A2418;color:#F7C873}
+.nav.off{color:#7E7666}
+.count{margin-left:auto;background:#F2A93B;color:#1A1306;border-radius:999px;padding:0 8px;font-size:12px;font-weight:600}
+.main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 24px;border-bottom:1px solid #2A261E}
+.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid #2E2A22;background:#17150F;color:#E6DECD;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px}
+.muted{color:#A8A08F}
+.small{font-size:12px}
+.mono{font-family:'JetBrains Mono',monospace;font-size:12px}
+.h{font-family:'Space Grotesk',Inter,sans-serif;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+.work{background:#F2A93B}.wait{background:#6CB6F5}.block{background:#EF7A5E}.done{background:#86C98A}.idle{background:#6E675A}
+.row{display:flex;align-items:center;gap:8px}
+.col{flex:1 1 210px;min-width:200px;background:#13110D;border:1px solid #2A261E;border-radius:14px;padding:10px;display:flex;flex-direction:column;gap:8px}
+.tcard{display:flex;flex-direction:column;gap:6px;text-align:left;background:#1A1812;border:1px solid #2E2A22;border-radius:12px;padding:10px;color:#F1EBDD;font:inherit;cursor:pointer;width:100%}
+.tcard:hover{border-color:#4A4232}
+.tcard.sel{border-color:#F2A93B}
+.caste{font-size:11.5px;font-weight:600;border-radius:6px;padding:1px 7px;background:#2A2418;color:#F7C873}
+</style>
+</helmet>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="brand"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2A93B" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z"/><path d="M12 7l4.33 2.5v5L12 17l-4.33-2.5v-5z"/></svg>Insectoids</div>
+    <a class="nav" href="Main.dc.html">Queen</a>
+    <a class="nav" href="Approvals.dc.html">Approvals<span class="count">3</span></a>
+    <a class="nav on" href="Taskboard.dc.html" aria-current="page">Taskboard</a>
+    <a class="nav" href="Hive.dc.html">Hive</a>
+    <a class="nav" href="Brain.dc.html">Brain</a>
+    <a class="nav" href="Changes.dc.html">Changes</a>
+    <span class="nav off">Library</span>
+    <a class="nav" href="Connections.dc.html">Connections</a>
+    <span class="nav off">Cadence</span>
+  </nav>
+
+  <main class="main">
+    <div class="top">
+      <h1 class="h" style="margin: 0; font-size: 20px">Taskboard</h1>
+      <span class="pill">Goal: Marketing site</span>
+      <span class="pill" style="border-color: #F2A93B; color: #F7C873">Wave 2</span>
+      <span class="pill">Wave 1 · done</span>
+      <span class="pill">Wave 3 · planned</span>
+      <span class="muted small" style="margin-left: auto">Insects pull cards for their caste. Nobody assigns them.</span>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; flex: 1; min-height: 0">
+      <div style="flex: 999 1 640px; display: flex; gap: 12px; padding: 16px; overflow-x: auto; align-items: flex-start; box-sizing: border-box">
+        <sc-for list="{{ cols }}" as="c" hint-placeholder-count="5">
+          <section class="col" aria-label="{{ c.name }}">
+            <div class="row"><span class="{{ c.dot }}"></span><span class="h">{{ c.name }}</span><span class="muted small" style="margin-left: auto">{{ c.n }}</span></div>
+            <sc-for list="{{ c.cards }}" as="k" hint-placeholder-count="2">
+              <button type="button" class="{{ k.cls }}" onClick="{{ k.pick }}">
+                <span class="row"><span class="caste">{{ k.caste }}</span><span class="small muted" style="margin-left: auto">{{ k.prio }}</span></span>
+                <span style="font-weight: 600">{{ k.title }}</span>
+                <span class="small muted">{{ k.meta }}</span>
+              </button>
+            </sc-for>
+          </section>
+        </sc-for>
+      </div>
+      <aside style="flex: 1 1 320px; border-left: 1px solid #2A261E; background: #13110D; padding: 20px; display: flex; flex-direction: column; gap: 12px; box-sizing: border-box" aria-label="Card details">
+        <div class="row"><span class="caste">{{ sel.caste }}</span><span class="small muted">{{ sel.id }}</span></div>
+        <h2 class="h" style="margin: 0; font-size: 19px">{{ sel.title }}</h2>
+        <div class="small muted">Brief (built by the Brain)</div>
+        <div>{{ sel.brief }}</div>
+        <div class="small muted">Done means</div>
+        <div>{{ sel.acceptance }}</div>
+        <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px">
+          <div><div class="small muted">Depends on</div><div class="mono">{{ sel.deps }}</div></div>
+          <div><div class="small muted">Priority</div><div>{{ sel.prio }}</div></div>
+          <div><div class="small muted">Held by</div><div>{{ sel.holder }}</div></div>
+          <div><div class="small muted">Lease</div><div>{{ sel.lease }}</div></div>
+          <div><div class="small muted">Model · effort</div><div class="mono">{{ sel.model }}</div></div>
+          <div><div class="small muted">Attempts</div><div>{{ sel.attempts }}</div></div>
+        </div>
+        <div class="small muted">If an insect crashes, its lease runs out and the card returns to Open by itself.</div>
+      </aside>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { picked: 'C-14' };
+  }
+  renderVals() {
+    const cards = [
+      { id: 'C-12', col: 'Open', caste: 'Tester', title: 'Pricing page tests', prio: 'High', deps: 'C-08', holder: 'nobody yet', lease: '-', model: 'router decides', attempts: '0',
+        brief: 'Write tests for plan toggles and the monthly/yearly switch.', acceptance: 'All tests pass; toggles work by keyboard.' },
+      { id: 'C-13', col: 'Open', caste: 'Writer', title: 'Blog: first two posts', prio: 'Normal', deps: 'none', holder: 'nobody yet', lease: '-', model: 'router decides', attempts: '0',
+        brief: 'Two launch posts in the brand voice, 800 words each.', acceptance: 'Inspector checks voice rules and facts.' },
+      { id: 'C-08', col: 'In progress', caste: 'Coder', title: 'Build the pricing page', prio: 'High', deps: 'C-03', holder: 'Ant-07', lease: '18 min left', model: 'Sonnet · medium', attempts: '1',
+        brief: 'Three plans, monthly/yearly switch, FAQ. Use tokens from design direction (C-03).', acceptance: 'Matches the wireframe; Lighthouse accessibility 100; tests from C-12 pass.' },
+      { id: 'C-10', col: 'In progress', caste: 'Writer', title: 'Homepage copy', prio: 'High', deps: 'C-02', holder: 'Ant-11', lease: '24 min left', model: 'Gemini · low', attempts: '1',
+        brief: 'Hero, three feature blocks, closing call to action.', acceptance: 'Under 250 words; brand voice; no invented claims.' },
+      { id: 'C-14', col: 'Blocked', caste: 'Coder', title: 'Blog layout', prio: 'Normal', deps: 'C-03', holder: 'Ant-09', lease: 'paused', model: 'Sonnet · medium', attempts: '1',
+        brief: 'Post list and post page with thumbnails.', acceptance: 'Renders Markdown posts; thumbnails resized at build.' },
+      { id: 'C-09', col: 'Review', caste: 'Coder', title: 'Homepage layout', prio: 'High', deps: 'C-03', holder: 'Inspector', lease: '-', model: 'Sonnet · medium', attempts: '1',
+        brief: 'Build the homepage from the wireframe.', acceptance: 'Matches wireframe; responsive at 3 breakpoints.' },
+      { id: 'C-03', col: 'Done', caste: 'Designer', title: 'Design direction', prio: 'High', deps: 'C-01', holder: 'Ant-03', lease: '-', model: 'Opus · high', attempts: '1',
+        brief: 'Tokens, type, spacing, components from the current brand.', acceptance: 'Approved by Inspector against brand guide.' },
+      { id: 'C-02', col: 'Done', caste: 'Researcher', title: 'Content inventory', prio: 'Normal', deps: 'none', holder: 'Ant-05', lease: '-', model: 'Haiku · low', attempts: '1',
+        brief: 'List every page and asset on the current site.', acceptance: 'Complete list with URLs.' }
+    ];
+    const colDefs = [
+      { name: 'Open', dot: 'dot idle' }, { name: 'In progress', dot: 'dot work' }, { name: 'Blocked', dot: 'dot block' },
+      { name: 'Review', dot: 'dot wait' }, { name: 'Done', dot: 'dot done' }
+    ];
+    const meta = (k) => k.col === 'Blocked' ? 'Waiting for your approval · ' + k.holder : k.col === 'In progress' ? k.holder + ' · ' + k.lease : k.col === 'Review' ? 'Inspector checking' : k.col === 'Done' ? 'Verified' : 'Needs: ' + k.deps;
+    const deco = cards.map((k) => ({ ...k, meta: meta(k), cls: 'tcard' + (k.id === this.state.picked ? ' sel' : ''), pick: () => this.setState({ picked: k.id }) }));
+    const cols = colDefs.map((c) => { const list = deco.filter((k) => k.col === c.name); return { ...c, cards: list, n: list.length }; });
+    return { cols, sel: deco.find((k) => k.id === this.state.picked) };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Insectoids · Queen chat</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F0E0B;color:#F1EBDD;font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#F2A93B}a:hover{color:#FFC566}
+.app{min-height:100vh;display:flex;flex-wrap:wrap;align-items:stretch}
+.rail{flex:1 1 220px;background:#13110D;border-right:1px solid #2A261E;padding:18px 12px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;font-family:'Space Grotesk',Inter,sans-serif;font-weight:700;font-size:17px;color:#F7C873}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:#CFC6B4;text-decoration:none;font-weight:500}
+.nav:hover{background:#1E1B15;color:#F1EBDD}
+.nav.on{background:#2A2418;color:#F7C873}
+.nav.off{color:#7E7666}
+.count{margin-left:auto;background:#F2A93B;color:#1A1306;border-radius:999px;padding:0 8px;font-size:12px;font-weight:600}
+.main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 24px;border-bottom:1px solid #2A261E}
+.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid #2E2A22;background:#17150F;color:#E6DECD;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:9px 14px;font:inherit;font-weight:600;border:1px solid #3A3428;background:#1E1B15;color:#F1EBDD;cursor:pointer;min-height:40px;text-decoration:none}
+.btn.primary{background:#F2A93B;border-color:#F2A93B;color:#1A1306}
+.btn.ghost{background:transparent}
+.card{background:#17150F;border:1px solid #2A261E;border-radius:14px;padding:16px}
+.muted{color:#A8A08F}
+.small{font-size:12px}
+.mono{font-family:'JetBrains Mono',monospace;font-size:12.5px}
+.h{font-family:'Space Grotesk',Inter,sans-serif;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+.work{background:#F2A93B}.wait{background:#6CB6F5}.block{background:#EF7A5E}.done{background:#86C98A}.idle{background:#6E675A}.pause{background:#B49CF0}
+.side{flex:1 1 300px;background:#13110D;border-left:1px solid #2A261E;padding:18px;display:flex;flex-direction:column;gap:16px;box-sizing:border-box}
+.row{display:flex;align-items:center;gap:10px}
+.bar{height:8px;border-radius:999px;background:#2A261E;overflow:hidden}
+.fill{height:8px;border-radius:999px;background:#F2A93B}
+.hex{clip-path:polygon(25% 5%,75% 5%,100% 50%,75% 95%,25% 95%,0 50%);display:inline-flex;align-items:center;justify-content:center;flex:none}
+</style>
+</helmet>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="brand">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2A93B" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z"/><path d="M12 7l4.33 2.5v5L12 17l-4.33-2.5v-5z"/></svg>
+      Insectoids
+    </div>
+    <a class="nav on" href="Main.dc.html" aria-current="page"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>Queen</a>
+    <a class="nav" href="Approvals.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1L2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/></svg>Approvals<span class="count">3</span></a>
+    <a class="nav" href="Taskboard.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="7" height="18" rx="1.5"/><rect x="14" y="3" width="7" height="11" rx="1.5"/></svg>Taskboard</a>
+    <a class="nav" href="Hive.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="12" cy="18" r="2.5"/><path d="M8.5 6h7M7.2 8.2l3.6 7.6M16.8 8.2l-3.6 7.6"/></svg>Hive</a>
+    <a class="nav" href="Brain.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 4.5a3 3 0 0 0-5.6 1.5A3 3 0 0 0 4.5 11a3 3 0 0 0 1.9 5A3 3 0 0 0 12 19.5z"/><path d="M12 4.5a3 3 0 0 1 5.6 1.5A3 3 0 0 1 19.5 11a3 3 0 0 1-1.9 5A3 3 0 0 1 12 19.5z"/></svg>Brain</a>
+    <a class="nav" href="Changes.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="8" r="2.5"/><path d="M6 8.5v7M18 10.5c0 4-5 3.5-9.6 6"/></svg>Changes</a>
+    <span class="nav off"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5z"/></svg>Library</span>
+    <a class="nav" href="Connections.dc.html"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M9 2v6M15 2v6M6 8h12v4a6 6 0 0 1-12 0zM12 18v4"/></svg>Connections</a>
+    <span class="nav off"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>Cadence</span>
+  </nav>
+
+  <main class="main">
+    <div class="top">
+      <span class="pill"><span class="dot work"></span>Goal: Relaunch the marketing site</span>
+      <button class="pill" type="button" style="cursor: pointer">Search or run a command <span class="mono muted">Ctrl K</span></button>
+      <span class="pill" style="margin-left: auto">Wave 2 of 3 · 4 insects working</span>
+      <button class="pill" type="button" aria-label="Switch to light theme" style="cursor: pointer"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+    </div>
+
+    <div style="flex: 1; display: flex; flex-direction: column; gap: 18px; padding: 24px; max-width: 860px; width: 100%; box-sizing: border-box; margin: 0 auto">
+      <div style="align-self: flex-end; max-width: 80%; background: #2A2418; border: 1px solid #3A3226; border-radius: 14px 14px 4px 14px; padding: 12px 16px">Relaunch our marketing site: a new homepage, a pricing page and a blog. Keep the current brand.</div>
+
+      <div style="display: flex; gap: 12px; align-items: flex-start">
+        <span class="hex" style="width: 34px; height: 34px; background: #F2A93B; color: #1A1306; font-weight: 700" aria-hidden="true">Q</span>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+          <div><span class="h">Queen</span> <span class="muted small">10:41</span></div>
+          <p style="margin: 0">I read the current site and the brand notes in the Brain. Here is the plan. It has more than one wave, so it needs your approval before anyone starts.</p>
+          <div class="card" style="display: flex; flex-direction: column; gap: 12px">
+            <div class="row"><span class="h" style="font-size: 16px">Plan · 3 waves · 14 task cards</span><span class="pill small" style="margin-left: auto">Estimate ≈ 1.9M tokens · within budget</span></div>
+            <div style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px">
+              <div style="border: 1px solid #2E2A22; border-radius: 10px; padding: 10px"><div class="small muted">Wave 1</div><div style="font-weight: 600">Scout and design direction</div><div class="small muted">3 cards · Scout, Designer</div></div>
+              <div style="border: 1px solid #2E2A22; border-radius: 10px; padding: 10px"><div class="small muted">Wave 2</div><div style="font-weight: 600">Build the three pages</div><div class="small muted">8 cards · Coder, Writer</div></div>
+              <div style="border: 1px solid #2E2A22; border-radius: 10px; padding: 10px"><div class="small muted">Wave 3</div><div style="font-weight: 600">Test, review, document</div><div class="small muted">3 cards · Tester, Reviewer, Documenter</div></div>
+            </div>
+            <div class="small muted">Approvals this plan will need later: merging into your main branch, and publishing the site.</div>
+            <sc-if value="{{ pending }}" hint-placeholder-val="{{ true }}">
+              <div class="row" style="flex-wrap: wrap">
+                <button class="btn primary" type="button" onClick="{{ approve }}">Approve plan</button>
+                <button class="btn ghost" type="button">Adjust</button>
+                <span class="small muted">Big plan (more than one wave): needs your yes.</span>
+              </div>
+            </sc-if>
+            <sc-if value="{{ approved }}" hint-placeholder-val="{{ false }}">
+              <div class="row" style="color: #86C98A"><span class="dot done"></span>Approved at 10:42 · wave 1 posted to the taskboard</div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+
+      <div style="display: flex; gap: 12px; align-items: flex-start">
+        <span class="hex" style="width: 34px; height: 34px; background: #F2A93B; color: #1A1306; font-weight: 700" aria-hidden="true">Q</span>
+        <div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 10px">
+          <div><span class="h">Queen</span> <span class="muted small">13:05</span></div>
+          <p style="margin: 0">Wave 1 is done and verified by the Inspector. Wave 2 is running.</p>
+          <div class="card" style="display: flex; flex-direction: column; gap: 8px">
+            <div class="row"><span class="dot work"></span><span style="font-weight: 600">Coder · Ant-07</span><span class="muted">Build the pricing page</span><span class="mono muted" style="margin-left: auto">Sonnet · medium</span></div>
+            <div class="bar"><div class="fill" style="width: 62%"></div></div>
+            <div class="row"><span class="dot work"></span><span style="font-weight: 600">Writer · Ant-11</span><span class="muted">Homepage copy</span><span class="mono muted" style="margin-left: auto">Gemini · low</span></div>
+            <div class="bar"><div class="fill" style="width: 80%"></div></div>
+            <div class="row"><span class="dot wait"></span><span style="font-weight: 600">Coder · Ant-09</span><span class="muted">Blog layout · waiting for your approval</span></div>
+            <a href="Hive.dc.html" class="small">Open the hive monitor</a>
+          </div>
+          <div class="card" style="border-color: #3B4C5E; display: flex; flex-direction: column; gap: 10px">
+            <div class="row"><span class="dot wait"></span><span class="h">Needs you</span><span class="small muted">from Coder · Ant-09</span></div>
+            <div>Add a new dependency to the project: <span class="mono">sharp</span> (image resizing for blog thumbnails).</div>
+            <sc-if value="{{ depOpen }}" hint-placeholder-val="{{ true }}">
+              <div class="row" style="flex-wrap: wrap">
+                <button class="btn primary" type="button" onClick="{{ depYes }}">Approve</button>
+                <button class="btn" type="button" onClick="{{ depNo }}">Deny</button>
+                <button class="btn ghost" type="button">Ask why</button>
+              </div>
+            </sc-if>
+            <sc-if value="{{ depDone }}" hint-placeholder-val="{{ false }}">
+              <div class="small muted">{{ depText }}</div>
+            </sc-if>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-top: auto; border: 1px solid #3A3428; background: #17150F; border-radius: 16px; padding: 12px; display: flex; flex-direction: column; gap: 10px">
+        <label for="msg" class="small muted">Message the Queen</label>
+        <textarea id="msg" rows="2" placeholder="Give the hive a goal, or ask about progress" style="resize: none; background: transparent; border: 0; color: #F1EBDD; font: inherit; outline: none"></textarea>
+        <div class="row" style="flex-wrap: wrap">
+          <span class="pill small">Queen · strongest model · high effort</span>
+          <button class="pill small" type="button" aria-label="Attach a file" style="cursor: pointer">Attach</button>
+          <button class="pill small" type="button" disabled="disabled" title="Voice comes in a later version" style="opacity: 0.55">Voice (later)</button>
+          <span class="pill small" style="margin-left: auto">Context 38%</span>
+          <button class="btn primary" type="button">Send</button>
+        </div>
+      </div>
+    </div>
+  </main>
+
+  <aside class="side" aria-label="Hive status">
+    <section class="card" style="display: flex; flex-direction: column; gap: 10px">
+      <div class="row"><span class="h">Approvals</span><span class="count">3</span></div>
+      <div class="row small"><span class="dot wait"></span>New dependency: sharp</div>
+      <div class="row small"><span class="dot wait"></span>Merge wave 1 into main</div>
+      <div class="row small"><span class="dot wait"></span>Confirm fact: brand font is Satoshi</div>
+      <a href="Approvals.dc.html" class="small">Open the inbox</a>
+    </section>
+    <section class="card" style="display: flex; flex-direction: column; gap: 8px">
+      <div class="h">Hive now</div>
+      <div class="row small"><span class="dot work"></span>Queen<span class="muted" style="margin-left: auto">planning wave 3</span></div>
+      <div class="row small"><span class="dot work"></span>Foreman<span class="muted" style="margin-left: auto">balancing</span></div>
+      <div class="row small"><span class="dot work"></span>Coder · Ant-07<span class="muted" style="margin-left: auto">working</span></div>
+      <div class="row small"><span class="dot work"></span>Writer · Ant-11<span class="muted" style="margin-left: auto">working</span></div>
+      <div class="row small"><span class="dot wait"></span>Coder · Ant-09<span class="muted" style="margin-left: auto">waiting</span></div>
+      <div class="row small"><span class="dot idle"></span>Inspector<span class="muted" style="margin-left: auto">idle</span></div>
+    </section>
+    <section class="card" style="display: flex; flex-direction: column; gap: 8px">
+      <div class="h">Budget</div>
+      <div class="row small"><span>This goal</span><span class="muted" style="margin-left: auto">1.18M / 1.9M tokens</span></div>
+      <div class="bar"><div class="fill" style="width: 62%"></div></div>
+      <div class="row small"><span>Claude subscription · 5-hour window</span><span class="muted" style="margin-left: auto">41%</span></div>
+      <div class="bar"><div class="fill" style="width: 41%; background: #6CB6F5"></div></div>
+      <div class="row small"><span>Codex subscription · week</span><span class="muted" style="margin-left: auto">18%</span></div>
+      <div class="bar"><div class="fill" style="width: 18%; background: #6CB6F5"></div></div>
+    </section>
+    <section class="card small" style="display: flex; flex-direction: column; gap: 6px">
+      <div class="h" style="font-size: 14px">While you were away</div>
+      <div class="muted">3 scheduled jobs ran overnight. 1 needs your review.</div>
+      <a href="Approvals.dc.html">Open the digest</a>
+    </section>
+  </aside>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { approved: false, dep: 'open' };
+  }
+  renderVals() {
+    const s = this.state;
+    return {
+      pending: !s.approved,
+      approved: s.approved,
+      approve: () => this.setState({ approved: true }),
+      depOpen: s.dep === 'open',
+      depDone: s.dep !== 'open',
+      depText: s.dep === 'yes' ? 'Approved. Ant-09 continues; the Treasurer logged the decision.' : 'Denied. The Queen will ask Ant-09 for an approach without a new dependency.',
+      depYes: () => this.setState({ dep: 'yes' }),
+      depNo: () => this.setState({ dep: 'no' })
+    };
+  }
+}
+</script>
+</body>
+</html>

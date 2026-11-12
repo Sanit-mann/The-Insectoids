@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Insectoids · Connections</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F0E0B;color:#F1EBDD;font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#F2A93B}a:hover{color:#FFC566}
+.app{min-height:100vh;display:flex;flex-wrap:wrap;align-items:stretch}
+.rail{flex:1 1 220px;background:#13110D;border-right:1px solid #2A261E;padding:18px 12px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;font-family:'Space Grotesk',Inter,sans-serif;font-weight:700;font-size:17px;color:#F7C873}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:#CFC6B4;text-decoration:none;font-weight:500}
+.nav:hover{background:#1E1B15;color:#F1EBDD}
+.nav.on{background:#2A2418;color:#F7C873}
+.nav.off{color:#7E7666}
+.count{margin-left:auto;background:#F2A93B;color:#1A1306;border-radius:999px;padding:0 8px;font-size:12px;font-weight:600}
+.main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 24px;border-bottom:1px solid #2A261E}
+.tab{display:inline-flex;align-items:center;border:1px solid #2E2A22;background:#17150F;color:#E6DECD;border-radius:999px;padding:6px 14px;font:inherit;font-size:13px;cursor:pointer;min-height:36px}
+.tab.on{border-color:#F2A93B;color:#F7C873}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:8px 13px;font:inherit;font-weight:600;border:1px solid #3A3428;background:#1E1B15;color:#F1EBDD;cursor:pointer;min-height:38px}
+.btn.primary{background:#F2A93B;border-color:#F2A93B;color:#1A1306}
+.card{background:#17150F;border:1px solid #2A261E;border-radius:14px;padding:16px;display:flex;flex-direction:column;gap:8px}
+.muted{color:#A8A08F}
+.small{font-size:12px}
+.mono{font-family:'JetBrains Mono',monospace;font-size:12px}
+.h{font-family:'Space Grotesk',Inter,sans-serif;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+.done{background:#86C98A}.wait{background:#6CB6F5}.idle{background:#6E675A}.work{background:#F2A93B}
+.row{display:flex;align-items:center;gap:10px}
+.bar{height:7px;border-radius:999px;background:#2A261E;overflow:hidden}
+.fill{height:7px;border-radius:999px;background:#6CB6F5}
+.tier{font-size:11.5px;font-weight:600;border-radius:6px;padding:1px 7px}
+</style>
+</helmet>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="brand"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2A93B" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z"/><path d="M12 7l4.33 2.5v5L12 17l-4.33-2.5v-5z"/></svg>Insectoids</div>
+    <a class="nav" href="Main.dc.html">Queen</a>
+    <a class="nav" href="Approvals.dc.html">Approvals<span class="count">3</span></a>
+    <a class="nav" href="Taskboard.dc.html">Taskboard</a>
+    <a class="nav" href="Hive.dc.html">Hive</a>
+    <a class="nav" href="Brain.dc.html">Brain</a>
+    <a class="nav" href="Changes.dc.html">Changes</a>
+    <span class="nav off">Library</span>
+    <a class="nav on" href="Connections.dc.html" aria-current="page">Connections</a>
+    <span class="nav off">Cadence</span>
+  </nav>
+
+  <main class="main">
+    <div class="top">
+      <h1 class="h" style="margin: 0; font-size: 20px">Connections</h1>
+      <sc-for list="{{ tabs }}" as="t" hint-placeholder-count="4">
+        <button type="button" class="{{ t.cls }}" onClick="{{ t.pick }}">{{ t.name }}</button>
+      </sc-for>
+      <span class="small muted" style="margin-left: auto">Vault: 4 secrets · encrypted by your OS · agents never see keys</span>
+    </div>
+
+    <div style="padding: 20px 24px; display: flex; flex-direction: column; gap: 14px">
+      <sc-if value="{{ isEngines }}" hint-placeholder-val="{{ true }}">
+        <div class="muted">AI engines run on your own subscriptions. You sign in inside each engine's own login; the AIOS never sees your password.</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px">
+          <div class="card">
+            <div class="row"><span class="dot done"></span><span class="h">Claude Code</span><span class="small muted" style="margin-left: auto">signed in</span></div>
+            <div class="small muted">Models: Opus, Sonnet, Haiku · effort low to max</div>
+            <div class="row small"><span>5-hour window</span><span class="muted" style="margin-left: auto">41%</span></div><div class="bar"><div class="fill" style="width: 41%"></div></div>
+            <div class="row small"><span>Weekly limit</span><span class="muted" style="margin-left: auto">23%</span></div><div class="bar"><div class="fill" style="width: 23%"></div></div>
+          </div>
+          <div class="card">
+            <div class="row"><span class="dot done"></span><span class="h">Codex</span><span class="small muted" style="margin-left: auto">signed in</span></div>
+            <div class="small muted">Models: GPT family · reasoning effort low to high</div>
+            <div class="row small"><span>Weekly limit</span><span class="muted" style="margin-left: auto">18%</span></div><div class="bar"><div class="fill" style="width: 18%"></div></div>
+          </div>
+          <div class="card">
+            <div class="row"><span class="dot wait"></span><span class="h">Gemini CLI</span><span class="small muted" style="margin-left: auto">installed · not signed in</span></div>
+            <div class="small muted">Opens Gemini's own login in a terminal.</div>
+            <div><button class="btn primary" type="button">Sign in</button></div>
+          </div>
+          <div class="card">
+            <div class="row"><span class="dot idle"></span><span class="h">OpenCode</span><span class="small muted" style="margin-left: auto">not installed</span></div>
+            <div class="small muted">Doorway for OpenRouter, FreeLLMAPI and local models.</div>
+            <sc-if value="{{ installAsk }}" hint-placeholder-val="{{ true }}">
+              <div><button class="btn" type="button" onClick="{{ askInstall }}">Install…</button></div>
+            </sc-if>
+            <sc-if value="{{ installShow }}" hint-placeholder-val="{{ false }}">
+              <div class="small">This will run:</div>
+              <div class="mono" style="background: #0A0907; border: 1px solid #2A261E; border-radius: 8px; padding: 8px">npm install -g opencode-ai@&lt;pinned version&gt;</div>
+              <div class="row"><button class="btn primary" type="button" onClick="{{ doInstall }}">Install</button><button class="btn" type="button" onClick="{{ cancelInstall }}">Cancel</button></div>
+            </sc-if>
+            <sc-if value="{{ installed }}" hint-placeholder-val="{{ false }}">
+              <div class="row small"><span class="dot done"></span>Installed. Next: add a provider below.</div>
+            </sc-if>
+          </div>
+        </div>
+        <div class="small muted">Next engines: Copilot, Cursor, then Qwen, Grok, Kimi, Pi, Crush, Antigravity, or any custom command.</div>
+      </sc-if>
+
+      <sc-if value="{{ isProviders }}" hint-placeholder-val="{{ false }}">
+        <div class="muted">Any OpenAI-compatible endpoint. Keys go straight into the vault.</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px">
+          <div class="card"><div class="row"><span class="dot done"></span><span class="h">OpenRouter</span></div><div class="mono muted">https://openrouter.ai/api/v1</div><div class="small muted">Key stored · 212 models</div></div>
+          <div class="card"><div class="row"><span class="dot done"></span><span class="h">Ollama (local)</span></div><div class="mono muted">http://127.0.0.1:11434</div><div class="small muted">No key · runs on this PC</div></div>
+          <div class="card"><div class="row"><span class="dot idle"></span><span class="h">FreeLLMAPI</span></div><div class="small muted">Meant for personal use. Free-tier terms can change.</div><div><button class="btn" type="button">Add</button></div></div>
+          <div class="card"><div class="row"><span class="dot idle"></span><span class="h">Custom provider</span></div><label class="small muted" for="pname">Name</label><input id="pname" style="background: #0F0E0B; border: 1px solid #2E2A22; border-radius: 8px; color: #F1EBDD; padding: 8px; font: inherit"><div><button class="btn" type="button">Add</button></div></div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isServices }}" hint-placeholder-val="{{ false }}">
+        <div class="muted">Read-only tools are on. Anything that can change things, or needs a key, stays off until you agree.</div>
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 14px">
+          <div class="card"><div class="row"><span class="h">Web search &amp; fetch</span><span class="tier" style="margin-left: auto; background: #22301F; color: #A9DCAB">safe · read-only</span></div><div class="small muted">On for Researcher, Writer, Analyst</div></div>
+          <div class="card"><div class="row"><span class="h">Files &amp; git</span><span class="tier" style="margin-left: auto; background: #22301F; color: #A9DCAB">safe · read-only</span></div><div class="small muted">Limited to each card's own workspace</div></div>
+          <div class="card"><div class="row"><span class="h">GitHub</span><span class="tier" style="margin-left: auto; background: #3A2C12; color: #F7C873">needs a key</span></div><div class="small muted">Connected · token in vault · used through the broker</div></div>
+          <div class="card"><div class="row"><span class="h">Notion · Linear · Jira · Slack</span><span class="tier" style="margin-left: auto; background: #2A261E; color: #A8A08F">phase 2</span></div><div class="small muted">Coming next</div></div>
+          <div class="card"><div class="row"><span class="h">Gmail · Calendar</span><span class="tier" style="margin-left: auto; background: #2A261E; color: #A8A08F">phase 3</span></div><div class="small muted">Needs the OAuth helper</div></div>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isVault }}" hint-placeholder-val="{{ false }}">
+        <div class="card" style="max-width: 640px">
+          <div class="h">Vault</div>
+          <div class="small muted">Encrypted by Windows or macOS protection. If that protection is unavailable, nothing is saved.</div>
+          <div class="row small"><span class="mono">openrouter</span><span class="muted" style="margin-left: auto">used by OpenCode</span></div>
+          <div class="row small"><span class="mono">github</span><span class="muted" style="margin-left: auto">used via the broker</span></div>
+          <div class="row small"><span class="mono">anthropic-api</span><span class="muted" style="margin-left: auto">not in use</span></div>
+          <div class="row small"><span class="mono">webhook-ci</span><span class="muted" style="margin-left: auto">Cadence trigger</span></div>
+          <div class="small muted">Values are never shown again after saving. Replace or remove only.</div>
+        </div>
+      </sc-if>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { tab: 'Engines', install: 'ask' };
+  }
+  renderVals() {
+    const s = this.state;
+    const tabs = ['Engines', 'API providers', 'Services', 'Vault'].map((n) => ({ name: n, cls: 'tab' + (n === s.tab ? ' on' : ''), pick: () => this.setState({ tab: n }) }));
+    return {
+      tabs,
+      isEngines: s.tab === 'Engines', isProviders: s.tab === 'API providers', isServices: s.tab === 'Services', isVault: s.tab === 'Vault',
+      installAsk: s.install === 'ask', installShow: s.install === 'show', installed: s.install === 'done',
+      askInstall: () => this.setState({ install: 'show' }), doInstall: () => this.setState({ install: 'done' }), cancelInstall: () => this.setState({ install: 'ask' })
+    };
+  }
+}
+</script>
+</body>
+</html>

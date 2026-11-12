@@ -1,0 +1,23 @@
+{
+  "v": 3,
+  "createdOnFiles": {"v": 1, "at": "2026-11-12T12:00:00Z"},
+  "title": "Insectoids AIOS UI",
+  "launch": {"view": "canvas"},
+  "pages": [],
+  "boards": {
+    "Main.dc.html": {"x": 0, "y": 0, "w": 1440, "h": 960, "title": "Queen chat (home)", "expand": "fill", "is_interactive": true},
+    "Approvals.dc.html": {"x": 1520, "y": 0, "w": 1440, "h": 960, "title": "Approval inbox", "expand": "fill", "is_interactive": true},
+    "Taskboard.dc.html": {"x": 3040, "y": 0, "w": 1440, "h": 960, "title": "Taskboard", "expand": "fill", "is_interactive": true},
+    "Hive.dc.html": {"x": 0, "y": 1080, "w": 1440, "h": 960, "title": "Hive monitor", "expand": "fill", "is_interactive": true},
+    "Brain.dc.html": {"x": 1520, "y": 1080, "w": 1440, "h": 960, "title": "Brain", "expand": "fill", "is_interactive": true},
+    "Changes.dc.html": {"x": 3040, "y": 1080, "w": 1440, "h": 960, "title": "Changes & undo", "expand": "fill", "is_interactive": true},
+    "Connections.dc.html": {"x": 0, "y": 2160, "w": 1440, "h": 960, "title": "Connections", "expand": "fill", "is_interactive": true},
+    "DesignSystem.dc.html": {"x": 1520, "y": 2160, "w": 1440, "h": 1300, "title": "Design system & component map", "expand": "fill"}
+  },
+  "order": ["Main.dc.html", "Approvals.dc.html", "Taskboard.dc.html", "Hive.dc.html", "Brain.dc.html", "Changes.dc.html", "Connections.dc.html", "DesignSystem.dc.html"],
+  "notes": {
+    "t1": {"x": 0, "y": -300, "text": "The Insectoids AIOS: app screens", "kind": "title1", "maxW": 4480},
+    "s1": {"x": 3040, "y": 2160, "text": "Click any screen's Play button to try it. The left rail links between screens. Library and Cadence screens follow the same patterns and are described in the design spec.", "w": 420, "fill": "orange"}
+  },
+  "designSystems": []
+}

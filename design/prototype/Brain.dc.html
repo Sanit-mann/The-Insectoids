@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Insectoids · Brain</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F0E0B;color:#F1EBDD;font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#F2A93B}a:hover{color:#FFC566}
+.app{min-height:100vh;display:flex;flex-wrap:wrap;align-items:stretch}
+.rail{flex:1 1 220px;background:#13110D;border-right:1px solid #2A261E;padding:18px 12px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;font-family:'Space Grotesk',Inter,sans-serif;font-weight:700;font-size:17px;color:#F7C873}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:#CFC6B4;text-decoration:none;font-weight:500}
+.nav:hover{background:#1E1B15;color:#F1EBDD}
+.nav.on{background:#2A2418;color:#F7C873}
+.nav.off{color:#7E7666}
+.count{margin-left:auto;background:#F2A93B;color:#1A1306;border-radius:999px;padding:0 8px;font-size:12px;font-weight:600}
+.main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 24px;border-bottom:1px solid #2A261E}
+.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid #2E2A22;background:#17150F;color:#E6DECD;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px}
+.pill.on{border-color:#F2A93B;color:#F7C873}
+.pill.later{color:#7E7666;border-style:dashed}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:9px 14px;font:inherit;font-weight:600;border:1px solid #3A3428;background:#1E1B15;color:#F1EBDD;cursor:pointer;min-height:40px}
+.muted{color:#A8A08F}
+.small{font-size:12px}
+.mono{font-family:'JetBrains Mono',monospace;font-size:12px}
+.h{font-family:'Space Grotesk',Inter,sans-serif;font-weight:600}
+.row{display:flex;align-items:center;gap:10px}
+.node{position:absolute;transform:translate(-50%,-50%);border-radius:12px;padding:6px 10px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;border:2px solid transparent;max-width:150px;text-align:center;line-height:1.3}
+.sw{width:10px;height:10px;display:inline-block;flex:none}
+</style>
+</helmet>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="brand"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2A93B" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z"/><path d="M12 7l4.33 2.5v5L12 17l-4.33-2.5v-5z"/></svg>Insectoids</div>
+    <a class="nav" href="Main.dc.html">Queen</a>
+    <a class="nav" href="Approvals.dc.html">Approvals<span class="count">3</span></a>
+    <a class="nav" href="Taskboard.dc.html">Taskboard</a>
+    <a class="nav" href="Hive.dc.html">Hive</a>
+    <a class="nav on" href="Brain.dc.html" aria-current="page">Brain</a>
+    <a class="nav" href="Changes.dc.html">Changes</a>
+    <span class="nav off">Library</span>
+    <a class="nav" href="Connections.dc.html">Connections</a>
+    <span class="nav off">Cadence</span>
+  </nav>
+
+  <main class="main">
+    <div class="top">
+      <h1 class="h" style="margin: 0; font-size: 20px">Brain</h1>
+      <span class="pill on">Graph</span><span class="pill">Tables</span><span class="pill">Search</span>
+      <span class="pill later" title="Phase 2">Globe</span><span class="pill later" title="Phase 2">Dashboard</span><span class="pill later" title="Phase 2">Timeline</span>
+      <span class="pill" style="margin-left: auto">Shelf: Marketing site + Global</span>
+      <span class="pill">Health 92</span>
+    </div>
+    <div class="top" style="gap: 8px">
+      <label for="q" class="small muted">Search the Brain</label>
+      <input id="q" type="search" placeholder="Words or meaning, e.g. why did we pick Astro" style="flex: 1 1 280px; background: #17150F; border: 1px solid #2E2A22; border-radius: 10px; color: #F1EBDD; padding: 9px 12px; font: inherit">
+      <span class="row small"><span class="sw" style="background: #B49CF0; border-radius: 2px"></span>Decision</span>
+      <span class="row small"><span class="sw" style="background: #6CB6F5; border-radius: 50%"></span>File</span>
+      <span class="row small"><span class="sw" style="background: #F2A93B; border-radius: 2px; transform: rotate(45deg)"></span>Task</span>
+      <span class="row small"><span class="sw" style="background: #86C98A; border-radius: 50%"></span>Fact</span>
+      <span class="row small"><span class="sw" style="background: #E58FB0; border-radius: 2px"></span>Outcome</span>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; flex: 1; min-height: 0">
+      <div style="flex: 999 1 560px; padding: 16px; min-width: 0; box-sizing: border-box; overflow-x: auto">
+        <div style="position: relative; width: 780px; height: 560px; margin: 0 auto; background: radial-gradient(circle at 50% 50%, #1A1711 0%, #0F0E0B 70%); border: 1px solid #2A261E; border-radius: 16px">
+          <svg width="780" height="560" style="position: absolute; inset: 0" aria-hidden="true">
+            <sc-for list="{{ edges }}" as="e" hint-placeholder-count="8">
+              <line x1="{{ e.x1 }}" y1="{{ e.y1 }}" x2="{{ e.x2 }}" y2="{{ e.y2 }}" stroke="{{ e.stroke }}" stroke-width="1.5"></line>
+            </sc-for>
+          </svg>
+          <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="10">
+            <button type="button" class="node" style="{{ n.style }}" onClick="{{ n.pick }}">{{ n.title }}</button>
+          </sc-for>
+        </div>
+        <div class="small muted" style="text-align: center; margin-top: 8px">Lines come only from real links between records. Click a node to read it.</div>
+      </div>
+      <aside style="flex: 1 1 340px; border-left: 1px solid #2A261E; background: #13110D; padding: 20px; display: flex; flex-direction: column; gap: 10px; box-sizing: border-box" aria-label="Reader">
+        <div class="row"><span class="pill small">{{ sel.type }}</span><span class="small" style="{{ sel.trustStyle }}">{{ sel.trust }}</span></div>
+        <h2 class="h" style="margin: 0; font-size: 19px">{{ sel.title }}</h2>
+        <div>{{ sel.body }}</div>
+        <div class="small muted">Source</div>
+        <div class="mono">{{ sel.source }}</div>
+        <div class="small muted">Linked to</div>
+        <div>{{ sel.links }}</div>
+        <div class="small muted">Versions</div>
+        <div class="small">{{ sel.versions }}</div>
+        <div class="row" style="flex-wrap: wrap; margin-top: 6px"><button class="btn" type="button">Edit</button><button class="btn" type="button">Archive</button></div>
+        <div class="small muted">Edits are saved as a new version through the single writer. Nothing is deleted.</div>
+      </aside>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { picked: 'd1' };
+  }
+  renderVals() {
+    const col = { Decision: '#B49CF0', File: '#6CB6F5', Task: '#F2A93B', Fact: '#86C98A', Outcome: '#E58FB0' };
+    const ink = { Decision: '#1B1030', File: '#0B1A28', Task: '#1A1306', Fact: '#0F2210', Outcome: '#2A0C18' };
+    const shape = { Decision: '6px', File: '999px', Task: '4px', Fact: '999px', Outcome: '6px' };
+    const raw = [
+      { id: 'g', type: 'Task', title: 'Goal: Marketing site', x: 390, y: 280, trust: 'Active', body: 'Relaunch homepage, pricing and blog. 3 waves, 14 cards.', source: 'Queen plan v2', versions: 'v2 today 10:42 · v1 today 10:38' },
+      { id: 'd1', type: 'Decision', title: 'Use Astro for the blog', x: 600, y: 150, trust: 'Proposed · waiting for you', body: 'Static pages, fast loads, Markdown posts. Alternatives: Next.js (heavier), plain HTML.', source: 'Queen · 11:20', versions: 'v1 today 11:20' },
+      { id: 'd2', type: 'Decision', title: 'Keep current brand', x: 170, y: 120, trust: 'Confirmed by you', body: 'No rebrand in this relaunch; reuse tokens and voice.', source: 'You · chat 10:40', versions: 'v1 today 10:41' },
+      { id: 'f1', type: 'File', title: 'pricing.astro', x: 620, y: 400, trust: 'Fresh (hash matches)', body: 'Pricing page: three plans, yearly toggle, FAQ.', source: 'src/pages/pricing.astro', versions: 'summary v3 · file changed 2 min ago' },
+      { id: 'f2', type: 'File', title: 'brand-guide.pdf', x: 120, y: 300, trust: 'Fresh', body: 'Brand guide: colours, type, voice rules.', source: 'docs/brand-guide.pdf', versions: 'summary v1' },
+      { id: 't1', type: 'Task', title: 'C-08 Pricing page', x: 500, y: 470, trust: 'In progress', body: 'Held by Ant-07, lease 18 min left.', source: 'Taskboard', versions: 'v4 · claimed 12:20' },
+      { id: 't2', type: 'Task', title: 'C-14 Blog layout', x: 640, y: 270, trust: 'Blocked', body: 'Waiting for approval of the sharp dependency.', source: 'Taskboard', versions: 'v3 · blocked 13:04' },
+      { id: 'k1', type: 'Fact', title: 'Brand font is Satoshi', x: 230, y: 440, trust: 'Unconfirmed · 0.7', body: 'Read from brand-guide.pdf page 4.', source: 'Writer Ant-11', versions: 'v1 today 12:31' },
+      { id: 'o1', type: 'Outcome', title: 'Wave 1 verified', x: 330, y: 110, trust: 'Recorded', body: '3 of 3 cards passed. Cost 410k tokens, 0 retries.', source: 'Inspector', versions: 'v1 today 12:58' },
+      { id: 'o2', type: 'Outcome', title: 'Lesson: resize images at build', x: 410, y: 420, trust: 'Lesson', body: 'Runtime resizing failed twice on a past project; prefer build time.', source: 'Global shelf', versions: 'v2 · used 4 times' }
+    ];
+    const links = [['g','d1'],['g','d2'],['g','t1'],['g','t2'],['g','o1'],['d1','t2'],['t1','f1'],['d2','f2'],['f2','k1'],['t2','o2'],['o1','d2'],['k1','g']];
+    const by = {}; raw.forEach((n) => { by[n.id] = n; });
+    const pick = this.state.picked;
+    const nodes = raw.map((n) => ({ ...n,
+      style: 'left:' + n.x + 'px;top:' + n.y + 'px;background:' + col[n.type] + ';color:' + ink[n.type] + ';border-radius:' + shape[n.type] + ';' + (n.id === pick ? 'border-color:#FFF3D6;box-shadow:0 0 0 4px rgba(242,169,59,.25);' : ''),
+      pick: () => this.setState({ picked: n.id }) }));
+    const edges = links.map(([a, b]) => ({ x1: by[a].x, y1: by[a].y, x2: by[b].x, y2: by[b].y, stroke: (a === pick || b === pick) ? '#F2A93B' : '#3A3428' }));
+    const s = by[pick];
+    const linked = links.filter(([a, b]) => a === pick || b === pick).map(([a, b]) => by[a === pick ? b : a].title).join(' · ');
+    const tStyle = /Unconfirmed|Proposed|Blocked/.test(s.trust) ? 'color:#6CB6F5' : 'color:#86C98A';
+    return { nodes, edges, sel: { ...s, links: linked, trustStyle: tStyle } };
+  }
+}
+</script>
+</body>
+</html>

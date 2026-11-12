@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Insectoids · Design system</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F0E0B;color:#F1EBDD;font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#F2A93B}a:hover{color:#FFC566}
+.h{font-family:'Space Grotesk',Inter,sans-serif;font-weight:600}
+.muted{color:#A8A08F}
+.small{font-size:12px}
+.mono{font-family:'JetBrains Mono',monospace;font-size:12px}
+.sw{border-radius:12px;height:64px;border:1px solid #2E2A22}
+.cell{display:flex;flex-direction:column;gap:6px}
+table{border-collapse:collapse;width:100%}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid #2A261E;vertical-align:top}
+th{color:#A8A08F;font-weight:500;font-size:12px}
+.lib{display:inline-block;border-radius:6px;padding:1px 7px;font-size:11.5px;font-weight:600}
+</style>
+</helmet>
+<div style="max-width: 1360px; margin: 0 auto; padding: 48px 40px; display: flex; flex-direction: column; gap: 40px; box-sizing: border-box">
+  <header style="display: flex; flex-direction: column; gap: 8px">
+    <div class="small muted">The Insectoids AIOS</div>
+    <h1 class="h" style="margin: 0; font-size: 40px">Design system &amp; component map</h1>
+    <p class="muted" style="margin: 0; max-width: 760px">A calm control room with a subtle hive. Warm dark surfaces, one honey accent, hexagons used sparingly: the logo, agent cells in the living hive, and empty states. Every status colour also carries a text label.</p>
+  </header>
+
+  <section style="display: flex; flex-direction: column; gap: 14px">
+    <h2 class="h" style="margin: 0; font-size: 22px">Colour · dark theme (default)</h2>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px">
+      <div class="cell"><div class="sw" style="background: #0F0E0B"></div><div>Ground</div><div class="mono muted">#0F0E0B</div></div>
+      <div class="cell"><div class="sw" style="background: #13110D"></div><div>Rail / side</div><div class="mono muted">#13110D</div></div>
+      <div class="cell"><div class="sw" style="background: #17150F"></div><div>Surface</div><div class="mono muted">#17150F</div></div>
+      <div class="cell"><div class="sw" style="background: #2A261E"></div><div>Line</div><div class="mono muted">#2A261E</div></div>
+      <div class="cell"><div class="sw" style="background: #F1EBDD"></div><div>Text</div><div class="mono muted">#F1EBDD</div></div>
+      <div class="cell"><div class="sw" style="background: #A8A08F"></div><div>Muted text</div><div class="mono muted">#A8A08F</div></div>
+      <div class="cell"><div class="sw" style="background: #F2A93B"></div><div>Honey (accent)</div><div class="mono muted">#F2A93B · ink #1A1306</div></div>
+    </div>
+    <h2 class="h" style="margin: 8px 0 0; font-size: 22px">Colour · light theme</h2>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 14px">
+      <div class="cell"><div class="sw" style="background: #FAF7F0"></div><div>Ground</div><div class="mono muted">#FAF7F0</div></div>
+      <div class="cell"><div class="sw" style="background: #FFFFFF"></div><div>Surface</div><div class="mono muted">#FFFFFF</div></div>
+      <div class="cell"><div class="sw" style="background: #E6DFD0"></div><div>Line</div><div class="mono muted">#E6DFD0</div></div>
+      <div class="cell"><div class="sw" style="background: #1C1912"></div><div>Text</div><div class="mono muted">#1C1912</div></div>
+      <div class="cell"><div class="sw" style="background: #6B6354"></div><div>Muted text</div><div class="mono muted">#6B6354</div></div>
+      <div class="cell"><div class="sw" style="background: #F2A93B"></div><div>Honey fill</div><div class="mono muted">#F2A93B · ink #1A1306</div></div>
+      <div class="cell"><div class="sw" style="background: #8F5600"></div><div>Honey text / links</div><div class="mono muted">#8F5600 (6:1 on white)</div></div>
+    </div>
+  </section>
+
+  <section style="display: flex; flex-direction: column; gap: 14px">
+    <h2 class="h" style="margin: 0; font-size: 22px">Status colours (always with a label)</h2>
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 14px">
+      <div class="cell"><div class="sw" style="background: #F2A93B"></div><div>Working</div><div class="mono muted">#F2A93B</div></div>
+      <div class="cell"><div class="sw" style="background: #6CB6F5"></div><div>Waiting / asking you</div><div class="mono muted">#6CB6F5</div></div>
+      <div class="cell"><div class="sw" style="background: #EF7A5E"></div><div>Blocked / stopped</div><div class="mono muted">#EF7A5E</div></div>
+      <div class="cell"><div class="sw" style="background: #86C98A"></div><div>Done / verified</div><div class="mono muted">#86C98A</div></div>
+      <div class="cell"><div class="sw" style="background: #B49CF0"></div><div>Paused / you're driving</div><div class="mono muted">#B49CF0</div></div>
+      <div class="cell"><div class="sw" style="background: #6E675A"></div><div>Idle</div><div class="mono muted">#6E675A</div></div>
+    </div>
+    <div class="small muted">Working (honey) and waiting (sky) differ in lightness as well as hue. Brain record types add a shape too: decision and outcome squares, files and facts circles, tasks diamonds.</div>
+  </section>
+
+  <section style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 28px">
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <h2 class="h" style="margin: 0; font-size: 22px">Type</h2>
+      <div class="h" style="font-size: 32px">Space Grotesk 32 · page titles</div>
+      <div class="h" style="font-size: 20px">Space Grotesk 20 · screen headers</div>
+      <div style="font-size: 14px">Inter 14 · body and controls (line height 1.5)</div>
+      <div style="font-size: 12px" class="muted">Inter 12 · meta and labels</div>
+      <div class="mono">JetBrains Mono 12.5 · code, models, paths, logs</div>
+    </div>
+    <div style="display: flex; flex-direction: column; gap: 10px">
+      <h2 class="h" style="margin: 0; font-size: 22px">Shape, space, motion</h2>
+      <div>Radius: 10 controls · 14 cards · 999 pills · hexagon for agents</div>
+      <div>Spacing: 4 px grid; 16 / 20 / 24 panel padding</div>
+      <div>Touch targets ≥ 40 px; focus ring 2 px honey with offset</div>
+      <div>Motion: short springs (150–250 ms) for state changes only; honour reduced-motion; the living hive pauses when hidden</div>
+      <div>Icons: Lucide stroke icons, 18 px, 1.8 stroke</div>
+    </div>
+  </section>
+
+  <section style="display: flex; flex-direction: column; gap: 14px">
+    <h2 class="h" style="margin: 0; font-size: 22px">Component map: which library each piece comes from</h2>
+    <div style="overflow-x: auto">
+    <table>
+      <thead><tr><th>Where</th><th>UI piece</th><th>Library</th><th>Component</th></tr></thead>
+      <tbody>
+        <tr><td>Queen chat</td><td>Composer with model + effort, attachments, / commands, Stop</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">ai-prompt</td></tr>
+        <tr><td>Queen chat</td><td>Context meter ring</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">ai-context-meter</td></tr>
+        <tr><td>Queen chat</td><td>Follow-ups queued while the hive works</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">ai-message-queue</td></tr>
+        <tr><td>Queen chat, Approvals</td><td>Approve / deny, hold-to-approve for destructive</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">ai-tool-approval, hold-button</td></tr>
+        <tr><td>Queen chat, Hive</td><td>Lead agent + sub-agent lanes, step progress, tool calls</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">ai-agent-lanes, ai-loading, ai-tool-calls</td></tr>
+        <tr><td>Top bar</td><td>Ctrl K command palette</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">action-search-bar</td></tr>
+        <tr><td>Top bar, tray</td><td>Background-work pill ("Wave 2 of 3")</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">status-island</td></tr>
+        <tr><td>Taskboard</td><td>Kanban columns and cards</td><td><span class="lib" style="background: #2E2547; color: #CDBDF7">Cult UI</span></td><td class="mono">kanban-board</td></tr>
+        <tr><td>Approvals, Taskboard</td><td>Detail panels and drawers</td><td><span class="lib" style="background: #2E2547; color: #CDBDF7">Cult UI</span></td><td class="mono">side-panel, family-drawer</td></tr>
+        <tr><td>Changes</td><td>File-by-file diff review with accept, reject, undo</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">ai-diff-review, undo-button</td></tr>
+        <tr><td>Brain</td><td>Facts list you can edit or forget</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">ai-memory</td></tr>
+        <tr><td>Brain (phase 2)</td><td>Globe view</td><td><span class="lib" style="background: #1C2A36; color: #9CCBF5">Eldora UI</span> / <span class="lib" style="background: #2E2547; color: #CDBDF7">Cult UI</span></td><td class="mono">cobe-globe / globe</td></tr>
+        <tr><td>Hive</td><td>Live terminal look (real terminal uses xterm.js)</td><td><span class="lib" style="background: #1C2A36; color: #9CCBF5">Eldora UI</span></td><td class="mono">terminal</td></tr>
+        <tr><td>Connections</td><td>"Connect this app" inside a stopped tool call</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">ai-connect</td></tr>
+        <tr><td>Connections, Budget</td><td>Per-agent model + effort override</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">ai-model-selector</td></tr>
+        <tr><td>Budget</td><td>Usage numbers and charts</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span> / <span class="lib" style="background: #2E2547; color: #CDBDF7">Cult UI</span></td><td class="mono">metric-card / analytics-chart, rolling-number</td></tr>
+        <tr><td>Forms everywhere</td><td>Inputs, fields, switches, selects, tabs, progress</td><td><span class="lib" style="background: #2E2547; color: #CDBDF7">Cult UI</span></td><td class="mono">halo-input, halo-field, halo-switch, halo-select, halo-tabs, halo-progress</td></tr>
+        <tr><td>Notifications</td><td>Toasts that follow a task, stacked notices, inline fixable alerts</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">promise-toast, notification-stack, inline-alert</td></tr>
+        <tr><td>Onboarding (08)</td><td>Multi-step setup</td><td><span class="lib" style="background: #2E2547; color: #CDBDF7">Cult UI</span></td><td class="mono">onboarding, wizard-expandable</td></tr>
+        <tr><td>Empty screens</td><td>Empty state that becomes the first item</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">empty-state</td></tr>
+        <tr><td>Settings</td><td>Drill-down settings panel</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">stack-panel</td></tr>
+        <tr><td>Theme</td><td>Light / dark toggle</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span> / <span class="lib" style="background: #22301F; color: #A9DCAB">Skiper UI</span></td><td class="mono">switch-button / skiper4</td></tr>
+        <tr><td>Tooltips, numbers</td><td>Custom tooltip, animated counters</td><td><span class="lib" style="background: #22301F; color: #A9DCAB">Skiper UI</span></td><td class="mono">skiper101, skiper37</td></tr>
+        <tr><td>Code</td><td>Code blocks with copy</td><td><span class="lib" style="background: #2E2547; color: #CDBDF7">Cult UI</span></td><td class="mono">code-block</td></tr>
+        <tr><td>Voice (later)</td><td>Voice input with waveform</td><td><span class="lib" style="background: #3A2C12; color: #F7C873">Kokonut UI</span></td><td class="mono">ai-voice</td></tr>
+        <tr><td>Living hive, Brain graph</td><td>Honeycomb agent cells; record graph</td><td><span class="lib" style="background: #2A261E; color: #A8A08F">Custom</span></td><td class="muted">No matching component in the preferred libraries; built on a graph library chosen in the tech-stack step</td></tr>
+      </tbody>
+    </table>
+    </div>
+    <div class="small muted">Install with <span class="mono">npx shadcn@latest add @kokonutui/&lt;name&gt;</span>, <span class="mono">@cult-ui/&lt;name&gt;</span>, <span class="mono">@eldoraui/&lt;name&gt;</span>, <span class="mono">@skiper-ui/&lt;name&gt;</span>. Registries are already set in the project's components.json.</div>
+  </section>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":1300}}'>
+class Component extends DCLogic {
+  renderVals() { return {}; }
+}
+</script>
+</body>
+</html>

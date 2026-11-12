@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Insectoids · Approval inbox</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&amp;family=Space+Grotesk:wght@500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0F0E0B;color:#F1EBDD;font-family:Inter,system-ui,sans-serif;font-size:14px;line-height:1.5}
+a{color:#F2A93B}a:hover{color:#FFC566}
+.app{min-height:100vh;display:flex;flex-wrap:wrap;align-items:stretch}
+.rail{flex:1 1 220px;background:#13110D;border-right:1px solid #2A261E;padding:18px 12px;display:flex;flex-direction:column;gap:4px;box-sizing:border-box}
+.brand{display:flex;align-items:center;gap:10px;padding:4px 10px 18px;font-family:'Space Grotesk',Inter,sans-serif;font-weight:700;font-size:17px;color:#F7C873}
+.nav{display:flex;align-items:center;gap:10px;padding:9px 12px;border-radius:10px;color:#CFC6B4;text-decoration:none;font-weight:500}
+.nav:hover{background:#1E1B15;color:#F1EBDD}
+.nav.on{background:#2A2418;color:#F7C873}
+.nav.off{color:#7E7666}
+.count{margin-left:auto;background:#F2A93B;color:#1A1306;border-radius:999px;padding:0 8px;font-size:12px;font-weight:600}
+.main{flex:999 1 560px;min-width:0;display:flex;flex-direction:column;box-sizing:border-box}
+.top{display:flex;flex-wrap:wrap;gap:10px;align-items:center;padding:14px 24px;border-bottom:1px solid #2A261E}
+.pill{display:inline-flex;align-items:center;gap:8px;border:1px solid #2E2A22;background:#17150F;color:#E6DECD;border-radius:999px;padding:6px 12px;font:inherit;font-size:13px}
+.btn{display:inline-flex;align-items:center;gap:8px;border-radius:10px;padding:9px 14px;font:inherit;font-weight:600;border:1px solid #3A3428;background:#1E1B15;color:#F1EBDD;cursor:pointer;min-height:40px;text-decoration:none}
+.btn.primary{background:#F2A93B;border-color:#F2A93B;color:#1A1306}
+.btn.ghost{background:transparent}
+.card{background:#17150F;border:1px solid #2A261E;border-radius:14px;padding:16px}
+.muted{color:#A8A08F}
+.small{font-size:12px}
+.mono{font-family:'JetBrains Mono',monospace;font-size:12.5px}
+.h{font-family:'Space Grotesk',Inter,sans-serif;font-weight:600}
+.dot{width:9px;height:9px;border-radius:50%;display:inline-block;flex:none}
+.work{background:#F2A93B}.wait{background:#6CB6F5}.block{background:#EF7A5E}.done{background:#86C98A}.idle{background:#6E675A}
+.row{display:flex;align-items:center;gap:10px}
+.item{display:flex;flex-direction:column;gap:4px;text-align:left;width:100%;background:transparent;border:1px solid transparent;border-radius:12px;padding:12px;color:#F1EBDD;font:inherit;cursor:pointer}
+.item:hover{background:#1A1812}
+.item.sel{background:#201D17;border-color:#3A3428}
+.tag{display:inline-block;border-radius:6px;padding:1px 8px;font-size:11.5px;font-weight:600}
+</style>
+</helmet>
+<div class="app">
+  <nav class="rail" aria-label="Main">
+    <div class="brand"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#F2A93B" stroke-width="1.8" stroke-linejoin="round" aria-hidden="true"><path d="M12 2l8.66 5v10L12 22l-8.66-5V7z"/><path d="M12 7l4.33 2.5v5L12 17l-4.33-2.5v-5z"/></svg>Insectoids</div>
+    <a class="nav" href="Main.dc.html">Queen</a>
+    <a class="nav on" href="Approvals.dc.html" aria-current="page">Approvals<span class="count">{{ openCount }}</span></a>
+    <a class="nav" href="Taskboard.dc.html">Taskboard</a>
+    <a class="nav" href="Hive.dc.html">Hive</a>
+    <a class="nav" href="Brain.dc.html">Brain</a>
+    <a class="nav" href="Changes.dc.html">Changes</a>
+    <span class="nav off">Library</span>
+    <a class="nav" href="Connections.dc.html">Connections</a>
+    <span class="nav off">Cadence</span>
+  </nav>
+
+  <main class="main">
+    <div class="top">
+      <h1 class="h" style="margin: 0; font-size: 20px">Approval inbox</h1>
+      <span class="muted">Everything the hive is waiting on you for. Work that doesn't need you keeps going.</span>
+    </div>
+    <div class="top" style="gap: 6px">
+      <span class="pill" style="border-color: #F2A93B; color: #F7C873">All · {{ openCount }} open</span>
+      <span class="pill">Plans</span><span class="pill">Risky actions</span><span class="pill">Merges</span><span class="pill">Decisions</span><span class="pill">Facts</span><span class="pill">Schedules</span>
+    </div>
+    <div style="display: flex; flex-wrap: wrap; flex: 1; min-height: 0">
+      <div style="flex: 1 1 340px; border-right: 1px solid #2A261E; padding: 12px; display: flex; flex-direction: column; gap: 4px; box-sizing: border-box">
+        <sc-for list="{{ items }}" as="it" hint-placeholder-count="5">
+          <button type="button" class="{{ it.cls }}" onClick="{{ it.pick }}">
+            <span class="row"><span class="tag" style="{{ it.tagStyle }}">{{ it.kind }}</span><span class="small muted" style="margin-left: auto">{{ it.when }}</span></span>
+            <span style="font-weight: 600">{{ it.title }}</span>
+            <span class="small muted">{{ it.from }} · {{ it.status }}</span>
+          </button>
+        </sc-for>
+      </div>
+      <div style="flex: 999 1 420px; padding: 24px; display: flex; flex-direction: column; gap: 16px; min-width: 0; box-sizing: border-box">
+        <div class="row"><span class="tag" style="{{ sel.tagStyle }}">{{ sel.kind }}</span><span class="small muted">{{ sel.from }}</span></div>
+        <h2 class="h" style="margin: 0; font-size: 22px">{{ sel.title }}</h2>
+        <p style="margin: 0; max-width: 640px">{{ sel.detail }}</p>
+        <div class="card" style="display: flex; flex-direction: column; gap: 6px; max-width: 640px">
+          <div class="small muted">Why it needs you</div>
+          <div>{{ sel.why }}</div>
+          <div class="small muted" style="margin-top: 6px">If you say yes</div>
+          <div>{{ sel.effect }}</div>
+        </div>
+        <sc-if value="{{ sel.open }}" hint-placeholder-val="{{ true }}">
+          <div class="row" style="flex-wrap: wrap">
+            <button class="btn primary" type="button" onClick="{{ yes }}">{{ sel.yesLabel }}</button>
+            <button class="btn" type="button" onClick="{{ no }}">Deny</button>
+            <button class="btn ghost" type="button">Ask the Queen</button>
+          </div>
+          <div class="small muted">{{ sel.note }}</div>
+        </sc-if>
+        <sc-if value="{{ sel.closed }}" hint-placeholder-val="{{ false }}">
+          <div class="row"><span class="{{ sel.resultDot }}"></span>{{ sel.result }}</div>
+        </sc-if>
+      </div>
+    </div>
+  </main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":960}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = { picked: 0, answers: {} };
+  }
+  renderVals() {
+    const tag = {
+      'Risky action': 'background:#3A2219;color:#F4A58F',
+      'Merge': 'background:#1C2A36;color:#9CCBF5',
+      'Fact': 'background:#22301F;color:#A9DCAB',
+      'Decision': 'background:#2E2547;color:#CDBDF7',
+      'Schedule': 'background:#3A2C12;color:#F7C873'
+    };
+    const raw = [
+      { kind: 'Risky action', title: 'Add a new dependency: sharp', from: 'Coder · Ant-09 · card "Blog layout"', when: '13:04',
+        detail: 'Ant-09 wants to add the sharp package to resize blog thumbnails at build time.',
+        why: 'Installing a new dependency is on the always-ask list (Hive D7).', effect: 'The package is added in Ant-09’s own workspace only. It reaches your main branch only when you approve that merge.', yesLabel: 'Approve', note: 'Hold-to-approve is used for anything destructive.' },
+      { kind: 'Merge', title: 'Merge wave 1 into main', from: 'Inspector · goal "Marketing site"', when: '12:58',
+        detail: '3 cards passed the Inspector: design direction, homepage wireframe, content inventory. 6 files changed.',
+        why: 'Your main branch changes only with your approval, once per goal or wave (Workspace D3).', effect: 'The hive branch is merged into main. You can undo the whole wave for 30 days.', yesLabel: 'Approve merge', note: 'Open Changes to read the diff first.' },
+      { kind: 'Fact', title: 'Confirm: the brand font is Satoshi', from: 'Writer · Ant-11 · confidence 0.7', when: '12:31',
+        detail: 'Found in brand-guide.pdf, page 4. Not yet confirmed by you.',
+        why: 'Facts written by agents start unconfirmed (Memory D3).', effect: 'It becomes a confirmed fact in the Brain that every agent can rely on.', yesLabel: 'Confirm fact', note: 'You can edit the fact before confirming.' },
+      { kind: 'Decision', title: 'Use Astro for the blog', from: 'Queen · proposed', when: '11:20',
+        detail: 'Static pages, fast loads, Markdown posts. Alternatives considered: Next.js (heavier), plain HTML (no templating).',
+        why: 'Agents only propose decisions; you approve them (Memory D3).', effect: 'Recorded in the decision log with its reasons and alternatives.', yesLabel: 'Approve decision', note: 'Decisions are never overwritten; a later change becomes a new version.' },
+      { kind: 'Schedule', title: 'Weekly SEO report, Mondays 09:00', from: 'Queen · noticed 3 requests', when: 'Yesterday',
+        detail: 'You asked for this report three Mondays in a row. The Queen proposes to schedule it.',
+        why: 'New cadences proposed by the Queen need your approval (Cadence D3).', effect: 'Runs every Monday at 09:00 local time, budget 120k tokens, results in your digest.', yesLabel: 'Approve schedule', note: 'Missed runs happen once when the PC wakes.' }
+    ];
+    const a = this.state.answers;
+    const items = raw.map((r, i) => {
+      const ans = a[i];
+      return { ...r, tagStyle: tag[r.kind], cls: 'item' + (i === this.state.picked ? ' sel' : ''),
+        status: ans === 'yes' ? 'approved' : ans === 'no' ? 'denied' : 'waiting',
+        open: !ans, closed: !!ans,
+        result: ans === 'yes' ? 'Approved. The hive continues.' : 'Denied. The Queen will find another way.',
+        resultDot: 'dot ' + (ans === 'yes' ? 'done' : 'block'),
+        pick: () => this.setState({ picked: i }) };
+    });
+    const i = this.state.picked;
+    return {
+      items, sel: items[i],
+      openCount: items.filter((x) => x.open).length,
+      yes: () => this.setState({ answers: { ...a, [i]: 'yes' } }),
+      no: () => this.setState({ answers: { ...a, [i]: 'no' } })
+    };
+  }
+}
+</script>
+</body>
+</html>
