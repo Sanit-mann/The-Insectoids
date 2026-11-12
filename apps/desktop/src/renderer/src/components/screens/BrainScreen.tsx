@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react';
 import type { BrainHitView, RecordKind } from '@insectoids/shared';
 import { BrainReader } from '@/components/brain/BrainReader';
 import { KINDS, kindInfo } from '@/components/brain/kinds';
+import { HitStatusBadge } from '@/components/brain/HitStatus';
 import { MatchBadge, MeaningSearchStrip, TURN_ON_ID } from '@/components/brain/MeaningSearch';
+import { Switch } from '@/components/connections/Switch';
 import { InlineError } from '@/components/changes/CardChanges';
 import { useHive } from '@/lib/hive-store';
 import { cn } from '@/lib/utils';
@@ -20,11 +22,13 @@ export function BrainScreen() {
   const { snapshot } = useHive();
   const [query, setQuery] = useState('');
   const [kinds, setKinds] = useState<RecordKind[]>([]);
+  /** Also show replaced facts and faded (archived) notes (Phase 2 B2). */
+  const [history, setHistory] = useState(false);
   const [found, setFound] = useState<{ key: string; results: Results } | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const q = query.trim();
-  const key = JSON.stringify([q, kinds, attempt]);
+  const key = JSON.stringify([q, kinds, history, attempt]);
   let results: Results = { state: 'idle' };
   if (q) results = found?.key === key ? found.results : { state: 'loading' };
 
@@ -33,7 +37,7 @@ export function BrainScreen() {
     let alive = true;
     const timer = setTimeout(() => {
       window.insectoids.hive
-        .brainSearch({ query: q, ...(kinds.length ? { kinds } : {}) })
+        .brainSearch({ query: q, ...(kinds.length ? { kinds } : {}), ...(history ? { includeHistory: true } : {}) })
         .then((hits) => alive && setFound({ key, results: { state: 'ready', hits } }))
         .catch((err: unknown) => alive && setFound({ key, results: { state: 'error', message: err instanceof Error ? err.message : String(err) } }));
     }, SEARCH_DEBOUNCE_MS);
@@ -41,7 +45,7 @@ export function BrainScreen() {
       alive = false;
       clearTimeout(timer);
     };
-  }, [key, q, kinds]);
+  }, [key, q, kinds, history]);
 
   const toggleKind = (k: RecordKind): void => setKinds((ks) => (ks.includes(k) ? ks.filter((x) => x !== k) : [...ks, k]));
   // Honest starting points: the user's own goals, which the hive always records in the Brain.
@@ -53,6 +57,10 @@ export function BrainScreen() {
   return (
     <div className="flex flex-1 flex-wrap items-start gap-6 p-6">
       <section aria-label="Search the Brain" className="flex w-full flex-[1_1_300px] flex-col gap-3 md:max-w-[400px]">
+        <p className="m-0 text-xs text-muted" data-testid="brain-tidy-intro">
+          The Brain keeps itself tidy: notes that get used rise in results, unused agent notes fade into the archive, and nothing is
+          ever deleted. Agents never change the notes you confirmed.
+        </p>
         <label className="flex min-h-10 items-center gap-2 rounded-[10px] border border-line bg-surface px-3 focus-within:border-honey">
           <Search aria-hidden="true" className="size-4 text-muted" />
           <span className="sr-only">Search the Brain</span>
@@ -66,6 +74,10 @@ export function BrainScreen() {
           />
         </label>
         <MeaningSearchStrip />
+        <div className="flex flex-wrap items-center gap-2">
+          <Switch checked={history} label="Include history" onChange={setHistory} />
+          <span className="text-xs text-muted">Include history: replaced facts and faded notes</span>
+        </div>
         <div role="group" aria-label="Filter by kind" className="flex flex-wrap gap-1.5">
           {KINDS.map(({ kind, label }) => {
             const on = kinds.includes(kind);
@@ -127,16 +139,20 @@ export function BrainScreen() {
                     data-testid="brain-hit"
                     onClick={() => setOpenId(h.id)}
                     aria-current={openId === h.id ? 'true' : undefined}
+                    data-status={h.status}
                     className={cn(
                       'flex w-full items-start gap-2.5 rounded-[10px] border border-transparent px-3 py-2 text-left hover:bg-surface-2',
                       openId === h.id && 'border-line bg-active',
+                      // Not current: muted and dashed, plus a text badge (never colour alone).
+                      h.status !== 'current' && 'border-dashed border-line opacity-75',
                     )}
                   >
                     <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-honey" />
                     <span className="flex min-w-0 flex-1 flex-col">
                       <span className="flex min-w-0 items-center gap-2">
-                        <span className="truncate font-medium">{h.title}</span>
+                        <span className={cn('truncate font-medium', h.status !== 'current' && 'text-muted')}>{h.title}</span>
                         <MatchBadge match={h.match} />
+                        <HitStatusBadge status={h.status} />
                       </span>
                       <span className="text-xs text-muted">
                         {k.label}

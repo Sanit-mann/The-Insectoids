@@ -177,3 +177,22 @@ describe('Brain refusals and failures (exit 1 with a hint)', () => {
     expect(JSON.parse(r.err)).toEqual({ error: { code: 'not_found', message: 'No Brain record nope' } });
   });
 });
+
+describe('B2: --supersedes and --history', () => {
+  it('supersedes a record, hides the old one, and shows it with --history', async () => {
+    const first = await run(['write', '--kind', 'fact', '--title', 'Hosting', '--body', 'The site is on Netlify.']);
+    expect(first.out).toBe('created r1\n');
+    const second = await run(['write', '--kind', 'fact', '--title', 'Hosting', '--body', 'The site moved to Vercel.', '--supersedes', 'r1']);
+    expect(second.out).toMatch(/^created r2/);
+    expect((await run(['search', 'hosting'])).out).not.toContain('r1 ');
+    expect((await run(['search', 'hosting', '--history'])).out).toContain('r1 [fact] Hosting [SUPERSEDED]');
+    expect((await run(['get', 'r1'])).out).toContain('SUPERSEDED by r2');
+  });
+
+  it('a near-duplicate says it is already known', async () => {
+    await run(['write', '--kind', 'update', '--title', 'Checkout', '--body', 'The checkout page uses Stripe Elements for card entry.']);
+    const dup = await run(['write', '--kind', 'update', '--title', 'Checkout', '--body', 'the checkout page uses stripe elements, for card entry']);
+    expect(dup.code).toBe(0);
+    expect(dup.out).toMatch(/^Already known as "Checkout" \(r1\)/);
+  });
+});

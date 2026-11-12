@@ -225,6 +225,40 @@ describe('hive runs get scoped Brain tokens (Memory 01-D5)', () => {
     expect(calls.find((c) => c.role === 'coder')!.brain).toMatchObject({ endpoint: service.endpoint, write: true, doors });
   });
 
+  it('what an insect read from the Brain is credited when its card passes (B2)', async () => {
+    const spec = brain.write({ kind: 'decision', shelf: 'site', title: 'Contact form spec', body: 'The contact form has name, email and message fields.' }, { type: 'user' }).id;
+    const plan = JSON.stringify({ summary: 's', waves: [{ cards: [{ id: 'C-01', title: 'Form', brief: 'Build it', caste: 'coder', acceptance: ['works'] }] }] });
+    const fence = '`'.repeat(3);
+    class ReadingEngine implements Engine {
+      readonly fake = new FakeEngine((req) => {
+        if (req.role === 'queen') return { text: `${fence}json\n${plan}\n${fence}` };
+        if (req.role === 'inspector') return { text: 'VERDICT: PASS' };
+        return { text: 'STATUS: DONE', effects: (cwd) => writeFileSync(join(cwd, 'form.js'), 'x') };
+      });
+      run(req: EngineRequest): EngineRun {
+        const done = (async () => {
+          if (req.role === 'coder') {
+            const client = await BrainClient.connect({ endpoint: req.brain!.endpoint, token: req.brain!.token });
+            await client.read({ query: 'contact form fields' });
+            client.close();
+          }
+          return this.fake.run(req).done;
+        })();
+        return { done, stop: () => {} };
+      }
+    }
+    const hive = new Hive({
+      brain, workspace: ws, engine: new ReadingEngine(), library, repoDir: repo, dataDir: join(root, 'data'), shelf: 'site', home: join(root, 'home'),
+      models: { strongest: 'opus', standard: 'sonnet', light: 'haiku' }, insectCap: 2, castes: ['coder', 'tester'], leaseMs: 60_000,
+      brainAccess: access(),
+    });
+    await hive.submitGoal('Add a contact form');
+    await hive.runUntilIdle();
+    expect(grants.map((g) => g.readKey ?? null)).toEqual([null, expect.stringMatching(/^card:.+C-01:a0$/), null]);
+    expect(brain.get(spec)).toMatchObject({ helped: 1 });
+    expect(brain.get(spec)!.reads).toBeGreaterThanOrEqual(2);
+  });
+
   it('revokes the token even when the run fails', async () => {
     const engine: Engine = { run: () => ({ done: Promise.reject(new Error('engine crashed')), stop: () => {} }) };
     const hive = new Hive({

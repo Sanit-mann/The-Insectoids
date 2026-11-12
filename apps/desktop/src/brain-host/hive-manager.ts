@@ -98,7 +98,7 @@ export const DEFAULT_LIMITS: HiveLimits = { insectCap: 3, goalBudgetTokens: 2_00
 export interface HiveManagerOptions {
   brain: Brain;
   /** Mints and revokes per-run agent tokens (the in-process Brain service). Null: no live Brain tools. */
-  tokens: { endpoint: string; issue(g: { agentId: string; shelf: string; write: boolean }): string; revoke(token: string): void } | null;
+  tokens: { endpoint: string; issue(g: { agentId: string; shelf: string; write: boolean; readKey?: string }): string; revoke(token: string): void } | null;
   doors: (DoorPaths & { cliShimDir?: string; hookLauncher?: { command: string; args: string[] } }) | null;
   userDataDir: string;
   libraryDir: string;
@@ -123,6 +123,13 @@ export interface HiveManagerOptions {
   };
   push: (p: HivePush) => void;
   log?: (line: string) => void;
+  /**
+   * Brain upkeep (B2): fade unused agent notes at start and every `intervalMs` (default 6 h) while idle.
+   * `clockShiftDays` moves the decay clock forward (e2e only, to test fading without waiting).
+   */
+  tidy?: { intervalMs?: number; clockShiftDays?: number };
+  /** e2e only: seed agent records (near-duplicates, a superseded fact, an old note) on the project shelf. */
+  seedBrainForE2E?: boolean;
   /** Foreman tick interval. Default 1000 ms (500 ms with the demo engine). */
   tickMs?: number;
   /** Tests: replace Claude detection (and the sign-in check, with `auth`). */
@@ -224,6 +231,7 @@ export class HiveManager {
   #outBuf = new Map<string, string[]>();
   #outTimer: NodeJS.Timeout | null = null;
   #changedTimer: NodeJS.Timeout | null = null;
+  #tidyTimer: NodeJS.Timeout | null = null;
   #changedReason = '';
   #ticking = false;
   #disposed = false;
@@ -305,13 +313,51 @@ export class HiveManager {
   /** Restore the project and start checking the engine. Never throws: problems become activity lines. */
   async init(): Promise<void> {
     void this.#checkEngines();
+    this.#startTidy();
     const path = this.#o.project ?? this.#readSettings().projectPath;
     if (!path) return;
     try {
       await this.#openProject(path);
+      if (this.#o.seedBrainForE2E) this.#seedBrain();
     } catch (err) {
       this.#note('error', `Could not open the project ${path}: ${err instanceof Error ? err.message : String(err)}`);
     }
+  }
+
+  // ---- Brain upkeep (B2) ------------------------------------------------------------------------
+
+  #startTidy(): void {
+    // At start, then every 6 h. Only while idle: a busy hive is reading the Brain right now.
+    this.#tidy(false);
+    const every = this.#o.tidy?.intervalMs ?? 6 * 60 * 60_000;
+    this.#tidyTimer = setInterval(() => this.#tidy(false), every);
+    this.#tidyTimer.unref?.();
+  }
+
+  /** Fade unused, unimportant agent notes into the archive; each one becomes an activity line. */
+  #tidy(force: boolean): number {
+    if (!force && (this.#working() > 0 || this.#o.brain.goals.list('running').length > 0)) return 0;
+    const shift = (this.#o.tidy?.clockShiftDays ?? 0) * 86_400_000;
+    const faded = this.#o.brain.fade({ now: this.#now() + shift });
+    for (const f of faded.slice(0, 10)) {
+      this.#record('brain-tidy', `Faded into the archive: "${f.title}" (unused for ${f.days} days). You can bring it back from the Brain screen.`, {});
+    }
+    if (faded.length > 10) this.#record('brain-tidy', `…and ${faded.length - 10} more faded into the archive.`, {});
+    if (faded.length) this.#changed('brain-tidy');
+    return faded.length;
+  }
+
+  /** e2e: agent records that exercise B2 (two near-duplicates, a superseded fact, an old note). */
+  #seedBrain(): void {
+    const shelf = this.#project?.view.shelf;
+    if (!shelf) return;
+    const ant = { type: 'agent' as const, id: 'Ant-seed' };
+    const b = this.#o.brain;
+    b.write({ kind: 'update', shelf, title: 'Checkout notes', body: 'The checkout page uses Stripe Elements for card entry.' }, ant);
+    b.write({ kind: 'update', shelf, title: 'Checkout notes', body: 'the checkout page uses stripe elements, for card entry' }, ant);
+    const old = b.write({ kind: 'fact', shelf, title: 'Hosting provider', body: 'The site is hosted on Netlify.' }, ant).id;
+    b.write({ kind: 'fact', shelf, title: 'Hosting provider', body: 'The site moved to Vercel hosting.', supersedes: old }, ant);
+    b.write({ kind: 'agent_memory', shelf, title: 'Scratch idea', body: 'Maybe try a carousel on the landing page someday.' }, ant);
   }
 
   /** Apply a safety preset now: the current hive and every project opened later. */
@@ -333,6 +379,7 @@ export class HiveManager {
   async dispose(): Promise<void> {
     this.#disposed = true;
     if (this.#engineTimer) clearTimeout(this.#engineTimer);
+    if (this.#tidyTimer) clearInterval(this.#tidyTimer);
     if (this.#outTimer) clearTimeout(this.#outTimer);
     if (this.#changedTimer) clearTimeout(this.#changedTimer);
     await this.#closeProject();
@@ -355,6 +402,15 @@ export class HiveManager {
     if (cmd.type === 'pause') return this.#pause(cmd.reason ?? 'Paused by you.');
     if (cmd.type === 'resume') return this.#resume();
     if (cmd.type === 'checkEngine') return this.#recheckEngines();
+    if (cmd.type === 'tidyBrain') {
+      if (!this.#tidy(true)) this.#note('brain-tidy', 'The Brain is tidy: nothing to fade.');
+      return;
+    }
+    if (cmd.type === 'restoreRecord') {
+      this.#o.brain.unarchive(cmd.id, { type: 'user' });
+      this.#note('brain-tidy', 'Brought a record back from the archive.');
+      return;
+    }
     if (cmd.type === 'setEngineEnabled') return this.#setEngineEnabled(cmd.engineId, cmd.enabled);
     if (cmd.type === 'setEngineOrder') {
       this.#engines.setOrder(cmd.order);
@@ -712,9 +768,11 @@ export class HiveManager {
   }
 
   /** Newest records on the project shelf (plus global), for the Brain screen without a query. */
-  brainRecent(params: { kinds?: Parameters<Brain['recent']>[0]['kinds'] } = {}) {
+  brainRecent(params: { kinds?: Parameters<Brain['recent']>[0]['kinds']; includeHistory?: boolean } = {}) {
     const shelf = this.#project?.view.shelf ?? 'global';
-    return this.#o.brain.recent({ shelf, ...(params.kinds ? { kinds: params.kinds } : {}), limit: 50 }).map(({ score: _s, ...h }) => h);
+    return this.#o.brain
+      .recent({ shelf, ...(params.kinds ? { kinds: params.kinds } : {}), ...(params.includeHistory ? { includeHistory: true } : {}), limit: 50 })
+      .map(({ score: _s, ...h }) => h);
   }
 
   // ---- events → read model ---------------------------------------------------------------------

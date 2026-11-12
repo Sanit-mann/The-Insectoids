@@ -18,6 +18,8 @@ export interface BrainGrant {
   agentId: string;
   shelf: string;
   write: boolean;
+  /** Ties the run's reads to its card attempt, so a pass credits what helped (B2). Insects only. */
+  readKey?: string;
 }
 
 export interface BrainTicket {

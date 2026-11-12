@@ -108,6 +108,11 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
       meaning: ms,
       push: (push) => send({ type: 'push', push }),
       log: (line) => console.log(line),
+      // e2e only: seed B2 records, and move the decay clock forward to test fading without waiting.
+      ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_BRAIN_SEED'] === '1' ? { seedBrainForE2E: true } : {}),
+      ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_TIDY_SHIFT_DAYS']
+        ? { tidy: { clockShiftDays: Number(process.env['INSECTOIDS_E2E_TIDY_SHIFT_DAYS']) || 0 } }
+        : {}),
     });
     await hive.init();
     await ms.init();

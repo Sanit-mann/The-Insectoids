@@ -43,6 +43,8 @@ export interface AgentGrant {
   /** The project shelf the agent may read (plus global) and write. */
   shelf: string;
   write: boolean;
+  /** Ties this token's reads to one card attempt, so a pass credits what helped (B2). */
+  readKey?: string | undefined;
 }
 
 export interface BrainService {
@@ -83,12 +85,16 @@ export async function startBrainService(opts: BrainServiceOptions): Promise<Brai
   const masterToken = opts.masterToken ?? newToken();
   /** sha256(token) -> identity. Raw tokens are never stored. */
   const tokens = new Map<string, Identity>([[tokenKey(masterToken), { type: 'user' }]]);
+  /** Agent identity -> read key (one card attempt), for tokens that have one (B2). */
+  const readKeys = new WeakMap<Identity, string>();
   const sockets = new Set<Socket>();
 
   const issueAgentToken = (grant: AgentGrant): string => {
-    const shelf = Params['admin.issueToken'].parse(grant).shelf;
+    const { shelf, readKey } = Params['admin.issueToken'].parse(grant);
     const token = newToken();
-    tokens.set(tokenKey(token), { type: 'agent', id: grant.agentId, shelf, write: grant.write });
+    const identity: Identity = { type: 'agent', id: grant.agentId, shelf, write: grant.write };
+    tokens.set(tokenKey(token), identity);
+    if (readKey) readKeys.set(identity, readKey);
     return token;
   };
 
@@ -142,12 +148,27 @@ export async function startBrainService(opts: BrainServiceOptions): Promise<Brai
     }
   };
 
+  /** Records handed to an agent count as read (B2); the user's own lookups in the app don't. */
+  const noteRead = (who: Identity, ids: string[]): void => {
+    if (who.type === 'agent' && ids.length) brain.noteRead(ids, readKeys.get(who));
+  };
+  const readKeyOpt = (who: Identity): { readKey?: string } => {
+    const k = who.type === 'agent' ? readKeys.get(who) : undefined;
+    return k ? { readKey: k } : {};
+  };
+
   const handlers: { [M in Method]: (p: ReturnType<(typeof Params)[M]['parse']>, who: Identity) => Results[M] | Promise<Results[M]> } = {
     ping: (_p, who) => ({ v: PROTOCOL_VERSION, identity: who }),
     search: async (p, who) => {
       const shelf = agentShelf(who, p.shelf);
       const m = await meaning(p.query);
-      return brain.search(p.query, { ...(shelf ? { shelf } : {}), ...(p.kinds ? { kinds: p.kinds } : {}), ...(p.limit ? { limit: p.limit } : {}), ...m });
+      return brain.search(p.query, {
+        ...(shelf ? { shelf } : {}),
+        ...(p.kinds ? { kinds: p.kinds } : {}),
+        ...(p.limit ? { limit: p.limit } : {}),
+        ...(p.includeHistory ? { includeHistory: true } : {}),
+        ...m,
+      });
     },
     read: async (p, who) => {
       const shelf = agentShelf(who, p.shelf);
@@ -156,12 +177,15 @@ export async function startBrainService(opts: BrainServiceOptions): Promise<Brai
         ...(shelf ? { shelf } : {}),
         ...(p.kinds ? { kinds: p.kinds } : {}),
         ...(p.tokenBudget ? { tokenBudget: p.tokenBudget } : {}),
+        ...readKeyOpt(who),
         ...m,
       });
     },
     get: (p, who) => {
       const rec = brain.get(p.id);
-      return rec && visible(who, rec.shelf) ? rec : null;
+      if (!rec || !visible(who, rec.shelf)) return null;
+      noteRead(who, [rec.id]);
+      return rec;
     },
     history: (p, who) => (seeRecord(who, p.id), brain.history(p.id)),
     links: (p, who) => {
@@ -174,15 +198,21 @@ export async function startBrainService(opts: BrainServiceOptions): Promise<Brai
     bootCard: (p, who) => {
       const shelf = who.type === 'agent' ? who.shelf : p.shelf;
       if (!shelf) throw new ServiceError('bad_request', 'bootCard needs a shelf.');
-      return { text: brain.bootCard(shelf) };
+      return { text: brain.bootCard(shelf, who.type === 'agent' ? readKeys.get(who) : undefined) };
     },
-    write: (p, who) => {
+    write: async (p, who) => {
       const shelf = who.type === 'agent' ? who.shelf : p.shelf;
       if (who.type === 'agent' && p.shelf && p.shelf !== who.shelf) {
         throw new ServiceError('forbidden', `This token writes only to the ${who.shelf} shelf.`);
       }
       if (!shelf) throw new ServiceError('bad_request', 'write needs a shelf.');
-      return brain.write({ ...p, shelf } as Parameters<Brain['write']>[0], actorOf(who));
+      // Superseding: only a record this identity may change (agents: their own project shelf).
+      if (p.supersedes) mayChange(who, p.supersedes);
+      // Its meaning vector, when meaning search is on: the near-duplicate check compares meanings (B2).
+      const m = await meaning(`${p.title}
+${p.body}`);
+      const vector = 'queryVector' in m && m.queryVector ? { vector: { vector: m.queryVector, model: m.vectorModel } } : {};
+      return brain.write({ ...p, shelf, ...vector } as Parameters<Brain['write']>[0], actorOf(who));
     },
     update: (p, who) => {
       mayChange(who, p.id);
@@ -198,6 +228,11 @@ export async function startBrainService(opts: BrainServiceOptions): Promise<Brai
       mayChange(who, p.from);
       seeRecord(who, p.to);
       brain.link(p.from, p.to, p.rel);
+      return { ok: true };
+    },
+    unarchive: (p, who) => {
+      seeRecord(who, p.id);
+      brain.unarchive(p.id, actorOf(who));
       return { ok: true };
     },
     'admin.issueToken': (p) => ({ token: issueAgentToken(p) }),

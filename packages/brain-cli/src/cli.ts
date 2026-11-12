@@ -30,15 +30,17 @@ export const HELP = `brain: the hive's shared memory (The Insectoids). Read befo
 Usage: brain <command> [args] [--json]
   whoami                         who this token is (agent, shelf, read/write)
   boot                           short briefing for your project: decisions, facts, recent outcomes
-  search <query> [--kind k]... [--limit n]     matching records: id, kind, title
+  search <query> [--kind k]... [--limit n] [--history]   matching records (--history: also superseded/archived)
   read <query> [--kind k]... [--budget n]      best matches packed into ~n tokens (default 800)
   get <id> | history <id> | links <id>
-  write --kind k --title t --body <text|-> [--summary s] [--source s]
+  write --kind k --title t --body <text|-> [--summary s] [--source s] [--supersedes id]
   update <id> [--title t] [--body <text|->] [--summary s]
   archive <id>                   hide from search; nothing is ever deleted
   link <from> <to> --rel r       e.g. --rel blocks, depends-on, see
 Kinds: ${KINDS.join(', ')}.
 --body - reads the text from stdin (use it for long or quoted text). A body starting with "-": --body=-text.
+--supersedes id replaces an outdated record of yours; the old one stays as history. Near-duplicates are
+folded into what is already there ("already known as …").
 --json prints machine-readable output.
 
 Rules: facts and decisions you write start unconfirmed/proposed until the user confirms them.
@@ -60,7 +62,7 @@ const HINTS: Record<ErrorCode, string> = {
   internal: 'Unexpected Brain error; mention it in your report.',
 };
 
-type OptName = 'kind' | 'limit' | 'budget' | 'title' | 'body' | 'summary' | 'source' | 'rel' | 'json' | 'help';
+type OptName = 'kind' | 'limit' | 'budget' | 'title' | 'body' | 'summary' | 'source' | 'rel' | 'json' | 'help' | 'history' | 'supersedes';
 const OPTIONS = {
   kind: { type: 'string', multiple: true },
   limit: { type: 'string' },
@@ -70,6 +72,8 @@ const OPTIONS = {
   summary: { type: 'string' },
   source: { type: 'string' },
   rel: { type: 'string' },
+  history: { type: 'boolean' },
+  supersedes: { type: 'string' },
   json: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
 } as const;
@@ -78,12 +82,12 @@ const OPTIONS = {
 const COMMANDS: Record<string, [number, number, OptName[]]> = {
   whoami: [0, 0, []],
   boot: [0, 0, []],
-  search: [1, Infinity, ['kind', 'limit']],
+  search: [1, Infinity, ['kind', 'limit', 'history']],
   read: [1, Infinity, ['kind', 'budget']],
   get: [1, 1, []],
   history: [1, 1, []],
   links: [1, 1, []],
-  write: [0, 0, ['kind', 'title', 'body', 'summary', 'source']],
+  write: [0, 0, ['kind', 'title', 'body', 'summary', 'source', 'supersedes']],
   update: [1, 1, ['title', 'body', 'summary']],
   archive: [1, 1, []],
   link: [2, 2, ['rel']],
@@ -181,10 +185,20 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       case 'search': {
         const kinds = kindsOpt(v.kind as string[] | undefined);
         const limit = intOpt(str('limit'), 'limit');
-        const hits = await c.call('search', { query: pos.join(' '), ...(kinds ? { kinds } : {}), ...(limit !== undefined ? { limit } : {}) });
+        const hits = await c.call('search', {
+          query: pos.join(' '),
+          ...(kinds ? { kinds } : {}),
+          ...(limit !== undefined ? { limit } : {}),
+          ...(v.history ? { includeHistory: true } : {}),
+        });
         emit(hits, () =>
           hits.length
-            ? hits.map((h) => `${h.id} [${h.kind}] ${oneLine(h.title, 80)}${h.summary ? ` — ${oneLine(h.summary, 100)}` : ''}`).join('\n')
+            ? hits
+                .map((h) => {
+                  const mark = h.status !== 'current' ? ` [${h.status.toUpperCase()}]` : '';
+                  return `${h.id} [${h.kind}] ${oneLine(h.title, 80)}${mark}${h.summary ? ` — ${oneLine(h.summary, 100)}` : ''}`;
+                })
+                .join('\n')
             : 'No matches.',
         );
         break;
@@ -202,7 +216,9 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         emit(rec, () =>
           [
             `${rec.id} [${rec.kind}] ${rec.title}`,
-            `shelf ${rec.shelf} · ${rec.trust} · v${rec.version} · by ${rec.owner} · ${date(rec.updatedAt)}${rec.archived ? ' · ARCHIVED' : ''}`,
+            `shelf ${rec.shelf} · ${rec.trust} · v${rec.version} · by ${rec.owner} · ${date(rec.updatedAt)}` +
+              (rec.archived ? ` · ARCHIVED${rec.archivedReason ? ` (${rec.archivedReason})` : ''}` : '') +
+              (rec.validTo !== null ? ` · SUPERSEDED${rec.supersededBy ? ` by ${rec.supersededBy}` : ''}` : ''),
             ...(rec.summary ? [`summary: ${rec.summary}`] : []),
             ...(rec.source ? [`source: ${rec.source}`] : []),
             '',
@@ -228,8 +244,9 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
           body: body!,
           ...(str('summary') !== undefined ? { summary: str('summary')! } : {}),
           ...(str('source') !== undefined ? { source: str('source')! } : {}),
+          ...(str('supersedes') !== undefined ? { supersedes: str('supersedes')! } : {}),
         });
-        emit(r, () => (r.created ? `created ${r.id}` : `exists ${r.id} (identical record already stored)`));
+        emit(r, () => (r.created ? `created ${r.id}${r.note ? `\n${r.note}` : ''}` : (r.note ?? `exists ${r.id} (identical record already stored)`)));
         break;
       }
       case 'update': {

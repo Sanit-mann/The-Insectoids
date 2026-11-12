@@ -72,7 +72,8 @@ const when = (ms: number): string => new Date(ms).toISOString().slice(0, 16).rep
 
 function formatRecord(r: BrainRecord): string {
   const meta = [`shelf ${r.shelf}`, `trust ${r.trust}`, `v${r.version}`, `owner ${r.owner}`, `updated ${when(r.updatedAt)}`];
-  if (r.archived) meta.push('ARCHIVED');
+  if (r.archived) meta.push(`ARCHIVED${r.archivedReason ? ` (${r.archivedReason})` : ''}`);
+  if (r.validTo !== null) meta.push(`SUPERSEDED${r.supersededBy ? ` by ${r.supersededBy}` : ''} at ${when(r.validTo)}`);
   if (r.source) meta.push(`source ${r.source}`);
   const head = [`[${r.kind}] ${r.title} (${r.id})`, meta.join(' · ')];
   if (r.summary) head.push(`Summary: ${r.summary}`);
@@ -165,13 +166,18 @@ export function createBrainMcpServer(source: BrainClient | BrainAccess, opts: Br
   server.registerTool(
     'brain_search',
     {
-      description: 'Keyword search of the Brain. Returns ids and titles, one per line; open one with brain_get.',
+      description:
+        'Search the Brain by words (and meaning, when it is on). Returns ids and titles, one per line; open one with brain_get. Current records only; set includeHistory to also see superseded and archived ones (marked).',
       inputSchema: search,
       annotations: READ_ONLY,
     },
     (args) =>
       run('search', args, (hits) =>
-        hits.length ? hits.map((h) => `[${h.kind}] ${h.title} (${h.id})${h.summary ? ` - ${h.summary}` : ''}`).join('\n') : 'No matches.',
+        hits.length
+          ? hits
+              .map((h) => `[${h.kind}] ${h.title} (${h.id})${h.status !== 'current' ? ` [${h.status.toUpperCase()}]` : ''}${h.summary ? ` - ${h.summary}` : ''}`)
+              .join('\n')
+          : 'No matches.',
       ),
   );
 
@@ -225,15 +231,15 @@ export function createBrainMcpServer(source: BrainClient | BrainAccess, opts: Br
     'brain_write',
     {
       description:
-        'Save something durable: a decision, fact, outcome, task or short update. Search first; exact duplicates are folded. Facts start unconfirmed and decisions proposed until the user confirms. Never include secrets.',
+        'Save something durable: a decision, fact, outcome, task or short update. Search first; duplicates and near-duplicates are folded into what is already there. To replace an outdated record, pass supersedes with its id (the old one stays as history). Facts start unconfirmed and decisions proposed until the user confirms. Never include secrets.',
       inputSchema: write,
       annotations: WRITES,
     },
     (args) =>
       run('write', args, async (r) => {
-        if (!r.created) return `Already in the Brain as ${r.id} (exact duplicate; nothing new saved).`;
+        if (!r.created) return r.note ?? `Already in the Brain as ${r.id} (exact duplicate; nothing new saved).`;
         const rec = await access.call('get', { id: r.id }).catch(() => null);
-        return `Saved as ${r.id}${rec ? ` (trust: ${rec.trust})` : ''}.`;
+        return `Saved as ${r.id}${rec ? ` (trust: ${rec.trust})` : ''}.${r.note ? ` ${r.note}` : ''}`;
       }),
   );
 

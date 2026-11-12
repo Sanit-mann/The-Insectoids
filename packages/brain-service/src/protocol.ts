@@ -75,6 +75,8 @@ export const Params = {
       limit: z.number().int().min(1).max(50).optional(),
       /** User only; agents are always held to their own shelf (plus global). */
       shelf: Shelf.optional(),
+      /** Also superseded and archived records, each marked with its status (B2). */
+      includeHistory: z.boolean().optional(),
     })
     .strict(),
   read: z
@@ -99,6 +101,11 @@ export const Params = {
       confidence: z.number().min(0).max(1).optional(),
       trust: TrustSchema.optional(),
       shelf: Shelf.optional(),
+      /**
+       * Replace an older record on the same shelf (time-aware facts, B2): it stays as history. If the user
+       * confirmed it, this record is saved as a proposal instead and the user decides.
+       */
+      supersedes: Id.optional(),
     })
     .strict(),
   update: z
@@ -112,7 +119,17 @@ export const Params = {
     .strict(),
   archive: z.object({ id: Id }).strict(),
   link: z.object({ from: Id, to: Id, rel: z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/, 'rel: lowercase word, max 40') }).strict(),
-  'admin.issueToken': z.object({ agentId: Text(100), shelf: Shelf, write: z.boolean() }).strict(),
+  /** Bring an archived (e.g. faded) record back as a new version. The user only (B2). */
+  unarchive: z.object({ id: Id }).strict(),
+  'admin.issueToken': z
+    .object({
+      agentId: Text(100),
+      shelf: Shelf,
+      write: z.boolean(),
+      /** Ties this token's reads to one card attempt, so a pass credits what helped (B2). */
+      readKey: Text(200).optional(),
+    })
+    .strict(),
   'admin.revokeToken': z.object({ token: Text(200) }).strict(),
 } as const;
 
@@ -127,17 +144,19 @@ export interface Results {
   history: RecordVersion[];
   links: LinkView[];
   bootCard: { text: string };
-  write: { id: string; created: boolean };
+  /** merged: folded into a near-duplicate; note: plain words for the agent ("already known as …"). */
+  write: { id: string; created: boolean; merged?: boolean; note?: string };
   update: { version: number };
   archive: { ok: true };
   link: { ok: true };
+  unarchive: { ok: true };
   'admin.issueToken': { token: string };
   'admin.revokeToken': { ok: true };
 }
 
 /** Methods that change the Brain (refused for read-only agent tokens). */
-export const WRITE_METHODS: ReadonlySet<Method> = new Set(['write', 'update', 'archive', 'link']);
+export const WRITE_METHODS: ReadonlySet<Method> = new Set(['write', 'update', 'archive', 'link', 'unarchive']);
 /** Methods only the user's token may call. */
-export const USER_METHODS: ReadonlySet<Method> = new Set(['admin.issueToken', 'admin.revokeToken']);
+export const USER_METHODS: ReadonlySet<Method> = new Set(['admin.issueToken', 'admin.revokeToken', 'unarchive']);
 
 export const isMethod = (m: string): m is Method => Object.hasOwn(Params, m);

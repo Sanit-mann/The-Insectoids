@@ -5,6 +5,7 @@ import { ApprovalStore } from './approvals';
 import { transaction } from './db';
 import { GoalStore } from './goals';
 import { ConflictError, SecretError, TrustError } from './errors';
+import { importance, rankScore } from './importance';
 import { OutcomeStore } from './outcomes';
 import { migrate } from './schema';
 import { detectSecrets } from './secrets';
@@ -22,6 +23,22 @@ export interface WriteInput {
   source?: string;
   confidence?: number;
   trust?: Trust;
+  /**
+   * Replace this record (time-aware facts, 01-E9; B2): the old one stops being current and stays as history.
+   * If the user confirmed it, an agent's write becomes a proposal instead and the old one stays current.
+   */
+  supersedes?: string;
+  /** The new record's meaning vector, when the host made one: used for the near-duplicate check, then stored. */
+  vector?: { vector: Float32Array; model: string };
+}
+
+export interface WriteResult {
+  id: string;
+  created: boolean;
+  /** A near-duplicate of an agent record was folded into it as a new version (01-E5). */
+  merged?: boolean;
+  /** Plain words for the caller, e.g. "already known as …" or "saved as a proposal". */
+  note?: string;
 }
 
 export interface UpdateInput {
@@ -46,11 +63,22 @@ export interface BrainRecord {
   archived: boolean;
   createdAt: number;
   updatedAt: number;
+  /** How agents use it (B2): reads, card passes it helped, last use; importance 0..1 (see importance.ts). */
+  reads: number;
+  helped: number;
+  lastUsedAt: number | null;
+  importance: number;
+  /** Time-aware facts (01-E9): current while validTo is null. */
+  validFrom: number;
+  validTo: number | null;
+  supersededBy: string | null;
+  /** Why it was archived ("faded: …", "merged into …", "by you"); null when not archived. */
+  archivedReason: string | null;
 }
 
 export interface RecordVersion {
   version: number;
-  change: 'create' | 'update' | 'archive';
+  change: 'create' | 'update' | 'archive' | 'supersede' | 'unarchive' | 'merge';
   title: string;
   body: string;
   trust: Trust;
@@ -58,16 +86,20 @@ export interface RecordVersion {
   changedAt: number;
 }
 
+export type RecordStatus = 'current' | 'superseded' | 'archived';
+
 export interface SearchHit {
   id: string;
   kind: RecordKind;
   shelf: string;
   title: string;
   summary: string | null;
-  /** Words only: bm25 (lower is better). Hybrid: the fused RRF score (higher is better). */
+  /** Ranking score, higher is better: fused relevance (RRF over words and meaning) scaled by importance (B2). */
   score: number;
   /** How it was found (Phase 2 B1): by its words, by meaning, or both. */
   match: 'words' | 'meaning' | 'both';
+  /** Current, or (only with includeHistory) superseded / archived. */
+  status: RecordStatus;
 }
 
 export interface SearchOptions {
@@ -84,6 +116,8 @@ export interface SearchOptions {
   vectorModel?: string;
   /** Lowest cosine similarity for a meaning match. Default DEFAULT_MIN_SIMILARITY. */
   minSimilarity?: number;
+  /** Also superseded and archived records, marked with their status (B2). Default: current only. */
+  includeHistory?: boolean;
 }
 
 /** A record that needs a (new) vector for a model: its text to embed and the content hash it belongs to. */
@@ -99,6 +133,12 @@ export interface LinkView {
   direction: 'in' | 'out';
 }
 
+export interface FadedRecord {
+  id: string;
+  title: string;
+  days: number;
+}
+
 export interface BrainOptions {
   now?: () => number;
   newId?: () => string;
@@ -108,11 +148,55 @@ export interface BrainOptions {
 export const DEFAULT_TOKEN_BUDGET = 800;
 const GLOBAL_SHELF = 'global';
 const NEEDS_CONFIRMATION: ReadonlySet<RecordKind> = new Set(['fact', 'decision']);
+const DAY = 86_400_000;
+
+/**
+ * Near-duplicate thresholds (01-E5; B2). Chosen so that genuinely different facts never merge: besides the
+ * similarity, the numbers in both texts must be the same ("port 3000" vs "port 3001" never merge).
+ */
+export const NEAR_DUPLICATE = { cosine: 0.95, jaccard: 0.9, candidates: 500, textChars: 4000 } as const;
+
+/**
+ * Decay (01-E7; B2): what fades into the archive, and when. Only agent-made records nobody confirmed;
+ * never decisions, tasks or files, never anything the user wrote, edited or confirmed.
+ */
+export const DECAY = {
+  /** update, agent_memory, outcome: unused this long. */
+  notesDays: 60,
+  /** facts an agent wrote that are still unconfirmed this long after creation, and unused as long. */
+  factsDays: 90,
+  /** Fade only below this importance. */
+  minImportance: 0.15,
+  kinds: ['update', 'agent_memory', 'outcome', 'fact'] as const,
+};
+
+/** The read key for one card attempt's runs: what they read, so a pass can credit what helped (B2). */
+export const cardReadKey = (cardId: string, attempt: number): string => `card:${cardId}:a${attempt}`;
 
 const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
 const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
 const actorName = (a: Actor): string => (a.type === 'user' ? 'user' : a.id);
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
+
+/** The numbers in a text (as written), so near-duplicates that differ only in a number never merge. */
+const numbersIn = (s: string): string => [...s.matchAll(/\d+(?:[.,:]\d+)*/g)].map((m) => m[0]).sort().join('|');
+
+/** Character-trigram Jaccard similarity of two normalised texts. */
+function trigramJaccard(a: string, b: string): number {
+  const grams = (s: string): Set<string> => {
+    // Punctuation and case don't make a different note: compare letters and digits only.
+    const t = ` ${norm(s.replace(/[^\p{L}\p{N}]+/gu, ' '))} `;
+    const out = new Set<string>();
+    for (let i = 0; i + 3 <= t.length; i++) out.add(t.slice(i, i + 3));
+    return out;
+  };
+  const ga = grams(a);
+  const gb = grams(b);
+  if (!ga.size || !gb.size) return 0;
+  let inter = 0;
+  for (const g of ga) if (gb.has(g)) inter++;
+  return inter / (ga.size + gb.size - inter);
+}
 
 const OPERATOR = /^(OR|AND|NOT)$/;
 
@@ -142,7 +226,7 @@ function toFtsQuery(query: string): string {
 
 /** Lowest cosine similarity a record needs to count as a meaning match (MiniLM: unrelated text sits below ~0.2). */
 export const DEFAULT_MIN_SIMILARITY = 0.25;
-/** How many candidates each list (words, meaning) contributes before the two are fused. */
+/** How many candidates each list (words, meaning) contributes before the two are fused and re-ranked. */
 const FUSION_DEPTH = 50;
 /** Text a record is embedded from: its title, summary and the start of its body. */
 const VECTOR_TEXT_CHARS = 2000;
@@ -162,9 +246,45 @@ interface RecordRow {
   archived: number;
   created_at: number;
   updated_at: number;
+  reads: number;
+  helped: number;
+  last_used_at: number | null;
+  valid_from: number | null;
+  valid_to: number | null;
+  superseded_by: string | null;
+  archived_reason: string | null;
 }
 
-const toRecord = (r: RecordRow): BrainRecord => ({
+/** The columns a search hit needs: what to show, its status, and what importance is computed from. */
+const HIT_COLUMNS =
+  'r.id, r.kind, r.shelf, r.title, r.summary, r.archived, r.valid_to, r.trust, r.confidence, r.reads, r.helped, r.last_used_at, r.updated_at';
+
+interface HitRow {
+  id: string;
+  kind: string;
+  shelf: string;
+  title: string;
+  summary: string | null;
+  archived: number;
+  valid_to: number | null;
+  trust: string;
+  confidence: number | null;
+  reads: number;
+  helped: number;
+  last_used_at: number | null;
+  updated_at: number;
+}
+
+const statusOf = (r: { archived: number; valid_to: number | null }): RecordStatus =>
+  r.archived === 1 ? 'archived' : r.valid_to !== null ? 'superseded' : 'current';
+
+const importanceOf = (r: HitRow | RecordRow, now: number): number =>
+  importance(
+    { trust: r.trust as Trust, confidence: r.confidence, reads: r.reads, helped: r.helped, lastUsedAt: r.last_used_at, updatedAt: r.updated_at },
+    now,
+  );
+
+const toRecord = (r: RecordRow, now: number): BrainRecord => ({
   id: r.id,
   kind: r.kind as RecordKind,
   shelf: r.shelf,
@@ -179,6 +299,14 @@ const toRecord = (r: RecordRow): BrainRecord => ({
   archived: r.archived === 1,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
+  reads: r.reads,
+  helped: r.helped,
+  lastUsedAt: r.last_used_at,
+  importance: importanceOf(r, now),
+  validFrom: r.valid_from ?? r.created_at,
+  validTo: r.valid_to,
+  supersededBy: r.superseded_by,
+  archivedReason: r.archived_reason,
 });
 
 /**
@@ -232,28 +360,78 @@ export class Brain {
     this.#db.close();
   }
 
-  write(input: WriteInput, actor: Actor): { id: string; created: boolean } {
+  /**
+   * Save a record. Exact duplicates (same shelf, same normalised content) return the existing record.
+   * B2: an agent's near-duplicate of an agent record is folded into it as a new version (the incoming text
+   * is kept as an archived record "merged into …"); a near-duplicate of something the user confirmed changes
+   * nothing. `supersedes` replaces an older record (time-aware facts).
+   */
+  write(input: WriteInput, actor: Actor): WriteResult {
     this.#assertNoSecrets(input.title, input.body, input.summary);
-    const trust = this.#initialTrust(input, actor);
+    let trust = this.#initialTrust(input, actor);
     const hash = this.#hash(input.kind, input.title, input.body);
 
     return this.#tx(() => {
       const existing = this.#db
-        .prepare('SELECT id FROM records WHERE shelf = ? AND content_hash = ? AND archived = 0')
+        .prepare('SELECT id FROM records WHERE shelf = ? AND content_hash = ? AND archived = 0 AND valid_to IS NULL')
         .get(input.shelf, hash) as { id: string } | undefined;
       if (existing) return { id: existing.id, created: false };
 
-      const id = this.#newId();
-      const at = this.#now();
-      this.#db
-        .prepare(
-          `INSERT INTO records (id, kind, shelf, owner, title, body, summary, trust, source, confidence, content_hash, version, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
-        )
-        .run(id, input.kind, input.shelf, actorName(actor), input.title, input.body, input.summary ?? null, trust,
-          input.source ?? null, input.confidence ?? null, hash, at, at);
-      this.#addVersion(id, 1, 'create', input.title, input.body, input.summary ?? null, trust, actor, at);
+      let replace: BrainRecord | undefined;
+      let proposalFor: BrainRecord | undefined;
+      if (input.supersedes) {
+        const old = this.#mustGet(input.supersedes);
+        this.#assertSupersedable(old, input.shelf);
+        if (actor.type === 'agent' && this.#userConfirmed(old)) {
+          // The user's record stays current; the agent's becomes a proposal the user decides on.
+          proposalFor = old;
+          if (NEEDS_CONFIRMATION.has(input.kind)) trust = 'proposed';
+        } else {
+          replace = old;
+        }
+      } else if (actor.type === 'agent') {
+        const dup = this.#nearDuplicate(input);
+        if (dup) {
+          if (this.#userConfirmed(dup)) {
+            return { id: dup.id, created: false, merged: false, note: `Already known as "${dup.title}" (${dup.id}), which the user confirmed; nothing changed.` };
+          }
+          this.#foldInto(dup, input, trust, hash, actor);
+          return { id: dup.id, created: false, merged: true, note: `Already known as "${dup.title}" (${dup.id}); your version was folded in as a new version.` };
+        }
+      }
+
+      const id = this.#insert(input, trust, hash, actor, false, null);
+      if (input.vector) this.#storeVector(id, input.vector.model, input.vector.vector, hash);
+      if (replace) {
+        this.#markSuperseded(replace, id, actor);
+      }
+      if (proposalFor) {
+        this.link(id, proposalFor.id, 'proposes_to_supersede');
+        return {
+          id,
+          created: true,
+          note: `${proposalFor.id} ("${proposalFor.title}") was confirmed by the user, so it stays current; your record is saved as a proposal to replace it, and the user decides.`,
+        };
+      }
       return { id, created: true };
+    });
+  }
+
+  /**
+   * Replace `oldId` with `newId` (time-aware facts, 01-E9): the old record stops being current (validTo,
+   * supersededBy) and stays readable as history; `newId -supersedes-> oldId` links them. Agents can't
+   * supersede what the user confirmed (ConflictError: propose instead).
+   */
+  supersede(oldId: string, newId: string, actor: Actor): void {
+    this.#tx(() => {
+      const old = this.#mustGet(oldId);
+      const next = this.#mustGet(newId);
+      if (old.id === next.id) throw new ConflictError('A record cannot supersede itself.');
+      this.#assertSupersedable(old, next.shelf);
+      if (actor.type === 'agent' && this.#userConfirmed(old)) {
+        throw new ConflictError(`${old.id} was confirmed by the user; propose a replacement instead of superseding it.`);
+      }
+      this.#markSuperseded(old, next.id, actor);
     });
   }
 
@@ -285,15 +463,25 @@ export class Brain {
   }
 
   /** Archive instead of delete: the record leaves search but stays readable with its history. */
-  archive(id: string, actor: Actor): void {
+  archive(id: string, actor: Actor, reason?: string): void {
     this.#tx(() => {
       const cur = this.#mustGet(id);
       if (cur.archived) return;
       this.#assertAgentMayChange(cur, actor);
+      this.#archiveRow(cur, actor, reason ?? (actor.type === 'user' ? 'by you' : `by ${actor.id}`));
+    });
+  }
+
+  /** Bring an archived (e.g. faded) record back, as a new version. Only the user can (B2). */
+  unarchive(id: string, actor: Actor): void {
+    if (actor.type !== 'user') throw new TrustError('Only the user can bring an archived record back.');
+    this.#tx(() => {
+      const cur = this.#mustGet(id);
+      if (!cur.archived) return;
       const version = cur.version + 1;
       const at = this.#now();
-      this.#db.prepare('UPDATE records SET archived = 1, version = ?, updated_at = ? WHERE id = ?').run(version, at, id);
-      this.#addVersion(id, version, 'archive', cur.title, cur.body, cur.summary, cur.trust, actor, at);
+      this.#db.prepare('UPDATE records SET archived = 0, archived_reason = NULL, version = ?, updated_at = ? WHERE id = ?').run(version, at, id);
+      this.#addVersion(id, version, 'unarchive', cur.title, cur.body, cur.summary, cur.trust, actor, at);
     });
   }
 
@@ -305,9 +493,10 @@ export class Brain {
       .run(fromId, toId, rel, this.#now());
   }
 
+  /** The record, without counting a read (internal lookups and the app's reader use this). */
   get(id: string): BrainRecord | undefined {
     const row = this.#db.prepare('SELECT * FROM records WHERE id = ?').get(id) as RecordRow | undefined;
-    return row ? toRecord(row) : undefined;
+    return row ? toRecord(row, this.#now()) : undefined;
   }
 
   history(id: string): RecordVersion[] {
@@ -323,35 +512,112 @@ export class Brain {
     return [...out.map((l) => ({ ...l, direction: 'out' as const })), ...inn.map((l) => ({ ...l, direction: 'in' as const }))];
   }
 
+  // ---- use (B2) --------------------------------------------------------------------------------
+
   /**
-   * Search (Memory 01-D7, E11; Phase 2 B1).
+   * Count a read: the record was handed to an agent (get, read(), boot card, Queen lookups). Search hits
+   * alone don't count, or ranking would feed itself. With a read key (one card attempt), a later pass of
+   * that attempt credits the record as having helped.
+   */
+  noteRead(ids: string[], readKey?: string): void {
+    if (!ids.length) return;
+    const at = this.#now();
+    this.#tx(() => {
+      const bump = this.#db.prepare('UPDATE records SET reads = reads + 1, last_used_at = ? WHERE id = ?');
+      const key = readKey ? this.#db.prepare('INSERT OR IGNORE INTO record_reads (read_key, record_id, at) VALUES (?, ?, ?)') : null;
+      for (const id of new Set(ids)) {
+        bump.run(at, id);
+        key?.run(readKey!, id, at);
+      }
+    });
+  }
+
+  /** A card attempt passed inspection: every record its runs read helped (each counted once). Returns how many. */
+  creditHelped(readKey: string): number {
+    return this.#tx(() => {
+      const r = this.#db
+        .prepare(`UPDATE records SET helped = helped + 1 WHERE id IN (SELECT record_id FROM record_reads WHERE read_key = ? AND credited = 0)`)
+        .run(readKey);
+      this.#db.prepare('UPDATE record_reads SET credited = 1 WHERE read_key = ?').run(readKey);
+      return Number(r.changes);
+    });
+  }
+
+  /**
+   * Decay (01-E7; B2): fade unused, unimportant agent notes into the archive ("faded: unused for N days").
+   * Never decisions, tasks or files; never anything the user wrote, edited or confirmed. Restorable by the
+   * user (unarchive). Returns what faded.
+   */
+  fade(opts: { now?: number; minImportance?: number } = {}): FadedRecord[] {
+    const now = opts.now ?? this.#now();
+    const min = opts.minImportance ?? DECAY.minImportance;
+    const rows = this.#db
+      .prepare(
+        `SELECT * FROM records r WHERE r.archived = 0 AND r.owner != 'user' AND r.kind IN (${DECAY.kinds.map(() => '?').join(', ')})
+         AND NOT EXISTS (SELECT 1 FROM record_versions v WHERE v.record_id = r.id AND v.changed_by = 'user')`,
+      )
+      .all(...DECAY.kinds) as unknown as RecordRow[];
+    const faded: FadedRecord[] = [];
+    this.#tx(() => {
+      for (const row of rows) {
+        const rec = toRecord(row, now);
+        if (this.#userConfirmed(rec)) continue;
+        const days = Math.floor((now - Math.max(rec.lastUsedAt ?? 0, rec.updatedAt)) / DAY);
+        if (rec.kind === 'fact') {
+          if (rec.trust === 'confirmed' || now - rec.createdAt < DECAY.factsDays * DAY || days < DECAY.factsDays) continue;
+        } else if (days < DECAY.notesDays) {
+          continue;
+        }
+        if (importanceOf(row, now) >= min) continue;
+        this.#archiveRow(rec, { type: 'agent', id: 'brain-tidy' }, `faded: unused for ${days} days`, now);
+        faded.push({ id: rec.id, title: rec.title, days });
+      }
+    });
+    return faded;
+  }
+
+  // ---- search ----------------------------------------------------------------------------------
+
+  /**
+   * Search (Memory 01-D7, E11; Phase 2 B1, B2).
    * - Words: FTS5 over title, body and summary, matching any meaningful word, ranked by bm25.
    * - With a query vector: also the records whose meaning is closest (cosine over current vectors from the
-   *   same model), then both lists fused with Reciprocal Rank Fusion. Each hit says how it was found.
+   *   same model). Both lists are fused with Reciprocal Rank Fusion, then scaled by importance (B2).
+   * - Current records only, unless includeHistory (then superseded and archived ones too, with their status).
    * Shelf scoping is the same for both: the given project shelf plus global, never other projects.
    */
   search(query: string, opts: SearchOptions = {}): SearchHit[] {
     const limit = opts.limit ?? 20;
+    const depth = Math.max(limit, FUSION_DEPTH);
     const hybrid = Boolean(opts.queryVector && opts.vectorModel);
-    const words = this.#wordHits(query, opts, hybrid ? Math.max(limit, FUSION_DEPTH) : limit);
-    if (!hybrid) return words;
-    const meaning = this.#meaningHits(opts.queryVector!, opts.vectorModel!, opts, Math.max(limit, FUSION_DEPTH));
-    if (!meaning.length) return words.slice(0, limit);
-    const byId = new Map<string, SearchHit>();
-    for (const h of [...words, ...meaning]) if (!byId.has(h.id)) byId.set(h.id, h);
-    const inWords = new Set(words.map((h) => h.id));
-    const inMeaning = new Set(meaning.map((h) => h.id));
-    return rrf([words.map((h) => h.id), meaning.map((h) => h.id)])
-      .slice(0, limit)
-      .map(({ id, score }) => ({
-        ...byId.get(id)!,
-        score,
-        match: inWords.has(id) && inMeaning.has(id) ? 'both' : inWords.has(id) ? 'words' : 'meaning',
-      }));
+    const words = this.#wordHits(query, opts, depth);
+    const meaning = hybrid ? this.#meaningHits(opts.queryVector!, opts.vectorModel!, opts, depth) : [];
+    const rows = new Map<string, HitRow>();
+    for (const r of [...words, ...meaning]) if (!rows.has(r.id)) rows.set(r.id, r);
+    const inWords = new Set(words.map((r) => r.id));
+    const inMeaning = new Set(meaning.map((r) => r.id));
+    const lists = meaning.length ? [words.map((r) => r.id), meaning.map((r) => r.id)] : [words.map((r) => r.id)];
+    const now = this.#now();
+    return rrf(lists)
+      .map(({ id, score }) => {
+        const r = rows.get(id)!;
+        return {
+          id,
+          kind: r.kind as RecordKind,
+          shelf: r.shelf,
+          title: r.title,
+          summary: r.summary,
+          score: rankScore(score, importanceOf(r, now)),
+          match: (inWords.has(id) && inMeaning.has(id) ? 'both' : inWords.has(id) ? 'words' : 'meaning') as SearchHit['match'],
+          status: statusOf(r),
+        };
+      })
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
+      .slice(0, limit);
   }
 
   #scope(opts: SearchOptions, alias: string): { where: string[]; params: Array<string | number> } {
-    const where: string[] = [`${alias}.archived = 0`];
+    const where: string[] = opts.includeHistory ? ['1 = 1'] : [`${alias}.archived = 0`, `${alias}.valid_to IS NULL`];
     const params: Array<string | number> = [];
     if (opts.shelf) {
       where.push(`${alias}.shelf IN (?, ?)`);
@@ -364,36 +630,36 @@ export class Brain {
     return { where, params };
   }
 
-  #wordHits(query: string, opts: SearchOptions, limit: number): SearchHit[] {
+  #wordHits(query: string, opts: SearchOptions, limit: number): HitRow[] {
     const fts = toFtsQuery(query);
     if (!fts) return [];
     const scope = this.#scope(opts, 'r');
-    const rows = this.#db
+    return this.#db
       .prepare(
-        `SELECT r.id, r.kind, r.shelf, r.title, r.summary, bm25(records_fts, 5.0, 1.0, 2.0) AS score
+        `SELECT ${HIT_COLUMNS}, bm25(records_fts, 5.0, 1.0, 2.0) AS bm
          FROM records_fts JOIN records r ON r.rowid = records_fts.rowid
-         WHERE records_fts MATCH ? AND ${scope.where.join(' AND ')} ORDER BY score LIMIT ?`,
+         WHERE records_fts MATCH ? AND ${scope.where.join(' AND ')} ORDER BY bm LIMIT ?`,
       )
-      .all(fts, ...scope.params, limit) as unknown as Array<Omit<SearchHit, 'match'> & { kind: string }>;
-    return rows.map((r) => ({ ...r, kind: r.kind as RecordKind, match: 'words' }));
+      .all(fts, ...scope.params, limit) as unknown as HitRow[];
   }
 
   /** Brute-force cosine over the scope's current vectors (fast far beyond Brain sizes, 01-R7). */
-  #meaningHits(query: Float32Array, model: string, opts: SearchOptions, limit: number): SearchHit[] {
+  #meaningHits(query: Float32Array, model: string, opts: SearchOptions, limit: number): HitRow[] {
     const min = opts.minSimilarity ?? DEFAULT_MIN_SIMILARITY;
     const scope = this.#scope(opts, 'r');
     const rows = this.#db
       .prepare(
-        `SELECT r.id, r.kind, r.shelf, r.title, r.summary, v.vec
+        `SELECT ${HIT_COLUMNS}, v.vec
          FROM record_vectors v JOIN records r ON r.id = v.record_id
          WHERE v.model = ? AND v.content_hash = r.content_hash AND ${scope.where.join(' AND ')}`,
       )
-      .all(model, ...scope.params) as unknown as Array<{ id: string; kind: string; shelf: string; title: string; summary: string | null; vec: Uint8Array }>;
+      .all(model, ...scope.params) as unknown as Array<HitRow & { vec: Uint8Array }>;
     return rows
-      .map((r) => ({ id: r.id, kind: r.kind as RecordKind, shelf: r.shelf, title: r.title, summary: r.summary, score: cosine(query, unpackI8(r.vec)), match: 'meaning' as const }))
-      .filter((h) => h.score >= min)
-      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id))
-      .slice(0, limit);
+      .map((r) => ({ row: r, sim: cosine(query, unpackI8(r.vec)) }))
+      .filter((x) => x.sim >= min)
+      .sort((a, b) => b.sim - a.sim || a.row.id.localeCompare(b.row.id))
+      .slice(0, limit)
+      .map(({ row: { vec: _v, ...row } }) => row);
   }
 
   // ---- meaning-search vectors (Phase 2 B1) ------------------------------------------------------
@@ -425,12 +691,7 @@ export class Brain {
   setVector(id: string, model: string, vector: Float32Array, contentHash: string): boolean {
     const cur = this.#db.prepare('SELECT content_hash FROM records WHERE id = ?').get(id) as { content_hash: string } | undefined;
     if (!cur || cur.content_hash !== contentHash) return false;
-    this.#db
-      .prepare(
-        `INSERT INTO record_vectors (record_id, model, dim, vec, content_hash, updated_at) VALUES (?, ?, ?, ?, ?, ?)
-         ON CONFLICT (record_id, model) DO UPDATE SET dim = excluded.dim, vec = excluded.vec, content_hash = excluded.content_hash, updated_at = excluded.updated_at`,
-      )
-      .run(id, model, vector.length, packI8(vector), contentHash, this.#now());
+    this.#storeVector(id, model, vector, contentHash);
     return true;
   }
 
@@ -448,10 +709,15 @@ export class Brain {
     return { indexed, total };
   }
 
-  /** Tiered read (Memory 01-D7): the best matches packed as one-line summaries within a token budget. */
-  read(query: string, opts: SearchOptions & { tokenBudget?: number } = {}): { text: string; ids: string[]; truncated: boolean } {
+  /**
+   * Tiered read (Memory 01-D7): the best current matches packed as one-line summaries within a token
+   * budget. What it returns counts as read (B2); `readKey` ties the reads to one card attempt.
+   */
+  read(query: string, opts: SearchOptions & { tokenBudget?: number; readKey?: string } = {}): { text: string; ids: string[]; truncated: boolean } {
     const budget = opts.tokenBudget ?? DEFAULT_TOKEN_BUDGET;
-    const hits = this.search(query, { ...opts, limit: opts.limit ?? 50 });
+    // read() hands records to an agent: current ones only, never history.
+    const { readKey, ...searchOpts } = opts;
+    const hits = this.search(query, { ...searchOpts, includeHistory: false, limit: opts.limit ?? 50 });
     const lines: string[] = [];
     const ids: string[] = [];
     for (const h of hits) {
@@ -461,50 +727,72 @@ export class Brain {
       lines.push(line);
       ids.push(rec.id);
     }
+    this.noteRead(ids, readKey);
     return { text: lines.join('\n'), ids, truncated: ids.length < hits.length };
   }
 
   /** Newest records on a shelf (plus global), for browsing without a search query (App 07, Brain screen). */
-  recent(opts: { shelf: string; kinds?: RecordKind[]; limit?: number }): SearchHit[] {
+  recent(opts: { shelf: string; kinds?: RecordKind[]; limit?: number; includeHistory?: boolean }): SearchHit[] {
     const params: Array<string | number> = [opts.shelf, GLOBAL_SHELF];
-    const kinds = opts.kinds?.length ? `AND kind IN (${opts.kinds.map(() => '?').join(', ')})` : '';
+    const current = opts.includeHistory ? '' : 'AND r.archived = 0 AND r.valid_to IS NULL';
+    const kinds = opts.kinds?.length ? `AND r.kind IN (${opts.kinds.map(() => '?').join(', ')})` : '';
     if (opts.kinds?.length) params.push(...opts.kinds);
     params.push(Math.min(Math.max(opts.limit ?? 50, 1), 200));
     const rows = this.#db
-      .prepare(`SELECT id, kind, shelf, title, summary FROM records WHERE shelf IN (?, ?) AND archived = 0 ${kinds} ORDER BY updated_at DESC, id LIMIT ?`)
-      .all(...params) as unknown as Array<Omit<SearchHit, 'score' | 'kind'> & { kind: string }>;
-    return rows.map((r) => ({ ...r, kind: r.kind as RecordKind, score: 0, match: 'words' as const }));
+      .prepare(`SELECT ${HIT_COLUMNS} FROM records r WHERE r.shelf IN (?, ?) ${current} ${kinds} ORDER BY r.updated_at DESC, r.id LIMIT ?`)
+      .all(...params) as unknown as HitRow[];
+    return rows.map((r) => ({
+      id: r.id,
+      kind: r.kind as RecordKind,
+      shelf: r.shelf,
+      title: r.title,
+      summary: r.summary,
+      score: 0,
+      match: 'words' as const,
+      status: statusOf(r),
+    }));
   }
 
-  /** The few hundred tokens every agent loads first (Memory 01, tiered reading step 1). */
-  bootCard(shelf: string): string {
+  /**
+   * The few hundred tokens every agent loads first (Memory 01, tiered reading step 1). Current records only;
+   * the records it lists count as read (B2).
+   */
+  bootCard(shelf: string, readKey?: string): string {
     const pick = (kind: RecordKind, trust: Trust | null, limit: number): BrainRecord[] =>
       (this.#db
         .prepare(
-          `SELECT * FROM records WHERE kind = ? AND shelf IN (?, ?) AND archived = 0 ${trust ? 'AND trust = ?' : ''}
+          `SELECT * FROM records WHERE kind = ? AND shelf IN (?, ?) AND archived = 0 AND valid_to IS NULL ${trust ? 'AND trust = ?' : ''}
            ORDER BY updated_at DESC LIMIT ?`,
         )
-        .all(...(trust ? [kind, shelf, GLOBAL_SHELF, trust, limit] : [kind, shelf, GLOBAL_SHELF, limit])) as unknown as RecordRow[]).map(toRecord);
+        .all(...(trust ? [kind, shelf, GLOBAL_SHELF, trust, limit] : [kind, shelf, GLOBAL_SHELF, limit])) as unknown as RecordRow[]).map((r) =>
+        toRecord(r, this.#now()),
+      );
 
     const waiting = this.#db
       .prepare(
-        `SELECT COUNT(*) AS n FROM records WHERE shelf IN (?, ?) AND archived = 0 AND trust IN ('proposed', 'unconfirmed')`,
+        `SELECT COUNT(*) AS n FROM records WHERE shelf IN (?, ?) AND archived = 0 AND valid_to IS NULL AND trust IN ('proposed', 'unconfirmed')`,
       )
       .get(shelf, GLOBAL_SHELF) as { n: number };
 
+    const decisions = pick('decision', 'confirmed', 5);
+    const facts = pick('fact', 'confirmed', 5);
+    const outcomes = pick('outcome', null, 3);
     const section = (title: string, recs: BrainRecord[]): string =>
       recs.length ? `${title}:\n${recs.map((r) => `- ${clip(r.title, 80)}`).join('\n')}` : '';
     const card = [
       `Shelf: ${shelf}`,
-      section('Decisions', pick('decision', 'confirmed', 5)),
-      section('Facts', pick('fact', 'confirmed', 5)),
-      section('Recent outcomes', pick('outcome', null, 3)),
+      section('Decisions', decisions),
+      section('Facts', facts),
+      section('Recent outcomes', outcomes),
       waiting.n ? `Waiting for the user: ${waiting.n} proposal(s) or unconfirmed fact(s).` : '',
     ]
       .filter(Boolean)
       .join('\n');
+    this.noteRead([...decisions, ...facts, ...outcomes].map((r) => r.id), readKey);
     return clip(card, 1200);
   }
+
+  // ---- internals -------------------------------------------------------------------------------
 
   #initialTrust(input: WriteInput, actor: Actor): Trust {
     if (actor.type === 'user') return input.trust ?? 'confirmed';
@@ -517,6 +805,114 @@ export class Brain {
     if (actor.type === 'agent' && cur.trust === 'confirmed' && NEEDS_CONFIRMATION.has(cur.kind)) {
       throw new ConflictError(`${cur.id} was confirmed by the user; propose a change instead of editing it.`);
     }
+  }
+
+  /**
+   * What the user owns or confirmed: anything the user wrote (owner "user", which includes the hive's own
+   * outcome notes), and any fact or decision the user confirmed. Agents never merge away, supersede or fade these.
+   */
+  #userConfirmed(r: BrainRecord): boolean {
+    return r.owner === 'user' || (r.trust === 'confirmed' && NEEDS_CONFIRMATION.has(r.kind));
+  }
+
+  #assertSupersedable(old: BrainRecord, shelf: string): void {
+    if (old.shelf !== shelf) throw new ConflictError(`${old.id} is on the ${old.shelf} shelf; a record can only supersede one on its own shelf.`);
+    if (old.archived) throw new ConflictError(`${old.id} is archived.`);
+    if (old.validTo !== null) throw new ConflictError(`${old.id} was already superseded by ${old.supersededBy ?? 'another record'}.`);
+  }
+
+  /** The best near-duplicate of `input` among current records of the same shelf and kind, if any (01-E5). */
+  #nearDuplicate(input: WriteInput): BrainRecord | undefined {
+    const rows = this.#db
+      .prepare(
+        `SELECT * FROM records WHERE shelf = ? AND kind = ? AND archived = 0 AND valid_to IS NULL ORDER BY updated_at DESC, id LIMIT ?`,
+      )
+      .all(input.shelf, input.kind, NEAR_DUPLICATE.candidates) as unknown as RecordRow[];
+    if (!rows.length) return undefined;
+    const text = clip(`${input.title}\n${input.body}`, NEAR_DUPLICATE.textChars);
+    const numbers = numbersIn(`${input.title} ${input.body}`);
+    const vectors = new Map<string, Float32Array>();
+    if (input.vector) {
+      const stmt = this.#db.prepare(
+        `SELECT v.record_id, v.vec FROM record_vectors v JOIN records r ON r.id = v.record_id
+         WHERE v.model = ? AND v.content_hash = r.content_hash AND r.shelf = ? AND r.kind = ?`,
+      );
+      for (const v of stmt.all(input.vector.model, input.shelf, input.kind) as Array<{ record_id: string; vec: Uint8Array }>) {
+        vectors.set(v.record_id, unpackI8(v.vec));
+      }
+    }
+    let best: { row: RecordRow; sim: number } | undefined;
+    for (const row of rows) {
+      if (numbersIn(`${row.title} ${row.body}`) !== numbers) continue;
+      const theirs = vectors.get(row.id);
+      const sim =
+        input.vector && theirs
+          ? cosine(input.vector.vector, theirs)
+          : trigramJaccard(text, clip(`${row.title}\n${row.body}`, NEAR_DUPLICATE.textChars));
+      const enough = input.vector && theirs ? sim >= NEAR_DUPLICATE.cosine : sim >= NEAR_DUPLICATE.jaccard;
+      if (enough && (!best || sim > best.sim)) best = { row, sim };
+    }
+    return best ? toRecord(best.row, this.#now()) : undefined;
+  }
+
+  /**
+   * Fold an agent's near-duplicate into an agent record: the incoming text is kept as an archived record
+   * ("merged into …", linked merged_into), and the existing record takes it as a new version.
+   */
+  #foldInto(dup: BrainRecord, input: WriteInput, trust: Trust, hash: string, actor: Actor): void {
+    const at = this.#now();
+    this.#insert(input, trust, hash, actor, true, `merged into ${dup.id}`, dup.id);
+    const version = dup.version + 1;
+    const nextHash = this.#hash(dup.kind, input.title, input.body);
+    this.#db
+      .prepare('UPDATE records SET title = ?, body = ?, summary = ?, content_hash = ?, version = ?, updated_at = ? WHERE id = ?')
+      .run(input.title, input.body, input.summary ?? dup.summary, nextHash, version, at, dup.id);
+    this.#addVersion(dup.id, version, 'merge', input.title, input.body, input.summary ?? dup.summary, dup.trust, actor, at);
+    if (input.vector) this.#storeVector(dup.id, input.vector.model, input.vector.vector, nextHash);
+  }
+
+  /** Inserts a record (archived when folded into another one). Returns its id. */
+  #insert(input: WriteInput, trust: Trust, hash: string, actor: Actor, archived: boolean, archivedReason: string | null, mergedInto?: string): string {
+    const id = this.#newId();
+    const at = this.#now();
+    // A folded-in duplicate never enters the exact-duplicate index of current records: give it its own hash.
+    const contentHash = archived ? `${hash}:merged:${id}` : hash;
+    this.#db
+      .prepare(
+        `INSERT INTO records (id, kind, shelf, owner, title, body, summary, trust, source, confidence, content_hash, version,
+           archived, archived_reason, valid_from, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)`,
+      )
+      .run(id, input.kind, input.shelf, actorName(actor), input.title, input.body, input.summary ?? null, trust,
+        input.source ?? null, input.confidence ?? null, contentHash, archived ? 1 : 0, archivedReason, at, at, at);
+    this.#addVersion(id, 1, 'create', input.title, input.body, input.summary ?? null, trust, actor, at);
+    if (mergedInto) {
+      this.#db.prepare('INSERT OR IGNORE INTO links (from_id, to_id, rel, created_at) VALUES (?, ?, ?, ?)').run(id, mergedInto, 'merged_into', at);
+    }
+    return id;
+  }
+
+  #markSuperseded(old: BrainRecord, newId: string, actor: Actor): void {
+    const at = this.#now();
+    const version = old.version + 1;
+    this.#db.prepare('UPDATE records SET valid_to = ?, superseded_by = ?, version = ?, updated_at = ? WHERE id = ?').run(at, newId, version, at, old.id);
+    this.#addVersion(old.id, version, 'supersede', old.title, old.body, old.summary, old.trust, actor, at);
+    this.#db.prepare('INSERT OR IGNORE INTO links (from_id, to_id, rel, created_at) VALUES (?, ?, ?, ?)').run(newId, old.id, 'supersedes', at);
+  }
+
+  #archiveRow(cur: BrainRecord, actor: Actor, reason: string, at = this.#now()): void {
+    const version = cur.version + 1;
+    this.#db.prepare('UPDATE records SET archived = 1, archived_reason = ?, version = ?, updated_at = ? WHERE id = ?').run(reason, version, at, cur.id);
+    this.#addVersion(cur.id, version, 'archive', cur.title, cur.body, cur.summary, cur.trust, actor, at);
+  }
+
+  #storeVector(id: string, model: string, vector: Float32Array, contentHash: string): void {
+    this.#db
+      .prepare(
+        `INSERT INTO record_vectors (record_id, model, dim, vec, content_hash, updated_at) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT (record_id, model) DO UPDATE SET dim = excluded.dim, vec = excluded.vec, content_hash = excluded.content_hash, updated_at = excluded.updated_at`,
+      )
+      .run(id, model, vector.length, packI8(vector), contentHash, this.#now());
   }
 
   #assertNoSecrets(...texts: Array<string | null | undefined>): void {

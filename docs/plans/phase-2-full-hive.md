@@ -365,3 +365,19 @@ Three milestones, each ending in something the user can try.
     - **Brain screen:** a meaning-search strip whose consent line states model, size and source before any download, then download progress / "Reading your Brain: n of m" / on; and a match badge on every result.
     - **Hint:** "Try meaning search" when a sentence finds nothing.
     - **Settings:** a Meaning search block.
+- **B2 Ranking, decay and dedupe: IN PROGRESS. Paused by the user on 2026-11-12 and saved as a work-in-progress commit.**
+  - **Contract:** in `packages/shared/src/hive-api.ts`:
+    - `BrainSearchRequest.includeHistory`;
+    - `BrainHitView.status` (current / superseded / archived);
+    - `BrainRecordView`: `usage` {reads, helped, lastUsedAt, importance}, `validFrom` / `validTo`, `supersededBy`, `supersedes`, `archivedReason`, `mergedFrom`.
+  - **Built so far:**
+    - Brain: usage tracking, the importance formula (`packages/brain/src/importance.ts`), supersede, near-duplicate merging, decay;
+    - Brain service, MCP, CLI and host wiring;
+    - the Brain reader UI (usage line, "Current since / Replaced by", history toggle and badges; `HitStatus.tsx`, `RecordLife.tsx`).
+  - **State when stopped:** typecheck and lint clean. Unit tests: 657 pass and **1 fails**, `apps/desktop/src/main/hive-manager-opencode.test.ts` ("is ready only with a provider; then a goal runs on it…"), probably affected by the B2 host changes. **The e2e suite was not run.** The backend worker had just finished its own tests and was about to run the full checks; the UI worker was splitting the last test in `e2e/brain-history-ui.spec.ts` into two seeded launches.
+  - **To resume:**
+    1. Fix the OpenCode host test.
+    2. Finish and run `e2e/brain-tidy.spec.ts` and `e2e/brain-history-ui.spec.ts`.
+    3. Run the full suite.
+    4. Review the B2 rules against the plan: nothing deleted; agents never change, merge, replace or fade user-confirmed notes; the secrets guard on every write path.
+    5. Write the B2 progress entry.

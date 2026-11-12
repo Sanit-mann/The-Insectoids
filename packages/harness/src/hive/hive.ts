@@ -1,7 +1,7 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Caste } from '@insectoids/shared';
-import type { ApprovalItem, BoardCard, Brain, Goal } from '@insectoids/brain';
+import { type ApprovalItem, type BoardCard, type Brain, type Goal, cardReadKey } from '@insectoids/brain';
 import type { Workspace } from '@insectoids/workspace';
 import type { ClaudeEvent } from '../claude/stream';
 import { type BrainAccess, type BrainTicket, brainWriteAccess } from './brain-access';
@@ -637,6 +637,8 @@ export class Hive {
         const merge = await workspace.mergeCard(goal.id, id, card.title);
         if (merge.ok) {
           brain.outcomes.settle(card.id, card.attempts, 'pass');
+          // What this attempt's insects read from the Brain helped work that passed (B2 ranking).
+          brain.creditHelped(cardReadKey(card.id, card.attempts));
           brain.taskboard.review(card.id, { verdict: 'pass', by: 'Inspector' });
           brain.write({ kind: 'outcome', shelf: goal.shelf, title: `${local(card.id)} verified: ${card.title}`, body: `Passed on attempt ${card.attempts + 1}. ${clip(card.result ?? '', 300)}`, source: card.id }, { type: 'agent', id: 'Inspector' });
           await workspace.removeCard(goal.id, id);
@@ -764,7 +766,10 @@ ${brief}`,
     // One token per run, scoped to this agent and the goal's shelf; it dies with the run, whatever happens.
     const write = brainWriteAccess(req.role);
     const shelf = this.#o.brain.goals.get(goalId)?.shelf ?? this.#o.shelf;
-    const ticket: BrainTicket = await access.grant({ agentId: req.agentId, shelf, write });
+    // Insects' reads are tied to their card attempt, so a pass can credit what helped (B2).
+    const card = cardId && req.role !== 'queen' && req.role !== 'inspector' ? this.#o.brain.taskboard.get(cardId) : undefined;
+    const readKey = card ? cardReadKey(card.id, card.attempts) : undefined;
+    const ticket: BrainTicket = await access.grant({ agentId: req.agentId, shelf, write, ...(readKey ? { readKey } : {}) });
     try {
       return await this.#runWith(goalId, cardId, {
         ...req,

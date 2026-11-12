@@ -4,6 +4,7 @@ import type { BrainRecordView } from '@insectoids/shared';
 import { InlineError } from '@/components/changes/CardChanges';
 import { cn } from '@/lib/utils';
 import { TRUST, kindInfo } from './kinds';
+import { RecordLife } from './RecordLife';
 
 type Load = { state: 'loading' } | { state: 'missing' } | { state: 'error'; message: string } | { state: 'ready'; record: BrainRecordView };
 
@@ -47,6 +48,7 @@ export function BrainReader({ id, onOpen }: { id: string; onOpen: (id: string) =
             {t.label}
           </span>
           {r.archived && <span className="rounded-full border border-line px-2 leading-5">Archived</span>}
+          {r.supersededBy && <span className="rounded-full border border-dashed border-line px-2 leading-5">Replaced</span>}
         </span>
         <h2 id="record-title" className="m-0 font-display text-xl font-semibold">
           {r.title}
@@ -88,6 +90,8 @@ export function BrainReader({ id, onOpen }: { id: string; onOpen: (id: string) =
           </span>
         ))}
       </div>
+
+      <RecordLife onOpen={onOpen} record={r} />
 
       <section aria-labelledby="links-title" className="flex flex-col gap-1">
         <h3 id="links-title" className="m-0 font-display text-sm font-semibold">

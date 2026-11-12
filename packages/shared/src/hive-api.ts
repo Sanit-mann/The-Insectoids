@@ -307,6 +307,10 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('setEngineOrder'), order: z.array(EngineIdSchema).max(5) }),
   /** The user's soft spending limits for an engine's subscription (null clears). */
   z.object({ type: z.literal('setEngineLimits'), engineId: EngineIdSchema, cap5hUsd: z.number().positive().max(10_000).nullable(), cap7dUsd: z.number().positive().max(100_000).nullable() }),
+  /** Tidy the Brain now (B2): fade unused, unimportant agent notes into the archive. Also runs on its own every 6 h. */
+  z.object({ type: z.literal('tidyBrain') }),
+  /** Bring an archived (e.g. faded) Brain record back, as a new version. The user only (B2). */
+  z.object({ type: z.literal('restoreRecord'), id: Id }),
   /** Switch meaning search on (downloads the model once if needed) or off (vectors kept, search uses words only). */
   z.object({ type: z.literal('setMeaningSearch'), enabled: z.boolean() }),
   /** Forget an engine's "limit reached" state now (e.g. the user upgraded the plan). */
@@ -343,6 +347,8 @@ export type ChangesView = z.infer<typeof ChangesViewSchema>;
 export const BrainSearchRequestSchema = z.object({
   query: z.string().trim().max(500),
   kinds: z.array(RecordKindSchema).optional(),
+  /** Include superseded facts and faded (archived) records too (B2). Default: current records only. */
+  includeHistory: z.boolean().optional(),
 });
 export const BrainHitViewSchema = z.object({
   id: z.string(),
@@ -352,6 +358,8 @@ export const BrainHitViewSchema = z.object({
   shelf: z.string(),
   title: z.string(),
   summary: z.string().nullable(),
+  /** No longer current: replaced by a newer record, or faded into the archive (only with includeHistory). */
+  status: z.enum(['current', 'superseded', 'archived']),
 });
 export type BrainHitView = z.infer<typeof BrainHitViewSchema>;
 
@@ -370,6 +378,25 @@ export const BrainRecordViewSchema = z.object({
   createdAt: z.number(),
   updatedAt: z.number(),
   history: z.array(z.object({ version: z.number(), change: z.string(), title: z.string(), trust: TrustSchema, changedBy: z.string(), changedAt: z.number() })),
+  /**
+   * Use and importance (Memory 01-E7; Phase 2 B2). Importance (0..1) blends recency (freshness
+   * half-life), how often agents read it, and whether it helped work that passed inspection.
+   */
+  usage: z.object({
+    reads: z.number().int(),
+    helped: z.number().int(),
+    lastUsedAt: z.number().nullable(),
+    importance: z.number().min(0).max(1),
+  }),
+  /** Time-aware facts (01-E9): when it became true and, once replaced, when it stopped being current. */
+  validFrom: z.number(),
+  validTo: z.number().nullable(),
+  supersededBy: z.object({ id: z.string(), title: z.string() }).nullable(),
+  supersedes: z.array(z.object({ id: z.string(), title: z.string() })),
+  /** Why it was archived, when it was (e.g. "faded: unused for 90 days", "merged into …", "by you"). */
+  archivedReason: z.string().nullable(),
+  /** Near-duplicates folded into this record (01-E5). */
+  mergedFrom: z.array(z.object({ id: z.string(), title: z.string() })),
   links: z.array(z.object({ id: z.string(), rel: z.string(), direction: z.enum(['in', 'out']), title: z.string() })),
 });
 export type BrainRecordView = z.infer<typeof BrainRecordViewSchema>;

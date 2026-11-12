@@ -166,6 +166,30 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX record_vectors_model ON record_vectors (model);
   `,
+  // v6: use, importance and time (Memory 01-E5, E7, E9; Phase 2 B2).
+  // - reads / helped / last_used_at: how agents use a record (ranking and decay).
+  // - valid_from / valid_to / superseded_by: time-aware facts; a superseded record leaves default search.
+  // - archived_reason: why it left search ("faded: …", "merged into …", "by you").
+  // - record_reads: which card attempt read which record, so a pass can credit what helped.
+  `
+  ALTER TABLE records ADD COLUMN reads INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE records ADD COLUMN helped INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE records ADD COLUMN last_used_at INTEGER;
+  ALTER TABLE records ADD COLUMN valid_from INTEGER;
+  ALTER TABLE records ADD COLUMN valid_to INTEGER;
+  ALTER TABLE records ADD COLUMN superseded_by TEXT;
+  ALTER TABLE records ADD COLUMN archived_reason TEXT;
+  UPDATE records SET valid_from = created_at;
+  CREATE INDEX records_current ON records (shelf, kind, archived, valid_to);
+
+  CREATE TABLE record_reads (
+    read_key   TEXT NOT NULL,
+    record_id  TEXT NOT NULL REFERENCES records(id),
+    credited   INTEGER NOT NULL DEFAULT 0,
+    at         INTEGER NOT NULL,
+    PRIMARY KEY (read_key, record_id)
+  );
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

@@ -195,3 +195,21 @@ describe('when the Brain is unreachable', () => {
     expect(await call(client, 'brain_search', { query: 'x' })).toEqual({ text: 'No matches.', isError: false });
   });
 });
+
+describe('B2: supersede, near-duplicates and history through MCP', () => {
+  it('supersedes, says "already known" for near-duplicates, and marks history only on request', async () => {
+    const client = await agent();
+    const old = idIn((await call(client, 'brain_write', { kind: 'fact', title: 'Hosting', body: 'The site is on Netlify.' })).text);
+    const next = await call(client, 'brain_write', { kind: 'fact', title: 'Hosting', body: 'The site moved to Vercel.', supersedes: old });
+    expect(next.text).toMatch(/^Saved as /);
+    const current = await call(client, 'brain_search', { query: 'hosting' });
+    expect(current.text).not.toContain(old);
+    const all = await call(client, 'brain_search', { query: 'hosting', includeHistory: true });
+    expect(all.text).toContain(`(${old}) [SUPERSEDED]`);
+    expect((await call(client, 'brain_get', { id: old })).text).toMatch(/SUPERSEDED by /);
+
+    await call(client, 'brain_write', { kind: 'update', title: 'Checkout', body: 'The checkout page uses Stripe Elements for card entry.' });
+    const dup = await call(client, 'brain_write', { kind: 'update', title: 'Checkout', body: 'the checkout page uses stripe elements, for card entry' });
+    expect(dup.text).toMatch(/^Already known as "Checkout"/);
+  });
+});

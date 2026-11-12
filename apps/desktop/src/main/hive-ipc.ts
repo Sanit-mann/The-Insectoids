@@ -56,13 +56,20 @@ export function registerHiveIpc(d: Deps): void {
   handle(HIVE_IPC.brainSearch, async (arg) => {
     const req = BrainSearchRequestSchema.parse(arg);
     if (!req.query) {
-      return BrainHitViewSchema.array().parse(await host().call('brainRecent', req.kinds ? { kinds: req.kinds } : {}));
+      const params = { ...(req.kinds ? { kinds: req.kinds } : {}), ...(req.includeHistory ? { includeHistory: true } : {}) };
+      return BrainHitViewSchema.array().parse(await host().call('brainRecent', params));
     }
     const project = ProjectViewSchema.nullable().parse(await host().call('project'));
     // As the user: the project's shelf plus global (Memory 01-D2).
-    const hits = await brain().search({ query: req.query, shelf: project?.shelf ?? 'global', limit: 30, ...(req.kinds ? { kinds: req.kinds } : {}) });
+    const hits = await brain().search({
+      query: req.query,
+      shelf: project?.shelf ?? 'global',
+      limit: 30,
+      ...(req.kinds ? { kinds: req.kinds } : {}),
+      ...(req.includeHistory ? { includeHistory: true } : {}),
+    });
     // Words + meaning when meaning search is on (the service embeds the query in the Brain host); each hit says how it was found.
-    return BrainHitViewSchema.array().parse(hits.map(({ id, kind, shelf, title, summary, match }) => ({ id, kind, shelf, title, summary, match })));
+    return BrainHitViewSchema.array().parse(hits.map(({ id, kind, shelf, title, summary, match, status }) => ({ id, kind, shelf, title, summary, match, status })));
   });
 
   handle(HIVE_IPC.brainRecord, async (arg) => {
@@ -77,6 +84,7 @@ export function registerHiveIpc(d: Deps): void {
         return other ? { id: l.id, rel: l.rel, direction: l.direction, title: other.title } : null;
       }),
     );
+    const live = titled.filter((l) => l !== null);
     return BrainRecordViewSchema.parse({
       id: rec.id,
       kind: rec.kind,
@@ -92,7 +100,15 @@ export function registerHiveIpc(d: Deps): void {
       createdAt: rec.createdAt,
       updatedAt: rec.updatedAt,
       history: history.map(({ version, change, title, trust, changedBy, changedAt }) => ({ version, change, title, trust, changedBy, changedAt })),
-      links: titled.filter((l) => l !== null),
+      links: live,
+      // B2: use and importance, time-aware facts, merges.
+      usage: { reads: rec.reads, helped: rec.helped, lastUsedAt: rec.lastUsedAt, importance: rec.importance },
+      validFrom: rec.validFrom,
+      validTo: rec.validTo,
+      supersededBy: rec.supersededBy ? { id: rec.supersededBy, title: (await c.get(rec.supersededBy))?.title ?? rec.supersededBy } : null,
+      supersedes: live.filter((l) => l.rel === 'supersedes' && l.direction === 'out').map(({ id, title }) => ({ id, title })),
+      archivedReason: rec.archivedReason,
+      mergedFrom: live.filter((l) => l.rel === 'merged_into' && l.direction === 'in').map(({ id, title }) => ({ id, title })),
     });
   });
 

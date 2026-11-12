@@ -145,6 +145,7 @@ export class BrainClient {
   update = (p: ParamsOf<'update'>) => this.call('update', p);
   archive = (id: string) => this.call('archive', { id });
   link = (p: ParamsOf<'link'>) => this.call('link', p);
+  unarchive = (id: string) => this.call('unarchive', { id });
 
   close(): void {
     this.#fail(new BrainServiceError('disconnected', 'Client closed.'));
