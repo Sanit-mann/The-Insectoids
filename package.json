@@ -1,0 +1,31 @@
+{
+  "name": "the-insectoids",
+  "private": true,
+  "description": "The Insectoids: a local-first AI operating system with a Queen, managers and insect agents sharing one Brain.",
+  "license": "MIT",
+  "type": "module",
+  "packageManager": "pnpm@12.18.0",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @insectoids/desktop dev",
+    "build": "pnpm -r build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "pnpm --filter @insectoids/desktop test:e2e",
+    "check": "pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "devDependencies": {
+    "@eslint/js": "10.0.1",
+    "@types/node": "24.19.2",
+    "eslint": "10.14.0",
+    "eslint-plugin-react-hooks": "7.1.1",
+    "globals": "17.14.0",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.72.2",
+    "vitest": "5.1.0"
+  }
+}

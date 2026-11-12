@@ -1,0 +1,93 @@
+@import 'tailwindcss';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/space-grotesk';
+@import '@fontsource-variable/jetbrains-mono';
+
+/* Design tokens (App 07 · Design system). Dark is the default theme. */
+:root,
+[data-theme='dark'] {
+  --ground: #0f0e0b;
+  --rail: #13110d;
+  --surface: #17150f;
+  --surface-2: #1e1b15;
+  --line: #2a261e;
+  --text: #f1ebdd;
+  --muted: #a8a08f;
+  --honey: #f2a93b;
+  --honey-ink: #1a1306;
+  --honey-text: #f7c873;
+  --active: #2a2418;
+  --st-working: #f2a93b;
+  --st-waiting: #6cb6f5;
+  --st-blocked: #ef7a5e;
+  --st-done: #86c98a;
+  --st-paused: #b49cf0;
+  --st-idle: #6e675a;
+  color-scheme: dark;
+}
+
+[data-theme='light'] {
+  --ground: #faf7f0;
+  --rail: #f3eee3;
+  --surface: #ffffff;
+  --surface-2: #f6f1e6;
+  --line: #e6dfd0;
+  --text: #1c1912;
+  --muted: #6b6354;
+  --honey-text: #8f5600;
+  --active: #f6e7c8;
+  color-scheme: light;
+}
+
+@theme inline {
+  --color-ground: var(--ground);
+  --color-rail: var(--rail);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-text: var(--text);
+  --color-muted: var(--muted);
+  --color-honey: var(--honey);
+  --color-honey-ink: var(--honey-ink);
+  --color-honey-text: var(--honey-text);
+  --color-active: var(--active);
+  --color-st-working: var(--st-working);
+  --color-st-waiting: var(--st-waiting);
+  --color-st-blocked: var(--st-blocked);
+  --color-st-done: var(--st-done);
+  --color-st-paused: var(--st-paused);
+  --color-st-idle: var(--st-idle);
+  --font-sans: 'Inter Variable', system-ui, sans-serif;
+  --font-display: 'Space Grotesk Variable', 'Inter Variable', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--honey);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

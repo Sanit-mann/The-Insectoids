@@ -13,7 +13,7 @@ Each function of the system lives in its own file in this folder. Status values:
 | 07 | The App (Shell & UI) | One desktop app for every screen: Queen chat, approval inbox, taskboard, hive monitor, Brain, changes & undo, library, connections, cadence, budgets, settings. Chat-first, subtle hive theme, 8-screen clickable prototype and component map. Decisions D1–D9. | Finalized | [07-app-shell-ui.md](07-app-shell-ui.md) |
 | 08 | Onboarding | First-run setup: privacy promise, Brain folder, engines, providers, "about you" interview, first project, safety limits, first goal. Rerunnable. 5-minute quick setup, Queen interview, safety presets, optional sample goal. Decisions D1–D8. | Finalized | [08-onboarding.md](08-onboarding.md) |
 | 09 | Tech Stack & Architecture | Proposed: Electron + TypeScript, React UI, SQLite (FTS5 + sqlite-vec) Brain service as single writer, local embeddings, PTY harness, loopback broker, pnpm monorepo. MIT open source. Decisions D1–D7. | Finalized | [09-tech-stack.md](09-tech-stack.md) |
-| 10 | Build Roadmap | Phase 0 foundation → Phase 1 "First Spark" MVP (one goal end to end, safely) → Phase 2 full hive → Phase 3 cadence & polish → Phase 4 expansion. A demo ends each phase. Claude Code only in the MVP; dogfooding from Phase 2; local git. Decisions D1–D6. | Ready to finalize (no open questions) | [10-build-roadmap.md](10-build-roadmap.md) |
+| 10 | Build Roadmap | Phase 0 foundation → Phase 1 "First Spark" MVP (one goal end to end, safely) → Phase 2 full hive → Phase 3 cadence & polish → Phase 4 expansion. A demo ends each phase. Claude Code only in the MVP; dogfooding from Phase 2; local git. Decisions D1–D6. | Finalized · Phase 0 in progress | [10-build-roadmap.md](10-build-roadmap.md) |
 
 ## Library
 

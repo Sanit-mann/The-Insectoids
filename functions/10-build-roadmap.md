@@ -1,6 +1,6 @@
 # 10 — Build Roadmap
 
-**Status:** In discussion
+**Status:** Finalized (2026-11-12) · Phase 0 in progress
 **Created:** 2026-11-12
 **Last updated:** 2026-11-12
 
@@ -25,6 +25,23 @@ Turn functions 01–09 into an order of work: the smallest version that proves t
 - Electron shell: main, preload (typed IPC bridge), React renderer, tray, design tokens, and the first registry components installed.
 - `packages/shared`: core types (records, task cards, agents, approvals).
 - **Demo:** the app opens with the rail and an empty Queen screen; tests run in CI.
+- **Outcome (2026-11-12, branch `phase-0-foundation`), built and verified locally on Windows:**
+  - **Toolchain:** pnpm 12.18 workspace with the `apps/desktop` and `packages/shared` packages; TypeScript 6.0.3 (typescript-eslint doesn't support 7 yet); ESLint 10; Vitest 5; Playwright 1.65.
+  - **Electron 45.2.3:** the newest release that passes pnpm's minimum-release-age supply-chain check.
+  - **`@insectoids/shared`:** castes, ranks, statuses, task card schema and lifecycle rules (Hive D10), approvals, Brain record kinds and trust levels, and the typed IPC contract.
+  - **Desktop app:**
+    - sandboxed window with context isolation and no Node in the UI;
+    - only the app's own pages may call IPC;
+    - https links open in the system browser and all other navigation is blocked;
+    - strict CSP on built pages and all browser permissions denied;
+    - single instance; close-to-tray.
+  - **UI:**
+    - rail with all 10 screens, Queen empty state, side panel, version from the main process;
+    - dark and light themes from the design tokens;
+    - bundled fonts, so no network calls.
+  - **Tests:** 35 unit tests and 5 end-to-end tests pass; lint and typecheck clean. CI workflow for Windows, macOS and Linux written (not yet run: no remote repository).
+  - **Not done in Phase 0:** no registry component installed yet; the first one (the Queen composer) moves to Phase 1. `pnpm dev` (hot-reload mode) not exercised; the built app was.
+  - **Screenshots:** `design/screenshots/phase-0-queen-dark.png`, `phase-0-queen-light.png`.
 
 ### Phase 1 — "First Spark" (the MVP)
 - **Brain core:**
@@ -146,3 +163,4 @@ Sequences everything in 01–09.
 
 - 2026-11-12 — Created: guiding rules, four phases with demos, questions.
 - 2026-11-12 — User delegated Q1–Q5 → D2–D6. Git repository initialised locally (`main`), with `.gitignore` (excludes Brain databases, vault, env files, worktrees) and `.gitattributes` (LF line endings).
+- 2026-11-12 — First local commit `1fe0aa8`. **Finalized by user;** Phase 0 started on branch `phase-0-foundation`.
