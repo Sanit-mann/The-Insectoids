@@ -19,7 +19,7 @@
 
 ---
 
-![The Queen planning a goal: two cards in one wave, waiting for your approval](design/screenshots/phase-1-demo-01-queen-plan.png)
+![The Insectoids desktop app in dark mode: the left rail with Queen, Approvals, Taskboard, Hive, Brain, Changes, Library, Connections, Cadence and Settings; the Queen screen asking you to choose a project folder; and the side panel showing approvals, hive status and budget](design/screenshots/queen-home-dark.webp)
 
 ## What it is
 
@@ -96,6 +96,8 @@ Compared with the projects that inspired it (credited below), it adds strict wor
  The Brain (one local SQLite file, one writer) records every decision, task and outcome.
  Agents reach it through MCP or the `brain` command, with a token scoped to their project.
 ```
+
+![The Queen planning a goal: two cards in one wave, waiting for your approval](design/screenshots/phase-1-demo-01-queen-plan.png)
 
 ![Hive monitor: each agent run with the model and effort that actually ran, tokens, cost and live output](design/screenshots/phase-1-demo-09-hive-done.png)
 
