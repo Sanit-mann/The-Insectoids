@@ -202,6 +202,9 @@ importers:
       '@insectoids/brain-service':
         specifier: workspace:*
         version: link:../../packages/brain-service
+      '@insectoids/embeddings':
+        specifier: workspace:*
+        version: link:../../packages/embeddings
       '@insectoids/harness':
         specifier: workspace:*
         version: link:../../packages/harness

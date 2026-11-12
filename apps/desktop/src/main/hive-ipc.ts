@@ -61,7 +61,8 @@ export function registerHiveIpc(d: Deps): void {
     const project = ProjectViewSchema.nullable().parse(await host().call('project'));
     // As the user: the project's shelf plus global (Memory 01-D2).
     const hits = await brain().search({ query: req.query, shelf: project?.shelf ?? 'global', limit: 30, ...(req.kinds ? { kinds: req.kinds } : {}) });
-    return BrainHitViewSchema.array().parse(hits.map(({ id, kind, shelf, title, summary }) => ({ id, kind, shelf, title, summary })));
+    // Words + meaning when meaning search is on (the service embeds the query in the Brain host); each hit says how it was found.
+    return BrainHitViewSchema.array().parse(hits.map(({ id, kind, shelf, title, summary, match }) => ({ id, kind, shelf, title, summary, match })));
   });
 
   handle(HIVE_IPC.brainRecord, async (arg) => {

@@ -136,6 +136,8 @@ function startBrain(brainDir: string): BrainHost {
       engine: process.env['INSECTOIDS_ENGINE'] === 'fake' ? 'fake' : 'claude',
       ...(isE2E && process.env['INSECTOIDS_E2E_PROJECT'] ? { project: process.env['INSECTOIDS_E2E_PROJECT'] } : {}),
       limits: limitsFor(settings?.preset ?? 'balanced'),
+      // e2e only: a folder that already holds the downloaded meaning model (tests never download).
+      ...(isE2E && process.env['INSECTOIDS_E2E_MODEL_DIR'] ? { modelsDir: process.env['INSECTOIDS_E2E_MODEL_DIR'] } : {}),
     },
     onPush: forwardPush,
     onHostRequest: async (method, params) => {

@@ -16,6 +16,8 @@ export interface DoorPaths {
   hiveTools: string;
   /** The services door: `call_service` over MCP, through the secret broker in main (Phase 2 A3). */
   servicesMcp: string;
+  /** onnxruntime-web's WASM folder, for meaning search's model (Phase 2 B1). */
+  ortWasmDir?: string;
 }
 
 /** What the hive host needs besides the Brain (Phase 1 Step 8: the Hive lives in this process). */
@@ -30,6 +32,8 @@ export interface HiveSetup {
   project?: string;
   /** Limits from the user's safety preset (Onboarding 08-D7); Balanced when absent. */
   limits?: HiveLimits;
+  /** Where meaning-search models live (Phase 2 B1). Default <userData>/models; e2e may point at a downloaded copy. */
+  modelsDir?: string;
 }
 
 /** Host RPC methods (main -> host). Inputs and outputs are validated in main against the shared schemas. */

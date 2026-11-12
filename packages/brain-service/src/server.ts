@@ -30,6 +30,12 @@ export interface BrainServiceOptions {
   endpoint?: string;
   /** The user's token. Default: a fresh random one. Keep it inside the app; never hand it to an insect. */
   masterToken?: string;
+  /**
+   * Meaning search (Phase 2 B1): turns a search's query text into a vector, in this process (the Brain
+   * host's embedder). Null when meaning search is off or not ready; then search uses words only.
+   * Callers never send vectors themselves.
+   */
+  embedQuery?: (text: string) => Promise<{ vector: Float32Array; model: string } | null>;
 }
 
 export interface AgentGrant {
@@ -125,18 +131,32 @@ export async function startBrainService(opts: BrainServiceOptions): Promise<Brai
     return who.shelf;
   };
 
-  const handlers: { [M in Method]: (p: ReturnType<(typeof Params)[M]['parse']>, who: Identity) => Results[M] } = {
+  /** The query's meaning vector, if meaning search is on. A failing embedder only costs the meaning part. */
+  const meaning = async (query: string): Promise<{ queryVector: Float32Array; vectorModel: string } | Record<string, never>> => {
+    if (!opts.embedQuery) return {};
+    try {
+      const v = await opts.embedQuery(query);
+      return v ? { queryVector: v.vector, vectorModel: v.model } : {};
+    } catch {
+      return {};
+    }
+  };
+
+  const handlers: { [M in Method]: (p: ReturnType<(typeof Params)[M]['parse']>, who: Identity) => Results[M] | Promise<Results[M]> } = {
     ping: (_p, who) => ({ v: PROTOCOL_VERSION, identity: who }),
-    search: (p, who) => {
+    search: async (p, who) => {
       const shelf = agentShelf(who, p.shelf);
-      return brain.search(p.query, { ...(shelf ? { shelf } : {}), ...(p.kinds ? { kinds: p.kinds } : {}), ...(p.limit ? { limit: p.limit } : {}) });
+      const m = await meaning(p.query);
+      return brain.search(p.query, { ...(shelf ? { shelf } : {}), ...(p.kinds ? { kinds: p.kinds } : {}), ...(p.limit ? { limit: p.limit } : {}), ...m });
     },
-    read: (p, who) => {
+    read: async (p, who) => {
       const shelf = agentShelf(who, p.shelf);
+      const m = await meaning(p.query);
       return brain.read(p.query, {
         ...(shelf ? { shelf } : {}),
         ...(p.kinds ? { kinds: p.kinds } : {}),
         ...(p.tokenBudget ? { tokenBudget: p.tokenBudget } : {}),
+        ...m,
       });
     },
     get: (p, who) => {
@@ -246,10 +266,21 @@ export async function startBrainService(opts: BrainServiceOptions): Promise<Brai
       if (!call.success) return send({ type: 'error', id: null, error: { code: 'bad_request', message: 'Expected a call frame.' } });
       // A token revoked mid-connection stops working at once.
       if (!tokens.has(connTokenKey.get(socket)!)) return fail('unauthorized', 'Token revoked.');
+      // Searches may wait for the query's meaning vector; everything else answers at once. Writes stay
+      // synchronous, so the single writer still applies them in arrival order.
+      const id = call.data.id;
       try {
-        send({ type: 'result', id: call.data.id, result: dispatch(call.data.method, call.data.params, who) });
+        const result = dispatch(call.data.method, call.data.params, who);
+        if (result instanceof Promise) {
+          result.then(
+            (r) => send({ type: 'result', id, result: r }),
+            (err: unknown) => send({ type: 'error', id, error: toWire(err) }),
+          );
+        } else {
+          send({ type: 'result', id, result });
+        }
       } catch (err) {
-        send({ type: 'error', id: call.data.id, error: toWire(err) });
+        send({ type: 'error', id, error: toWire(err) });
       }
     };
 

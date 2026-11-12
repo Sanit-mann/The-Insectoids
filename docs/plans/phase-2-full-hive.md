@@ -332,3 +332,36 @@ Three milestones, each ending in something the user can try.
     - Hive lanes show "Why this model".
     - The side panel warns when an engine is near or at a limit.
   - **Flaky test check:** `brain-crash.spec.ts` failed once while two runs overlapped; it passed in both full sequential runs.
+- **B1 Local embeddings + hybrid search: done (2026-11-12).** 616 unit tests and 72 e2e tests pass.
+  - **No native modules:** `onnxruntime-web` 1.31.1 runs the model in WebAssembly, with `@huggingface/tokenizers` 0.2.0 (both MIT/Apache, both pass the 2-week rule). `@huggingface/transformers` was rejected: it pulls in native `sharp` and `onnxruntime-node` (300+ MB). protobufjs's install script only prints a warning and stays blocked (`allowBuilds: protobufjs: false`).
+  - **Spike** (user approved downloading both candidates, about 58 MB): pinned Hugging Face revisions, SHA-256-checked, evaluated on 168 passages from this repo with 50 queries (40 paraphrases written to avoid the passages' words).
+
+    | Search | recall@5 | paraphrases | keywords |
+    |---|---|---|---|
+    | FTS5, every word must match (before B1) | 0.19 | **0.00** | 0.93 |
+    | FTS5, any word | 0.58 | 0.48 | 1.00 |
+    | bge-small | 0.62 | 0.54 | 0.95 |
+    | MiniLM | 0.64 | 0.57 | 0.93 |
+    | **any word + MiniLM (RRF)** | **0.66** | **0.58** | **1.00** |
+
+    **Winner: all-MiniLM-L6-v2** (23.7 MB; 5 ms per query, 65 ms per record). bge-small was 3–4× slower and used about 560 MB more memory, so its files were deleted. The int8 model's vectors shift slightly with their batch neighbours, so the batch size is 1 (deterministic, and also faster).
+  - **Brain** (migration v5, `record_vectors`):
+    - int8 vectors per record and model; a vector counts only while the record's content hash matches.
+    - Search is now hybrid: **any** meaningful word (stop words dropped), plus a cosine search when there's a query vector (floor 0.25), merged with RRF (k=60).
+    - Every hit says `words | meaning | both`.
+    - Shelf scoping unchanged.
+    - `read()` and the Queen's lookups use hybrid search.
+  - **Host:**
+    - Meaning search is **off by default**.
+    - Turning it on downloads the model only if it's missing, then indexes in the background one record at a time.
+    - Agents get meaning search through MCP and the `brain` command; they never send vectors.
+    - A search round trip in the app took 11 ms.
+    - The packaged-app path for the WASM file is a Phase 3 TODO.
+  - **Downloads in tests:**
+    - While the UI was being built, an e2e test pressed "Turn on" on a fresh test profile and the app **downloaded the approved MiniLM model once into that temporary profile**. The test was removed.
+    - The backend now refuses downloads under e2e or vitest unless `INSECTOIDS_ALLOW_MODEL_DOWNLOAD=1` is set, proven by a unit test and an e2e test.
+    - It reports `needs-download` when the model isn't present, so the consent text is exact.
+  - **UI:**
+    - **Brain screen:** a meaning-search strip whose consent line states model, size and source before any download, then download progress / "Reading your Brain: n of m" / on; and a match badge on every result.
+    - **Hint:** "Try meaning search" when a sentence finds nothing.
+    - **Settings:** a Meaning search block.

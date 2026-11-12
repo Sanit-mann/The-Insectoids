@@ -61,6 +61,11 @@ export interface HiveOptions {
   /** Clock for run outcomes (tests). Default Date.now. */
   now?: () => number;
   onEvent?: (e: HiveEvent) => void;
+  /**
+   * Meaning search (Phase 2 B1): the query's vector from the Brain host's embedder, or null when it is off.
+   * The Queen's related-records lookup then finds notes by meaning, not just matching words.
+   */
+  embedQuery?: (text: string) => Promise<{ vector: Float32Array; model: string } | null>;
 }
 
 export interface HiveLimits {
@@ -383,11 +388,12 @@ export class Hive {
     const scratch = join(this.#o.dataDir, 'goals', goal.id, 'queen');
     mkdirSync(scratch, { recursive: true });
     const services = await this.#o.services?.available().catch(() => []) ?? [];
+    const meaning = await this.#o.embedQuery?.(goal.text).catch(() => null);
     const base = queenPrompt(library, {
       services,
       goal: goal.text,
       bootCard: brain.bootCard(goal.shelf),
-      context: brain.read(goal.text, { shelf: goal.shelf, tokenBudget: 800 }).text,
+      context: brain.read(goal.text, { shelf: goal.shelf, tokenBudget: 800, ...(meaning ? { queryVector: meaning.vector, vectorModel: meaning.model } : {}) }).text,
       castes,
       projectListing: this.#listing(),
     });

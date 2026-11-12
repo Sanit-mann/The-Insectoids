@@ -1,5 +1,6 @@
 import { Palette, RotateCcw } from 'lucide-react';
 import { type ReactNode, useState } from 'react';
+import { MeaningSearchSettings } from '@/components/brain/MeaningSearch';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { BrainFolder, Checklist, PresetCards } from '@/components/setup/parts';
 import { Button } from '@/components/ui/button';
@@ -79,6 +80,14 @@ export function SettingsScreen() {
         title="Brain folder"
       >
         <BrainFolder showNote={false} state={state} />
+      </Section>
+
+      <Section
+        description="Lets the Brain find notes by meaning, not just by the same words. A small model runs on this PC; nothing about your Brain leaves it."
+        id="settings-meaning"
+        title="Meaning search"
+      >
+        <MeaningSearchSettings />
       </Section>
 
       <Section id="settings-theme" title="Theme">

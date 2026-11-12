@@ -6,7 +6,9 @@
   "description": "Local meaning-search vectors for the Brain: a small ONNX model run in WebAssembly, no native modules, nothing leaves the PC.",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./models": "./src/models.ts",
+    "./download": "./src/download.ts"
   },
   "scripts": {
     "typecheck": "tsc -p tsconfig.json"

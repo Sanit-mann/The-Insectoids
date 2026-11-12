@@ -14,6 +14,7 @@ import { type Brain, openBrain } from '@insectoids/brain';
 import { writeBrainShims } from '@insectoids/brain-cli/shims';
 import { type BrainService, startBrainService } from '@insectoids/brain-service';
 import { HiveManager } from './hive-manager';
+import { MeaningSearch } from './meaning-search';
 import type { LlmAccess, LlmUsage, ReadyProvider } from '@insectoids/harness';
 import { writeHookLauncher } from '../main/hook-launcher';
 import type { ServiceAccess, ServiceTicket } from '@insectoids/harness';
@@ -23,6 +24,7 @@ const port = process.parentPort;
 let brain: Brain | null = null;
 let service: BrainService | null = null;
 let hive: HiveManager | null = null;
+let meaning: MeaningSearch | null = null;
 
 const send = (m: FromHost): void => port.postMessage(m);
 
@@ -77,7 +79,17 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
     // A Unix socket left behind by a crashed host would block listen(); named pipes vanish with their process.
     if (process.platform !== 'win32' && existsSync(m.endpoint)) unlinkSync(m.endpoint);
     brain = openBrain(m.dbPath);
-    const svc = await startBrainService({ brain, endpoint: m.endpoint, masterToken: m.masterToken });
+    // Meaning search (Phase 2 B1): off until the user switches it on; then the model runs in this process.
+    const ms = new MeaningSearch({
+      brain,
+      settingsFile: join(m.hive.userDataDir, 'meaning-search.json'),
+      modelsDir: m.hive.modelsDir ?? join(m.hive.userDataDir, 'models'),
+      ...(m.doors.ortWasmDir ? { wasmDir: m.doors.ortWasmDir } : {}),
+      onChange: () => send({ type: 'push', push: { type: 'changed', reason: 'meaning-search' } }),
+      log: (line) => console.log(line),
+    });
+    meaning = ms;
+    const svc = await startBrainService({ brain, endpoint: m.endpoint, masterToken: m.masterToken, embedQuery: (text) => ms.embedQuery(text) });
     service = svc;
     // Launchers live in the app profile, never next to a Brain folder the user picked.
     const doors = { ...m.doors, ...installCliShims(m.hive.userDataDir, m.doors), ...installHookLauncher(m.hive.userDataDir, m.doors) };
@@ -93,12 +105,16 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
       services: serviceAccess(m.doors),
       llm: llmAccess(),
       providers: readyProviders,
+      meaning: ms,
       push: (push) => send({ type: 'push', push }),
       log: (line) => console.log(line),
     });
     await hive.init();
+    await ms.init();
     send({ type: 'ready', endpoint: svc.endpoint });
   } catch (err) {
+    await meaning?.dispose().catch(() => {});
+    meaning = null;
     await hive?.dispose().catch(() => {});
     hive = null;
     await service?.close().catch(() => {});
@@ -159,6 +175,8 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
 }
 
 async function stop(): Promise<void> {
+  await meaning?.dispose().catch(() => {});
+  meaning = null;
   await hive?.dispose().catch(() => {});
   hive = null;
   await service?.close().catch(() => {});

@@ -242,6 +242,26 @@ export const ActivityViewSchema = z.object({
 });
 export type ActivityView = z.infer<typeof ActivityViewSchema>;
 
+/**
+ * Meaning search (Memory 01-E11; Phase 2 B1): a small model on this PC turns each record into a vector.
+ * The model is downloaded once, only after the user switches meaning search on.
+ */
+export const MeaningSearchSchema = z.object({
+  state: z.enum(['off', 'needs-download', 'downloading', 'indexing', 'ready', 'error']),
+  /** e.g. "all-MiniLM-L6-v2". */
+  model: z.string(),
+  /** Download size in MB (shown before the user agrees). */
+  sizeMb: z.number(),
+  /** Where it comes from, e.g. "huggingface.co/Xenova/all-MiniLM-L6-v2 (pinned revision, checked)". */
+  source: z.string(),
+  /** 0..1 while downloading. */
+  progress: z.number().min(0).max(1),
+  indexed: z.number().int(),
+  total: z.number().int(),
+  message: z.string(),
+});
+export type MeaningSearch = z.infer<typeof MeaningSearchSchema>;
+
 export const HiveSnapshotSchema = z.object({
   /** null until the user picks a project folder. */
   project: ProjectViewSchema.nullable(),
@@ -249,6 +269,7 @@ export const HiveSnapshotSchema = z.object({
   engine: EngineViewSchema,
   /** Every known engine, in the user's preference order (Connections screen). */
   engines: z.array(EngineCardSchema),
+  meaningSearch: MeaningSearchSchema,
   hive: z.object({
     paused: z.boolean(),
     pausedReason: z.string().nullable(),
@@ -286,6 +307,8 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('setEngineOrder'), order: z.array(EngineIdSchema).max(5) }),
   /** The user's soft spending limits for an engine's subscription (null clears). */
   z.object({ type: z.literal('setEngineLimits'), engineId: EngineIdSchema, cap5hUsd: z.number().positive().max(10_000).nullable(), cap7dUsd: z.number().positive().max(100_000).nullable() }),
+  /** Switch meaning search on (downloads the model once if needed) or off (vectors kept, search uses words only). */
+  z.object({ type: z.literal('setMeaningSearch'), enabled: z.boolean() }),
   /** Forget an engine's "limit reached" state now (e.g. the user upgraded the plan). */
   z.object({ type: z.literal('clearEngineLimitHit'), engineId: EngineIdSchema }),
   z.object({ type: z.literal('cancelGoal'), goalId: Id }),
@@ -323,6 +346,8 @@ export const BrainSearchRequestSchema = z.object({
 });
 export const BrainHitViewSchema = z.object({
   id: z.string(),
+  /** How it was found: by its words, by meaning, or both (hybrid search, B1). */
+  match: z.enum(['words', 'meaning', 'both']),
   kind: RecordKindSchema,
   shelf: z.string(),
   title: z.string(),

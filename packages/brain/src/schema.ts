@@ -152,6 +152,20 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX run_outcomes_learn ON run_outcomes (role, engine, tier, effort, result);
   CREATE INDEX run_outcomes_card ON run_outcomes (card_id, attempt);
   `,
+  // v5: meaning-search vectors (Memory 01-E11; Phase 2 B1). One per record and model; stale when the
+  // record's content hash moves on. int8-quantized unit vectors (1 byte per dimension).
+  `
+  CREATE TABLE record_vectors (
+    record_id     TEXT NOT NULL REFERENCES records(id),
+    model         TEXT NOT NULL,
+    dim           INTEGER NOT NULL,
+    vec           BLOB NOT NULL,
+    content_hash  TEXT NOT NULL,
+    updated_at    INTEGER NOT NULL,
+    PRIMARY KEY (record_id, model)
+  );
+  CREATE INDEX record_vectors_model ON record_vectors (model);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

@@ -186,3 +186,38 @@ describe('single writer under load', () => {
     expect(again.created).toBe(false);
   });
 });
+
+describe('meaning search through the service (Phase 2 B1)', () => {
+  it('embeds the query in-process: agents get meaning hits without ever sending a vector', async () => {
+    await service.close();
+    const axis = (i: number) => {
+      const v = new Float32Array(4);
+      v[i] = 1;
+      return v;
+    };
+    const calls: string[] = [];
+    service = await startBrainService({
+      brain,
+      embedQuery: async (text) => {
+        calls.push(text);
+        return { vector: axis(0), model: 'm' };
+      },
+    });
+    const id = brain.write({ kind: 'fact', shelf: 'site', title: 'Vault', body: 'API keys are encrypted.' }, { type: 'user' }).id;
+    const p = brain.pendingVectors('m')[0]!;
+    brain.setVector(id, 'm', axis(0), p.contentHash);
+    const ant = await asAgent();
+    const hits = await ant.search({ query: 'how are passwords protected' });
+    expect(hits.map((h) => [h.id, h.match])).toEqual([[id, 'meaning']]);
+    expect((await ant.read({ query: 'how are passwords protected' })).ids).toEqual([id]);
+    expect(calls).toEqual(['how are passwords protected', 'how are passwords protected']);
+  });
+
+  it('a failing embedder only costs the meaning part: word search still answers', async () => {
+    await service.close();
+    service = await startBrainService({ brain, embedQuery: async () => Promise.reject(new Error('wasm failed')) });
+    const id = brain.write({ kind: 'fact', shelf: 'site', title: 'Vault', body: 'keys' }, { type: 'user' }).id;
+    const ant = await asAgent();
+    expect((await ant.search({ query: 'keys' })).map((h) => [h.id, h.match])).toEqual([[id, 'words']]);
+  });
+});

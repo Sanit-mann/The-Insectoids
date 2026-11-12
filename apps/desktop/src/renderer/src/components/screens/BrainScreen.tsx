@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import type { BrainHitView, RecordKind } from '@insectoids/shared';
 import { BrainReader } from '@/components/brain/BrainReader';
 import { KINDS, kindInfo } from '@/components/brain/kinds';
+import { MatchBadge, MeaningSearchStrip, TURN_ON_ID } from '@/components/brain/MeaningSearch';
 import { InlineError } from '@/components/changes/CardChanges';
 import { useHive } from '@/lib/hive-store';
 import { cn } from '@/lib/utils';
@@ -12,8 +13,8 @@ const SEARCH_DEBOUNCE_MS = 250;
 type Results = { state: 'idle' } | { state: 'loading' } | { state: 'error'; message: string } | { state: 'ready'; hits: BrainHitView[] };
 
 /**
- * Brain, Phase 1 (App 07, Memory 01-D10): search by words, filter by kind, read a record with its trust,
- * versions and links. The graph and meaning search arrive in Phase 2.
+ * Brain (App 07, Memory 01-D10): search by words and, once switched on, by meaning (01-E11, Phase 2 B1);
+ * filter by kind; read a record with its trust, versions and links. The graph arrives later in Phase 2.
  */
 export function BrainScreen() {
   const { snapshot } = useHive();
@@ -45,6 +46,9 @@ export function BrainScreen() {
   const toggleKind = (k: RecordKind): void => setKinds((ks) => (ks.includes(k) ? ks.filter((x) => x !== k) : [...ks, k]));
   // Honest starting points: the user's own goals, which the hive always records in the Brain.
   const suggestions = (snapshot?.goals ?? []).slice(0, 4).map((g) => g.title);
+  const meaningOn = snapshot?.meaningSearch?.state === 'ready';
+  // A sentence-like query that finds nothing by words is exactly where meaning search helps.
+  const tryMeaning = !meaningOn && snapshot?.meaningSearch !== undefined && q.split(/\s+/).length >= 3;
 
   return (
     <div className="flex flex-1 flex-wrap items-start gap-6 p-6">
@@ -56,11 +60,12 @@ export function BrainScreen() {
             type="search"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search the Brain by words"
+            placeholder={meaningOn ? 'Search the Brain by words or meaning' : 'Search the Brain by words'}
             data-testid="brain-search"
             className="min-w-0 flex-1 border-0 bg-transparent py-2 text-text outline-none placeholder:text-muted"
           />
         </label>
+        <MeaningSearchStrip />
         <div role="group" aria-label="Filter by kind" className="flex flex-wrap gap-1.5">
           {KINDS.map(({ kind, label }) => {
             const on = kinds.includes(kind);
@@ -81,7 +86,8 @@ export function BrainScreen() {
         {results.state === 'idle' && (
           <div className="flex flex-col gap-2 rounded-2xl border border-dashed border-line p-4 text-sm text-muted">
             <p className="m-0">
-              Search the Brain for decisions, tasks, facts and outcomes. Words only for now; search by meaning arrives in Phase 2.
+              Search the Brain for decisions, tasks, facts and outcomes.{' '}
+              {meaningOn ? 'Results match your words, their meaning, or both.' : 'Words only until meaning search is on.'}
             </p>
             {suggestions.length > 0 && (
               <div className="flex flex-wrap gap-1.5">
@@ -96,7 +102,19 @@ export function BrainScreen() {
         )}
         {results.state === 'loading' && <div aria-busy="true" className="h-32 animate-pulse rounded-2xl border border-line bg-surface" />}
         {results.state === 'error' && <InlineError message={`Search failed: ${results.message}`} onRetry={() => setAttempt((a) => a + 1)} />}
-        {results.state === 'ready' && results.hits.length === 0 && <p className="m-0 text-sm text-muted">Nothing in the Brain matches those words.</p>}
+        {results.state === 'ready' && results.hits.length === 0 && (
+          <div className="flex flex-col gap-1.5 text-sm text-muted">
+            <p className="m-0">{meaningOn ? 'Nothing in the Brain matches those words or their meaning.' : 'Nothing in the Brain matches those words.'}</p>
+            {tryMeaning && (
+              <p className="m-0" data-testid="try-meaning">
+                Try meaning search: it finds notes that say the same thing in other words.{' '}
+                <button className="min-h-8 font-medium text-honey-text underline-offset-4 hover:underline" onClick={() => document.getElementById(TURN_ON_ID)?.focus()} type="button">
+                  Show me how
+                </button>
+              </p>
+            )}
+          </div>
+        )}
         {results.state === 'ready' && results.hits.length > 0 && (
           <ul aria-label="Results" className="m-0 flex list-none flex-col gap-1 p-0">
             {results.hits.map((h) => {
@@ -115,8 +133,11 @@ export function BrainScreen() {
                     )}
                   >
                     <Icon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-honey" />
-                    <span className="flex min-w-0 flex-col">
-                      <span className="truncate font-medium">{h.title}</span>
+                    <span className="flex min-w-0 flex-1 flex-col">
+                      <span className="flex min-w-0 items-center gap-2">
+                        <span className="truncate font-medium">{h.title}</span>
+                        <MatchBadge match={h.match} />
+                      </span>
                       <span className="text-xs text-muted">
                         {k.label}
                         {h.shelf === 'global' ? ' · global' : ''}

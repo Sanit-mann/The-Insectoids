@@ -65,6 +65,7 @@ import {
   type EngineUsage,
 } from '@insectoids/shared';
 import { Workspace } from '@insectoids/workspace';
+import { meaningSearchOffView } from './meaning-search';
 import type { DoorPaths } from './messages';
 
 const run = promisify(execFile);
@@ -111,6 +112,15 @@ export interface HiveManagerOptions {
   /** OpenCode's model providers (Phase 2 A4): per-run broker passes and the ready providers, both from main. */
   llm?: LlmAccess;
   providers?: () => Promise<ReadyProvider[]>;
+  /**
+   * Meaning search (Phase 2 B1): its view for the snapshot, the user's switch, and query vectors for the
+   * Queen's related-records lookup. Absent: words only (the snapshot says "off").
+   */
+  meaning?: {
+    view(): HiveSnapshot['meaningSearch'];
+    setEnabled(on: boolean): Promise<void>;
+    embedQuery(text: string): Promise<{ vector: Float32Array; model: string } | null>;
+  };
   push: (p: HivePush) => void;
   log?: (line: string) => void;
   /** Foreman tick interval. Default 1000 ms (500 ms with the demo engine). */
@@ -356,6 +366,11 @@ export class HiveManager {
       this.#writeSettings({ limits: this.#engineLimits });
       return;
     }
+    if (cmd.type === 'setMeaningSearch') {
+      if (!this.#o.meaning) throw new Error("Meaning search isn't available in this build.");
+      await this.#o.meaning.setEnabled(cmd.enabled);
+      return;
+    }
     if (cmd.type === 'clearEngineLimitHit') {
       const rest = { ...this.#limitHits };
       delete rest[cmd.engineId];
@@ -463,6 +478,7 @@ export class HiveManager {
       workspace,
       engine: this.#engines.engine(),
       route: (input) => this.#engines.route(input, routeCard),
+      ...(this.#o.meaning ? { embedQuery: (text: string) => this.#o.meaning!.embedQuery(text) } : {}),
       library: new Library(this.#o.libraryDir),
       repoDir: root,
       dataDir: join(data, 'projects', view.shelf),
@@ -620,6 +636,7 @@ export class HiveManager {
       project: p?.view ?? null,
       engine: this.#engineView(),
       engines: this.#engines.cards().map((c): EngineCard => ({ ...c, usage: this.#usage(c.id) })),
+      meaningSearch: this.#o.meaning?.view() ?? meaningSearchOffView(),
       hive: { paused: this.#paused, pausedReason: this.#pausedReason, insectCap: this.#limits.insectCap, working: this.#working() },
       goals: goals.map((g) => this.#goalView(g)),
       cards,
