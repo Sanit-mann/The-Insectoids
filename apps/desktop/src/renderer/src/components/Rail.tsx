@@ -1,4 +1,4 @@
-import { HexMark } from '@/components/HexMark';
+import { BrandMark } from '@/components/BrandMark';
 import { cn } from '@/lib/utils';
 import { SCREENS, type ScreenId } from '@/screens';
 
@@ -15,7 +15,7 @@ export function Rail({ active, onSelect, approvals }: RailProps) {
       className="flex flex-[1_1_220px] flex-col gap-1 border-r border-line bg-rail px-3 py-[18px] md:max-w-[260px]"
     >
       <div className="flex items-center gap-2.5 px-2.5 pb-[18px] font-display text-[17px] font-bold text-honey-text">
-        <HexMark />
+        <BrandMark />
         The Insectoids
       </div>
       {SCREENS.map(({ id, label, icon: Icon }) => {

@@ -11,6 +11,7 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
+    "icons": "node scripts/make-icons.mjs",
     "test:e2e": "electron-vite build && playwright test"
   },
   "dependencies": {
@@ -29,6 +30,7 @@
     "electron": "45.2.3",
     "electron-vite": "6.0.0",
     "lucide-react": "1.72.0",
+    "pngjs": "7.0.0",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "tailwind-merge": "3.7.0",

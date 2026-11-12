@@ -1,11 +1,11 @@
-import { HexMark } from '@/components/HexMark';
+import { BrandMark } from '@/components/BrandMark';
 
 /** Phase 0: the Queen's empty state. The composer is wired to the hive in Phase 1. */
 export function QueenScreen() {
   return (
     <div className="mx-auto flex w-full max-w-[860px] flex-1 flex-col gap-6 p-6">
       <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
-        <HexMark size={64} />
+        <BrandMark size={64} />
         <h2 className="m-0 font-display text-2xl font-semibold">Give the hive its first goal</h2>
         <p className="m-0 max-w-[520px] text-muted">
           Tell the Queen what you want done. She plans it in waves, insects do the work in safe copies of your files,

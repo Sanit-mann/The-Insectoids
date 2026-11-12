@@ -1,3 +1,5 @@
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserWindow, app, ipcMain, session, shell, type Tray } from 'electron';
@@ -14,6 +16,9 @@ const resourcesDir = app.isPackaged ? process.resourcesPath : join(here, '../../
 const isE2E = process.env['INSECTOIDS_E2E'] === '1';
 
 app.setName(APP_NAME);
+// Test runs get a throwaway profile: they never touch the real one, and the single-instance
+// lock (keyed on the profile folder) does not make them quit while the user has the app open.
+if (isE2E) app.setPath('userData', mkdtempSync(join(tmpdir(), 'insectoids-e2e-')));
 
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;

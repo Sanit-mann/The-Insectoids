@@ -31,6 +31,14 @@ test('opens with the rail and an empty Queen screen', async () => {
   await expect(win.getByRole('complementary', { name: 'Hive status' })).toBeVisible();
 });
 
+test('shows the brand logo in the rail and on the Queen screen', async () => {
+  const marks = win.getByTestId('brand-mark');
+  await expect(marks).toHaveCount(2);
+  // naturalWidth is 0 when an image fails to load (e.g. blocked by the Content-Security-Policy).
+  const loaded = await marks.evaluateAll((imgs) => imgs.map((img) => (img as unknown as { naturalWidth: number }).naturalWidth > 0));
+  expect(loaded).toEqual([true, true]);
+});
+
 test('the renderer reaches the main process through the validated bridge', async () => {
   await expect(win.getByText(/^v0\.0\.1 · Electron \d+\./)).toBeVisible();
 });
