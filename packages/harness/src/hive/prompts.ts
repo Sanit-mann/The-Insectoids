@@ -1,7 +1,7 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { Caste } from '@insectoids/shared';
-import { MAX_CARDS_PER_WAVE, MAX_WAVES } from './protocol';
+import { MAX_CARDS_PER_WAVE, MAX_PLAN_SKILLS, MAX_WAVES } from './protocol';
 
 /** Skills each role carries by default in Phase 1 (Capabilities 03-D8: at most ~5 active). */
 export const ROLE_SKILLS: Record<'queen' | 'inspector' | 'librarian' | Caste, string[]> = {
@@ -31,8 +31,17 @@ export class Library {
     return stripFrontmatter(readFileSync(join(this.dir, 'skills', name, 'SKILL.md'), 'utf8'));
   }
 
-  role(role: keyof typeof ROLE_SKILLS): string {
-    const parts = [this.agent(role), ...ROLE_SKILLS[role].map((s) => `## Skill: ${s}\n\n${this.skill(s)}`)];
+  /** Whether a skill is on disk (only those can be switched on for an insect). */
+  hasSkill(name: string): boolean {
+    return /^[a-z0-9][a-z0-9-]{0,79}$/.test(name) && existsSync(join(this.dir, 'skills', name, 'SKILL.md'));
+  }
+
+  /**
+   * The role's agent text plus the skills it carries for this run. Default: the role's default skills
+   * (ROLE_SKILLS). Insects get the skills chosen for their card (Capabilities 03-D8), defaults first.
+   */
+  role(role: keyof typeof ROLE_SKILLS, skills: readonly string[] = ROLE_SKILLS[role]): string {
+    const parts = [this.agent(role), ...skills.map((s) => `## Skill: ${s}\n\n${this.skill(s)}`)];
     return parts.join('\n\n---\n\n');
   }
 }
@@ -78,6 +87,19 @@ function servicesSection(services: ReadonlyArray<{ id: string; description: stri
   ].join('\n');
 }
 
+/**
+ * Library skills that fit the goal (Capabilities 03-D8). Each insect already carries its caste's defaults;
+ * the Queen may add a few more to a card, and the hive finds more from the card's own text.
+ */
+function skillsSection(skills: ReadonlyArray<{ name: string; description: string }>): string {
+  if (!skills.length) return '## Library skills\nEach insect carries its caste\'s default skills. Leave every card\'s "skills" as [].';
+  return [
+    '## Library skills',
+    `Each insect already carries its caste's default skills. A card may name up to ${MAX_PLAN_SKILLS} more in "skills", only from this list and only when the card clearly needs one (most cards need none):`,
+    ...skills.map((s) => `- ${s.name}: ${s.description}`),
+  ].join('\n');
+}
+
 export function queenPrompt(
   lib: Library,
   o: {
@@ -87,6 +109,8 @@ export function queenPrompt(
     castes: readonly Caste[];
     projectListing: string;
     services?: ReadonlyArray<{ id: string; description: string }>;
+    /** Library skills that fit this goal (03-D8 "Find"); a card may name a few in "skills". */
+    skills?: ReadonlyArray<{ name: string; description: string }>;
   },
 ): PromptPair {
   const system = [
@@ -94,7 +118,7 @@ export function queenPrompt(
     HIVE_RULES.replace('You never talk to the user; only the Queen does.', 'You are the Queen. In this run you only plan; you do not edit files.'),
     `## Output contract
 Reply with your plan as ONE fenced \`\`\`json block, exactly this shape:
-{"headline": "<one short line, at most 100 characters>", "summary": "<at most 3 sentences>", "waves": [{"cards": [{"id": "C-01", "title": "...", "brief": "what to change and why, with file paths", "caste": "<one of: ${o.castes.join(', ')}>", "priority": "critical|high|normal|low", "acceptance": ["checkable criterion", "..."], "dependsOn": ["C-..."], "integrations": []}]}]}
+{"headline": "<one short line, at most 100 characters>", "summary": "<at most 3 sentences>", "waves": [{"cards": [{"id": "C-01", "title": "...", "brief": "what to change and why, with file paths", "caste": "<one of: ${o.castes.join(', ')}>", "priority": "critical|high|normal|low", "acceptance": ["checkable criterion", "..."], "dependsOn": ["C-..."], "integrations": [], "skills": []}]}]}
 Rules: at most ${MAX_WAVES} waves and ${MAX_CARDS_PER_WAVE} cards per wave; each card is sized for one insect in one session;
 every card has checkable acceptance criteria; a card may depend only on cards in the same or an earlier wave;
 tester cards depend on the coder cards they test. Use only the castes listed.
@@ -102,6 +126,7 @@ Priority: use "normal" by default. Use "high" only when other work waits on the 
 an urgent fix, "low" for nice-to-haves. Priority decides how much model effort a card gets, so over-using "high" wastes tokens.
 Don't say whether the plan needs the user's approval; the hive decides that from its own rules.`,
     servicesSection(o.services ?? []),
+    skillsSection(o.skills ?? []),
   ].join('\n\n');
   const task = [
     `# Goal\n${o.goal}`,
@@ -124,8 +149,12 @@ export interface CardForPrompt {
   lastFailure?: string;
 }
 
-export function insectPrompt(lib: Library, caste: Caste, card: CardForPrompt, bootCard: string): PromptPair {
-  const system = [lib.role(caste), HIVE_RULES, 'End your final message with exactly one line: "STATUS: DONE", "STATUS: BLOCKED: <reason>" or "STATUS: NEEDS_CONTEXT: <question>".'].join('\n\n');
+/**
+ * An insect's prompt. `skills` are the library skills switched on for this card (03-D8, defaults first);
+ * without them it carries its caste's defaults. Nothing carries over to the next card (03-D7).
+ */
+export function insectPrompt(lib: Library, caste: Caste, card: CardForPrompt, bootCard: string, skills?: readonly string[]): PromptPair {
+  const system = [lib.role(caste, skills ?? ROLE_SKILLS[caste]), HIVE_RULES, 'End your final message with exactly one line: "STATUS: DONE", "STATUS: BLOCKED: <reason>" or "STATUS: NEEDS_CONTEXT: <question>".'].join('\n\n');
   const task = [
     `# Card ${card.id}: ${card.title}`,
     card.brief,

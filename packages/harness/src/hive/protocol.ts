@@ -4,6 +4,8 @@ import { z } from 'zod';
 /** Most cards a single wave may hold, so every wave stays small enough to review. */
 export const MAX_CARDS_PER_WAVE = 6;
 export const MAX_WAVES = 6;
+/** The most library skills the Queen may add to one card (Capabilities 03-D8). */
+export const MAX_PLAN_SKILLS = 3;
 
 const PlanCardSchema = z.object({
   id: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/).optional(),
@@ -15,6 +17,11 @@ const PlanCardSchema = z.object({
   dependsOn: z.array(z.string()).default([]),
   /** Outside services this card needs (ids from the enabled list the Queen was given); none by default. */
   integrations: z.array(z.string().regex(/^[a-z][a-z0-9-]{1,31}$/)).max(5).default([]),
+  /**
+   * Library skills the Queen adds to this card (03-D8). Loose on purpose: names the hive can't switch on are
+   * dropped by parsePlan, never a reason to reject the plan.
+   */
+  skills: z.array(z.unknown()).default([]),
 });
 
 const PlanSchema = z.object({
@@ -24,7 +31,7 @@ const PlanSchema = z.object({
   waves: z.array(z.object({ cards: z.array(PlanCardSchema).min(1).max(MAX_CARDS_PER_WAVE) })).min(1).max(MAX_WAVES),
 });
 
-export type PlanCard = z.infer<typeof PlanCardSchema> & { id: string };
+export type PlanCard = Omit<z.infer<typeof PlanCardSchema>, 'skills'> & { id: string; skills?: string[] };
 export interface Plan {
   headline: string;
   summary: string;
@@ -45,8 +52,20 @@ function extractJson(text: string): unknown {
   return JSON.parse(candidate);
 }
 
+/** The Queen's skill picks for a card: known, switchable names only, deduplicated, at most MAX_PLAN_SKILLS. */
+function planSkills(raw: readonly unknown[], allowed: ((name: string) => boolean) | undefined): string[] {
+  if (!allowed) return [];
+  const out: string[] = [];
+  for (const v of raw) {
+    if (typeof v !== 'string' || out.includes(v) || !allowed(v)) continue;
+    out.push(v);
+    if (out.length >= MAX_PLAN_SKILLS) break;
+  }
+  return out;
+}
+
 /** Read and check the Queen's plan (Hive 02-D5, D10): valid castes, "done means", real dependencies, no cycles. */
-export function parsePlan(text: string, opts: { castes: readonly Caste[] }): PlanResult {
+export function parsePlan(text: string, opts: { castes: readonly Caste[]; skillAllowed?: (name: string) => boolean }): PlanResult {
   let raw: unknown;
   try {
     raw = extractJson(text);
@@ -60,7 +79,7 @@ export function parsePlan(text: string, opts: { castes: readonly Caste[] }): Pla
 
   let n = 0;
   const waves = parsed.data.waves.map((w) => ({
-    cards: w.cards.map((c) => ({ ...c, id: c.id ?? `C-${String(++n).padStart(2, '0')}` })),
+    cards: w.cards.map((c) => ({ ...c, id: c.id ?? `C-${String(++n).padStart(2, '0')}`, skills: planSkills(c.skills, opts.skillAllowed) })),
   }));
   const ids = new Set<string>();
   const waveOf = new Map<string, number>();

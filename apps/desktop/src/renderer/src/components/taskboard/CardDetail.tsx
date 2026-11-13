@@ -2,6 +2,7 @@ import type { CardView } from '@insectoids/shared';
 import { X } from 'lucide-react';
 import { StatusDot } from '@/components/StatusDot';
 import { CARD_STATUS, casteLabel, formatDuration } from '@/components/hive/format';
+import { openLibraryItem } from '@/lib/library-nav';
 
 interface CardDetailProps {
   card: CardView;
@@ -55,6 +56,28 @@ export function CardDetail({ card, cards, now, onClose }: CardDetailProps) {
             <li key={a}>{a}</li>
           ))}
         </ul>
+      </section>
+
+      <section aria-label="Skills" data-testid="card-skills">
+        <div className="text-xs text-muted">Skills on for this card</div>
+        {card.skills.length === 0 ? (
+          <p className="m-0 text-sm text-muted">No extra skills</p>
+        ) : (
+          <div className="mt-1 flex flex-wrap gap-1.5">
+            {card.skills.map((s) => (
+              <button
+                className="min-h-8 rounded-full border border-line bg-surface px-3 text-xs hover:border-honey focus-visible:ring-2 focus-visible:ring-honey focus-visible:outline-none"
+                data-testid="card-skill"
+                key={s}
+                onClick={() => openLibraryItem(s)}
+                title={`Open ${s} in the Library`}
+                type="button"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+        )}
       </section>
 
       <dl className="m-0 grid grid-cols-2 gap-x-3 gap-y-2.5">

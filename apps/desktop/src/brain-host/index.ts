@@ -192,6 +192,13 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
       hive.e2eAgentEdit(p.id, p.body);
       return null;
     }
+    // Library screen (Phase 2 C1): requests are validated in main and parsed again in the HiveManager.
+    case 'libraryCastes':
+      return hive.libraryCastes();
+    case 'librarySearch':
+      return hive.librarySearch(params as Parameters<HiveManager['librarySearch']>[0]);
+    case 'libraryItem':
+      return hive.libraryItem(params as string);
     case 'setLimits':
       // Built in main from the shared PRESETS table; checked again by setLimits.
       hive.setLimits(params as Parameters<HiveManager['setLimits']>[0]);

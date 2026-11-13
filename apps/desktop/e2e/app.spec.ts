@@ -73,7 +73,11 @@ test('the renderer has no Node access', async () => {
 test('switches screens from the rail', async () => {
   await win.getByRole('button', { name: 'Library' }).click();
   await expect(win.getByRole('heading', { level: 1, name: 'Library' })).toBeVisible();
-  await expect(win.getByText('Arrives in Phase 2')).toBeVisible();
+  // Library is a live screen since Phase 2 C1; Cadence is still a placeholder.
+  await expect(win.getByTestId('library-screen')).toBeVisible();
+  await win.getByRole('button', { name: 'Cadence' }).click();
+  await expect(win.getByRole('heading', { level: 1, name: 'Cadence' })).toBeVisible();
+  await expect(win.getByText(/^Arrives in Phase \d/)).toBeVisible();
   await win.getByRole('button', { name: 'Queen' }).click();
   await expect(win.getByRole('heading', { name: 'Choose a project for the hive' })).toBeVisible();
 });

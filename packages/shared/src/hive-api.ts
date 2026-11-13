@@ -24,6 +24,10 @@ export const HIVE_IPC = {
   brainGraph: 'hive:brain-graph',
   brainDashboard: 'hive:brain-dashboard',
   brainEdit: 'hive:brain-edit',
+  /** Library screen (Phase 2 C1): the castes, and the catalog of agents and skills. */
+  libraryCastes: 'hive:library-castes',
+  librarySearch: 'hive:library-search',
+  libraryItem: 'hive:library-item',
   /** Opens the folder picker in main; returns the chosen project or null if cancelled. */
   pickProject: 'hive:pick-project',
   /** main -> renderer push. */
@@ -182,6 +186,8 @@ export const CardViewSchema = z.object({
   result: z.string().nullable(),
   /** The card's changes were undone (reverted on the hive branch). */
   undone: z.boolean(),
+  /** Library skills switched on for the card's latest attempt (Capabilities 03-D8; Phase 2 C1), at most 5. */
+  skills: z.array(z.string()).default([]),
   updatedAt: z.number(),
 });
 export type CardView = z.infer<typeof CardViewSchema>;
@@ -611,6 +617,76 @@ export const BrainEditResultSchema = z.discriminatedUnion('status', [
 export type BrainEditRequest = z.infer<typeof BrainEditRequestSchema>;
 export type BrainEditResult = z.infer<typeof BrainEditResultSchema>;
 
+// ---- Library (Phase 2 C1; Capabilities 03-D3, D7, D8) ------------------------------------------
+
+/**
+ * Where a library item stands:
+ * active = always on for its castes (the warm set: a caste's default skills, and the caste agents themselves);
+ * ready = rewritten and safety-checked, on disk, switched on for a card only when that card needs it;
+ * dormant = listed in the catalog only (not rewritten or safety-scanned yet): never switched on;
+ * draft = proposed by the hive and waiting for the user (skill proposals arrive in C3).
+ */
+export const LibraryStatusSchema = z.enum(['active', 'ready', 'dormant', 'draft']);
+export type LibraryStatus = z.infer<typeof LibraryStatusSchema>;
+export const LibraryKindSchema = z.enum(['agent', 'skill', 'tool']);
+
+export const LibraryItemViewSchema = z.object({
+  name: z.string(),
+  kind: LibraryKindSchema,
+  status: LibraryStatusSchema,
+  /** Castes from the catalog; may include labels that aren't hive castes yet (e.g. "specialist"). */
+  castes: z.array(z.string()),
+  description: z.string(),
+  /** 'vetted' = safety-reviewed (not yet field-tested); 'unscanned' = not checked. */
+  safety: z.enum(['vetted', 'unscanned']),
+  sources: z.array(z.object({ repo: z.string(), path: z.string(), license: z.string().nullable() })),
+  usage: z.object({ uses: z.number().int(), passed: z.number().int(), failed: z.number().int(), lastUsedAt: z.number().nullable() }),
+});
+export type LibraryItemView = z.infer<typeof LibraryItemViewSchema>;
+
+export const LibrarySearchRequestSchema = z.object({
+  /** Words to match in name and description; empty lists everything. */
+  query: z.string().max(200).default(''),
+  kinds: z.array(LibraryKindSchema).optional(),
+  statuses: z.array(LibraryStatusSchema).optional(),
+  /** Only items for this caste. */
+  caste: z.string().max(40).optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+  offset: z.number().int().min(0).default(0),
+});
+export const LibrarySearchResultSchema = z.object({
+  items: z.array(LibraryItemViewSchema),
+  /** Items matching the filters (before limit/offset). */
+  total: z.number().int(),
+  /** Whole catalog, by status (ignores filters), for the filter chips. */
+  counts: z.object({ active: z.number().int(), ready: z.number().int(), dormant: z.number().int(), draft: z.number().int() }),
+});
+export type LibrarySearchRequest = z.input<typeof LibrarySearchRequestSchema>;
+export type LibrarySearchResult = z.infer<typeof LibrarySearchResultSchema>;
+
+export const LibraryItemDetailSchema = z.object({
+  item: LibraryItemViewSchema,
+  /** The item's text (AGENT.md / SKILL.md without frontmatter) when it is on disk; null for dormant entries. */
+  body: z.string().nullable(),
+  /** The latest cards it was switched on for, newest first (at most 10). */
+  recentCards: z.array(z.object({ cardId: z.string(), title: z.string(), outcome: z.enum(['passed', 'failed', 'running']), at: z.number() })),
+});
+export type LibraryItemDetail = z.infer<typeof LibraryItemDetailSchema>;
+
+/** One insect caste: what it is for, what it always carries, and what it may reach on the network. */
+export const CasteViewSchema = z.object({
+  caste: CasteSchema,
+  label: z.string(),
+  /** One line from its AGENT.md description. */
+  role: z.string(),
+  defaultSkills: z.array(z.string()),
+  /** none = no network; docs = documentation sites only; web = the open web (read-only). */
+  network: z.enum(['none', 'docs', 'web']),
+  /** Whether the hive gives it cards (all 8 since C1). */
+  enabled: z.boolean(),
+});
+export type CasteView = z.infer<typeof CasteViewSchema>;
+
 // ---- push events -----------------------------------------------------------------------------
 
 export const HivePushSchema = z.discriminatedUnion('type', [
@@ -632,6 +708,10 @@ export interface HiveApi {
   brainGraph(req: BrainGraphRequest): Promise<BrainGraphView>;
   brainDashboard(): Promise<BrainDashboardView>;
   brainEdit(req: BrainEditRequest): Promise<BrainEditResult>;
+  libraryCastes(): Promise<CasteView[]>;
+  librarySearch(req: LibrarySearchRequest): Promise<LibrarySearchResult>;
+  /** null when no item has that name. */
+  libraryItem(name: string): Promise<LibraryItemDetail | null>;
   pickProject(): Promise<ProjectView | null>;
   /** Returns an unsubscribe function. */
   onEvent(listener: (e: HivePush) => void): () => void;

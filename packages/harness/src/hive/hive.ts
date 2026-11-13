@@ -7,7 +7,8 @@ import type { ClaudeEvent } from '../claude/stream';
 import { type BrainAccess, type BrainTicket, brainWriteAccess } from './brain-access';
 import { type ServiceAccess, type ServiceTicket, servicesBrief } from './services-access';
 import type { Engine, EngineRequest, EngineResult } from './engine';
-import { type Library, brainRules, inspectorPrompt, insectPrompt, queenPrompt } from './prompts';
+import { CASTE_NETWORK, MAX_FOUND_SKILLS, chooseSkills, firstSentence } from './catalog';
+import { type Library, ROLE_SKILLS, brainRules, estimateTokens, inspectorPrompt, insectPrompt, queenPrompt } from './prompts';
 import { type Plan, parsePlan, parseStatus, parseVerdict } from './protocol';
 import type { EngineId } from '@insectoids/shared';
 import { detectUsageLimit } from '../engines/limits';
@@ -144,10 +145,6 @@ interface Job {
   stop(): void;
 }
 
-const NETWORK: Record<Caste, 'none' | 'docs' | 'web'> = {
-  coder: 'docs', tester: 'docs', reviewer: 'docs', documenter: 'docs', designer: 'docs',
-  researcher: 'web', analyst: 'web', writer: 'web',
-};
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
 const local = (cardId: string): string => cardId.slice(cardId.indexOf('.') + 1);
 const wsId = (card: BoardCard): string => `${local(card.id)}.a${card.attempts}`;
@@ -447,6 +444,7 @@ export class Hive {
       context: brain.read(goal.text, { shelf: goal.shelf, tokenBudget: 800, ...(meaning ? { queryVector: meaning.vector, vectorModel: meaning.model } : {}) }).text,
       castes,
       projectListing: this.#listing(),
+      skills: this.#skillsForGoal(goal.text),
     });
     let task = base.task;
     let limitRetries = 0;
@@ -470,11 +468,74 @@ export class Hive {
         if (result.error === 'quota') this.#afterLimit('queen');
         return null;
       }
-      const parsed = parsePlan(result.text, { castes });
+      const parsed = parsePlan(result.text, { castes, skillAllowed: (n) => this.#canCarry(n) });
       if (parsed.ok) return parsed.plan;
       task = `${base.task}\n\nYour previous plan was not valid: ${parsed.error}\nReply again with only the corrected JSON plan.`;
     }
     return null;
+  }
+
+  // ---- library skills (Capabilities 03-D8; Phase 2 C1) --------------------------------------------
+
+  /** A skill an insect may carry: switchable in the catalog (never dormant) and on disk. */
+  #canCarry(name: string): boolean {
+    try {
+      return this.#o.brain.library.isActivatable(name) && this.#o.library.hasSkill(name);
+    } catch {
+      return false;
+    }
+  }
+
+  /** Up to 12 switchable skills that fit the goal, for the Queen's plan ("Find"). */
+  #skillsForGoal(text: string): Array<{ name: string; description: string }> {
+    try {
+      return this.#o.brain.library
+        .activatable(text, { limit: 12, minTerms: 1 })
+        .filter((s) => this.#o.library.hasSkill(s.name))
+        .map((s) => ({ name: s.name, description: clip(firstSentence(s.description), 200) }));
+    } catch {
+      return [];
+    }
+  }
+
+  /** The Queen's skill picks for a card, from the stored plan (cards themselves don't keep them). */
+  #cardSkillPicks(goalId: string, cardId: string): string[] {
+    const plan = this.#o.brain.goals.get(goalId)?.plan as Plan | null | undefined;
+    const card = plan?.waves.flatMap((w) => w.cards).find((c) => `${goalId}.${c.id}` === cardId);
+    return card?.skills ?? [];
+  }
+
+  /**
+   * The skills one insect carries on this card attempt ("Activate", at most 5): its caste's defaults, the
+   * Queen's picks, then the best matches for the card's own text. A resumed or re-routed run of the same
+   * attempt keeps the same set. Bookkeeping trouble never stops the card: it falls back to the defaults.
+   */
+  #skillsForCard(card: BoardCard): string[] {
+    const { brain, library } = this.#o;
+    const defaults = ROLE_SKILLS[card.caste];
+    try {
+      const already = brain.library.activated(card.id, card.attempts).filter((n) => library.hasSkill(n));
+      if (already.length) return already;
+      const picked = this.#cardSkillPicks(card.goalId, card.id).filter((n) => this.#canCarry(n));
+      const found = brain.library
+        .activatable(`${card.title}\n${card.brief}`, { caste: card.caste, limit: MAX_FOUND_SKILLS, exclude: [...defaults, ...picked] })
+        .map((s) => s.name)
+        .filter((n) => library.hasSkill(n));
+      const chosen = chooseSkills({ defaults, picked, found });
+      brain.library.activate(card.id, card.attempts, chosen.map((name) => ({ name, tokens: estimateTokens(library.skill(name)) })));
+      return chosen;
+    } catch {
+      return [...defaults];
+    }
+  }
+
+  /** How the attempt ended, for the skills it carried ("Deactivate": they left with the insect). */
+  #settleSkills(card: BoardCard, outcome: 'passed' | 'failed'): void {
+    try {
+      this.#o.brain.library.settle(card.id, card.attempts, outcome);
+    } catch {
+      // Bookkeeping must never stop the hive.
+    }
   }
 
   async #startGoal(goalId: string): Promise<void> {
@@ -569,7 +630,7 @@ export class Hive {
         acceptance: card.acceptance,
         attempts: card.attempts,
         ...(this.#lastFailure.has(card.id) ? { lastFailure: this.#lastFailure.get(card.id)! } : {}),
-      }, brain.bootCard(goal.shelf));
+      }, brain.bootCard(goal.shelf), this.#skillsForCard(card));
       const asks: string[] = [];
       let result: EngineResult;
       let route: Route | undefined;
@@ -587,7 +648,7 @@ export class Hive {
             home: this.#o.home,
             linkedPaths: (this.#o.linkDependencies ?? []).map((n) => join(cardPath, n)),
             noGo: this.#o.noGo ?? [],
-            network: NETWORK[card.caste],
+            network: CASTE_NETWORK[card.caste],
             approvedRules: this.#approved.get(card.id) ?? [],
           },
           onEvent: (e) => {
@@ -615,6 +676,7 @@ export class Hive {
           return;
         }
         this.#lastFailure.set(card.id, `${result.error}: ${clip(result.text || result.stderrTail, 300)}`);
+        this.#settleSkills(card, 'failed');
         brain.taskboard.giveUp(card.id, agentId, result.error ?? 'error');
         await workspace.removeCard(goal.id, id);
         return;
@@ -688,6 +750,7 @@ export class Hive {
         const merge = await workspace.mergeCard(goal.id, id, card.title);
         if (merge.ok) {
           brain.outcomes.settle(card.id, card.attempts, 'pass');
+          this.#settleSkills(card, 'passed');
           // What this attempt's insects read from the Brain helped work that passed (B2 ranking).
           brain.creditHelped(cardReadKey(card.id, card.attempts));
           brain.taskboard.review(card.id, { verdict: 'pass', by: 'Inspector' });
@@ -701,6 +764,7 @@ export class Hive {
       }
       this.#lastFailure.set(card.id, verdict.note);
       brain.outcomes.settle(card.id, card.attempts, 'fail');
+      this.#settleSkills(card, 'failed');
       const after = brain.taskboard.review(card.id, { verdict: 'fail', by: 'Inspector', note: verdict.note });
       this.#learn(goal.shelf, card, verdict.note);
       await workspace.removeCard(goal.id, id);

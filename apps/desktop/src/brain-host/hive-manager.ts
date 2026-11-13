@@ -47,12 +47,24 @@ import {
   DEFAULT_LIMIT_WAIT_MS,
   formatClock,
   seededRng,
+  ALL_CASTES,
+  CASTE_NETWORK,
+  ROLE_SKILLS,
+  firstSentence,
+  frontmatterDescription,
+  loadCatalog,
 } from '@insectoids/harness';
 import {
   type ActivityView,
   type AgentView,
   type ApprovalView,
   type BrainHealth,
+  type CasteView,
+  type LibraryItemDetail,
+  type LibraryItemView,
+  type LibrarySearchRequest,
+  LibrarySearchRequestSchema,
+  type LibrarySearchResult,
   type BrainDashboardView,
   type BrainEditRequest,
   BrainEditRequestSchema,
@@ -281,6 +293,8 @@ export class HiveManager {
   #libState: LibrarianView['state'] = 'idle';
   #libMessage = 'The Librarian checks the Brain at start and every 6 hours.';
   #health: BrainHealth | null = null;
+  /** Card id → its latest attempt's library skills, while one snapshot is being built. */
+  #cardSkills: Map<string, string[]> | null = null;
   #lastAuditAt: number | null = null;
   #review: { lastReviewAt: number | null; since: number; cardsSince: number };
   #codeMap: CodeMapBuilder | null = null;
@@ -392,6 +406,7 @@ export class HiveManager {
   /** Restore the project and start checking the engine. Never throws: problems become activity lines. */
   async init(): Promise<void> {
     void this.#checkEngines();
+    this.#syncLibrary();
     const path = this.#o.project ?? this.#readSettings().projectPath;
     let opened = false;
     if (path) {
@@ -810,7 +825,7 @@ export class HiveManager {
       insectCap: this.#limits.insectCap,
       defaultBudgetTokens: this.#limits.goalBudgetTokens,
       approveEveryPlan: this.#limits.approveEveryPlan,
-      castes: ['coder', 'tester'],
+      castes: [...ALL_CASTES],
       ...(this.#brainAccess() ? { brainAccess: this.#brainAccess()! } : {}),
       ...(this.#o.services ? { services: this.#o.services } : {}),
       limits: {
@@ -957,7 +972,10 @@ export class HiveManager {
     const { brain } = this.#o;
     const goals = this.#goals();
     const goalIds = new Set(goals.map((g) => g.id));
-    const cards = goals.flatMap((g) => brain.taskboard.list({ goalId: g.id }).map((c) => this.#cardView(c)));
+    const boardCards = goals.flatMap((g) => brain.taskboard.list({ goalId: g.id }));
+    this.#cardSkills = this.#latestSkills(boardCards.map((c) => c.id));
+    const cards = boardCards.map((c) => this.#cardView(c));
+    this.#cardSkills = null;
     const approvals = brain.approvals.list().filter((a) => a.goalId === null || goalIds.has(a.goalId));
     const waiting = approvals.filter((a) => a.status === 'waiting');
     const decided = approvals
@@ -1029,6 +1047,7 @@ export class HiveManager {
       acceptance: c.acceptance, dependsOn: c.dependsOn, integrations: this.#cardIntegrations(c), status: c.status, claimedBy: c.claimedBy ?? null,
       leaseExpiresAt: c.leaseExpiresAt ?? null, attempts: c.attempts, maxAttempts: c.maxAttempts, escalated: c.escalated,
       result: c.result ?? null,
+      skills: (this.#cardSkills ?? this.#latestSkills([c.id])).get(c.id) ?? [],
       undone: c.status === 'done' && Boolean(undo && (undo.goalReset || undo.cards.has(c.id))),
       updatedAt: c.updatedAt,
     };
@@ -1126,6 +1145,93 @@ export class HiveManager {
     return this.#o.brain
       .recent({ shelf, ...(params.kinds ? { kinds: params.kinds } : {}), ...(params.includeHistory ? { includeHistory: true } : {}), limit: 50 })
       .map(({ score: _s, ...h }) => h);
+  }
+
+  // ---- the library (Phase 2 C1; Capabilities 03-D3, D7, D8) -------------------------------------
+
+  /** Bring the Brain's catalog in line with the library folder. Never throws: a problem is one activity line. */
+  #syncLibrary(): void {
+    try {
+      const r = this.#o.brain.library.sync(loadCatalog(this.#o.libraryDir));
+      this.#o.log?.(`Library catalog: ${r.added} added, ${r.updated} updated, ${r.removed} removed.`);
+    } catch (err) {
+      this.#note('error', `Could not read the library catalog: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
+  #latestSkills(cardIds: string[]): Map<string, string[]> {
+    try {
+      return this.#o.brain.library.latestByCard(cardIds);
+    } catch {
+      return new Map();
+    }
+  }
+
+  /** The library file's text without its frontmatter, or null when it isn't on disk. */
+  #libraryText(file: string | null): string | null {
+    if (!file) return null;
+    const path = join(this.#o.libraryDir, file);
+    if (!existsSync(path)) return null;
+    return readFileSync(path, 'utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim();
+  }
+
+  /** The 8 castes: what each is for, the skills it always carries, and its network policy (03-D3). */
+  libraryCastes(): CasteView[] {
+    return ALL_CASTES.map((caste) => {
+      let role = '';
+      try {
+        role = firstSentence(frontmatterDescription(readFileSync(join(this.#o.libraryDir, 'agents', caste, 'AGENT.md'), 'utf8')));
+      } catch {
+        // A missing agent file shows an empty role line rather than failing the screen.
+      }
+      return {
+        caste,
+        label: `${caste[0]!.toUpperCase()}${caste.slice(1)}`,
+        role,
+        defaultSkills: [...ROLE_SKILLS[caste]],
+        network: CASTE_NETWORK[caste],
+        enabled: true,
+      };
+    });
+  }
+
+  #libraryItemView(i: ReturnType<Brain['library']['search']>['items'][number]): LibraryItemView {
+    return {
+      name: i.name,
+      kind: i.kind,
+      status: i.status,
+      castes: i.castes,
+      description: i.description,
+      safety: i.safety,
+      sources: i.sources,
+      usage: { uses: i.uses, passed: i.passed, failed: i.failed, lastUsedAt: i.lastUsedAt },
+    };
+  }
+
+  /** Search the catalog (Library screen): words, kinds, statuses and caste; counts by status for the chips. */
+  librarySearch(req: LibrarySearchRequest): LibrarySearchResult {
+    const r = LibrarySearchRequestSchema.parse(req ?? {});
+    const { items, total } = this.#o.brain.library.search({
+      query: r.query,
+      ...(r.kinds ? { kinds: r.kinds } : {}),
+      ...(r.statuses ? { statuses: r.statuses } : {}),
+      ...(r.caste ? { caste: r.caste } : {}),
+      limit: r.limit,
+      offset: r.offset,
+    });
+    return { items: items.map((i) => this.#libraryItemView(i)), total, counts: this.#o.brain.library.counts() };
+  }
+
+  /** One item: its text when it is on disk (never for dormant entries), and the latest cards it was carried on. */
+  libraryItem(name: string): LibraryItemDetail | null {
+    if (typeof name !== 'string' || !name) return null;
+    const i = this.#o.brain.library.get(name);
+    if (!i) return null;
+    return {
+      item: this.#libraryItemView(i),
+      body: i.status === 'dormant' ? null : this.#libraryText(i.file),
+      recentCards: this.#o.brain.library.recentCards(name, 10),
+    };
   }
 
   // ---- events → read model ---------------------------------------------------------------------

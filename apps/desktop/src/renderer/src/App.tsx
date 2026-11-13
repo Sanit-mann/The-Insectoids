@@ -7,6 +7,7 @@ import { BrainScreen } from '@/components/screens/BrainScreen';
 import { ChangesScreen } from '@/components/screens/ChangesScreen';
 import { ConnectionsScreen } from '@/components/screens/ConnectionsScreen';
 import { HiveScreen } from '@/components/screens/HiveScreen';
+import { LibraryScreen } from '@/components/screens/LibraryScreen';
 import { QueenScreen } from '@/components/screens/QueenScreen';
 import { SettingsScreen } from '@/components/screens/SettingsScreen';
 import { SetupGate } from '@/components/setup/SetupGate';
@@ -27,6 +28,7 @@ const LIVE: Partial<Record<ScreenId, () => ReactNode>> = {
   brain: () => <BrainScreen />,
   settings: () => <SettingsScreen />,
   connections: () => <ConnectionsScreen />,
+  library: () => <LibraryScreen />,
 };
 
 export function App() {

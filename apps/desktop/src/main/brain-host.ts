@@ -16,7 +16,7 @@ const READY_WAIT_MS = 15_000;
 /** The error in-flight calls get when the host process dies under them. */
 const HOST_STOPPED = 'The Brain host stopped.';
 /** Host methods that only read: safe to repeat after a crash-and-restart. */
-const READ_ONLY_METHODS: ReadonlySet<HostMethod> = new Set<HostMethod>(['snapshot', 'changes', 'project', 'brainRecent', 'codeLookup', 'brainGraph', 'brainDashboard']);
+const READ_ONLY_METHODS: ReadonlySet<HostMethod> = new Set<HostMethod>(['snapshot', 'changes', 'project', 'brainRecent', 'codeLookup', 'brainGraph', 'brainDashboard', 'libraryCastes', 'librarySearch', 'libraryItem']);
 const RPC_TIMEOUT_MS = 30_000;
 
 export const restartDelay = (attempt: number): number => BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)]!;

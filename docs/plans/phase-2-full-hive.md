@@ -478,3 +478,39 @@ Three milestones, each ending in something the user can try.
   - **Not built yet:**
     - from 01-D13: Tables, the 3D Globe and the Obsidian export (01-D11, E13);
     - "tokens saved" on the dashboard.
+- **C1 All 8 castes + library activation: done (2026-11-13).** Built by two parallel workers (backend; Library screen and e2e) on the contract additions (`CardView.skills`, `libraryCastes`, `librarySearch`, `libraryItem`). Unit tests: 776 pass, 32 of them new, with no unhandled errors in two runs. e2e: 115 passed, 2 skipped by design, in 4 of 5 full runs. Lint and typecheck are clean. No real engine runs.
+  - **Castes:**
+    - The hive now hands cards to all 8: Coder, Tester, Reviewer, Researcher, Documenter, Designer, Analyst and Writer. Each has its role (AGENT.md), its default skills and a network rule:
+      - **Documentation sites only:** coder, tester, reviewer, documenter, designer;
+      - **Read-only web:** researcher, analyst, writer.
+    - The read-only engine guard covers reviewer, researcher and analyst. A card that changes no files commits nothing.
+    - With the scripted engine, "Write the welcome docs" plans one wave with coder, tester and documenter cards, and it runs to done (`castes-goal` e2e and a host test).
+  - **Catalog in the Brain (03-D8):** migration v9 adds `library_items` (with usage: uses, passed, failed, tokens, last used), the FTS index `library_fts`, and `library_activations` (card, attempt, item, outcome). It syncs at start from `catalog.json` plus the library folder. Statuses:
+    - **active:** the caste agents, Queen, Inspector and Librarian, plus every caste's default skills (the warm set);
+    - **ready:** other rewritten, safety-checked items on disk;
+    - **dormant:** the 879 entries never rewritten or scanned, which are **never switched on** (tested);
+    - **draft:** reserved for C3.
+  - **Search:**
+    - **Ranking:** exact name first, then names containing the words, then text matches; within each group, active, ready, draft, dormant, then relevance.
+    - **Licences:** sources without a licence get it from `THIRD-PARTY-NOTICES.md`.
+    - **Descriptions:** rewritten items take their description from their own frontmatter.
+    - **Not yet:** search is keyword only; meaning search over the catalog comes later.
+  - **Switching skills on per card (Find / Activate / Deactivate):**
+    - **The Queen's input:** her planner prompt lists up to 12 switchable skills that fit the goal, and each plan card may name up to 3. Unknown or dormant names are dropped and never fail a plan.
+    - **What an insect carries:** caste defaults first, then the Queen's picks, then up to 2 search matches (at least 2 meaningful words in common, ignoring generic task words), capped at 5. Only those go into its prompt.
+    - **Fresh each time:** the next insect starts fresh (03-D7), and a resumed run of the same attempt reuses the same set.
+    - **Usage:** counted once per attempt, with each skill's estimated prompt tokens. Pass or fail is settled by the Inspector's decision.
+  - **Library screen** (it was a placeholder):
+    - **Castes tab:** role, "Always carries" chips and the network rule in words with an icon.
+    - **Catalog tab:**
+      - search, status chips with counts and what each status means, kind and caste filters, and paging;
+      - an item panel with safety in words, sources with licence, usage, recent cards and the full text.
+    - **Taskboard card detail:** "Skills on for this card" chips that open the item.
+    - **UI pieces:** shadcn `button`; Kokonut UI `empty-state` and `inline-alert`. The rest is custom.
+  - **Catalog data fixes:**
+    - **The bug:** `build-catalog.mjs` stripped only a description's opening quote, leaving stray closing quotes in 9 rewritten descriptions.
+    - **The fix:** the script is fixed, and `catalog.json` and `CATALOG.md` were regenerated.
+  - **Updated test:** the Phase 1 `app.spec` rail test expected Library to be a placeholder. It now checks the Library screen, and uses Cadence as the placeholder.
+  - **Flakes seen:**
+    - **Engines tab:** `connections.spec` "the Engines tab lists every engine…" failed once in 5 full runs, with no trace kept. It then passed 30 single runs and 2 more full runs. Watch it.
+    - **Unit-test crash:** one unit run crashed a Vitest worker natively (exit 0xC0000409) in `llm-providers.test.ts`, which C1 didn't touch. It didn't happen in the next two runs. Watch it.

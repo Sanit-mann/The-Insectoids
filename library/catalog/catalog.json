@@ -1,5 +1,5 @@
 {
- "generated": "2026-11-12",
+ "generated": "2026-11-13",
  "counts": {
   "rewritten": 65,
   "dormant": 879,
@@ -191,10 +191,10 @@
    "castes": [
     "librarian"
    ],
-   "description": "Memory manager that keeps the Brain and the skill catalog healthy. Code reflexes dedupe, rank, decay, check freshness and score health; its brain consolidates memories, prepares conflicts and fact confirmations for the user, runs audits, distills lessons and proposes new or retired skills. Use for Brain upkeep and catalog changes.",
+   "description": "Memory manager that keeps the Brain healthy. Its reflexes (code) learn lessons from failed inspections, fade unused agent notes, score Brain health and find near-duplicates only the user can merge; its brain (one short, read-only LLM review) reads a compact audit summary and proposes merges, replacements, lesson confirmations and archiving for the user to approve. Use for Brain upkeep.",
    "status": "active-library",
    "rewritten": true,
-   "lines": 108,
+   "lines": 77,
    "file": "agents/librarian/AGENT.md",
    "sources": [
     {
@@ -593,7 +593,7 @@
     "coder",
     "inspector"
    ],
-   "description": "Review a code change for real problems only (correctness, security, maintainability, performance, tests), filtered by confidence, no style nitpicks, reported one line per finding as `path:line: severity: problem. fix.` with a clear verdict. Use when reviewing a diff, branch or card result, and when requesting a review of your own finished work.'",
+   "description": "Review a code change for real problems only (correctness, security, maintainability, performance, tests), filtered by confidence, no style nitpicks, reported one line per finding as `path:line: severity: problem. fix.` with a clear verdict. Use when reviewing a diff, branch or card result, and when requesting a review of your own finished work.",
    "status": "active-library",
    "rewritten": true,
    "lines": 148,
@@ -675,7 +675,7 @@
     "scout",
     "analyst"
    ],
-   "description": "Answer a question from many sources with a cited report: check the Brain first, split the topic into sub-questions, search and fully read key sources, weigh conflicting evidence, and mark confidence and gaps. Use for in-depth research, technology evaluation, competitive or market analysis, and due diligence. For a quick check before building, use search-first.\"",
+   "description": "Answer a question from many sources with a cited report: check the Brain first, split the topic into sub-questions, search and fully read key sources, weigh conflicting evidence, and mark confidence and gaps. Use for in-depth research, technology evaluation, competitive or market analysis, and due diligence. For a quick check before building, use search-first.",
    "status": "active-library",
    "rewritten": true,
    "lines": 159,
@@ -1013,7 +1013,7 @@
     "reviewer",
     "inspector"
    ],
-   "description": "Python review checks on top of code-review: injection and unsafe APIs, error handling, type hints, mutable defaults, concurrency and async pitfalls, plus FastAPI (async, dependencies, Pydantic models, CORS) and Django (ORM, migrations, DRF, settings) sections. Use when a diff touches .py files, migrations or Python project config.'",
+   "description": "Python review checks on top of code-review: injection and unsafe APIs, error handling, type hints, mutable defaults, concurrency and async pitfalls, plus FastAPI (async, dependencies, Pydantic models, CORS) and Django (ORM, migrations, DRF, settings) sections. Use when a diff touches .py files, migrations or Python project config.",
    "status": "active-library",
    "rewritten": true,
    "lines": 165,
@@ -1129,7 +1129,7 @@
     "designer",
     "writer"
    ],
-   "description": "Handle review findings with technical rigor: read all of it, clarify anything unclear before changing code, verify each item against the codebase, push back with evidence when it is wrong, then fix one item at a time and test each. Use when a reviewer, the Inspector or the Queen returns findings on your card, before implementing any suggestion.'",
+   "description": "Handle review findings with technical rigor: read all of it, clarify anything unclear before changing code, verify each item against the codebase, push back with evidence when it is wrong, then fix one item at a time and test each. Use when a reviewer, the Inspector or the Queen returns findings on your card, before implementing any suggestion.",
    "status": "active-library",
    "rewritten": true,
    "lines": 153,
@@ -1194,7 +1194,7 @@
     "scout",
     "queen"
    ],
-   "description": "Before building, look for what already exists: prior decisions, outcomes and open tasks in the Brain, code in the repo, skills and tools in the library, packages, and public projects. Then adopt, extend, compose or build. Use when starting a feature, adding a dependency or integration, or about to write a helper that may already exist.\"",
+   "description": "Before building, look for what already exists: prior decisions, outcomes and open tasks in the Brain, code in the repo, skills and tools in the library, packages, and public projects. Then adopt, extend, compose or build. Use when starting a feature, adding a dependency or integration, or about to write a helper that may already exist.",
    "status": "active-library",
    "rewritten": true,
    "lines": 132,
@@ -1214,7 +1214,7 @@
     "coder",
     "inspector"
    ],
-   "description": "OWASP-style security review of code and configuration: secrets, injection, XSS, access control, authentication, sensitive data, SSRF, unsafe deserialization, dependencies and infrastructure. Use when a change touches user input, auth, API endpoints, file uploads, payments, webhooks, crypto, secrets or sensitive data, when dependencies change, and before any release.'",
+   "description": "OWASP-style security review of code and configuration: secrets, injection, XSS, access control, authentication, sensitive data, SSRF, unsafe deserialization, dependencies and infrastructure. Use when a change touches user input, auth, API endpoints, file uploads, payments, webhooks, crypto, secrets or sensitive data, when dependencies change, and before any release.",
    "status": "active-library",
    "rewritten": true,
    "lines": 130,
@@ -1259,7 +1259,7 @@
     "coder",
     "tester"
    ],
-   "description": "Find the root cause before changing anything: read the error, reproduce, gather evidence, rank hypotheses, test one at a time, then fix at the source with a failing test first. Use for any bug, test failure, build failure, flaky or intermittent behavior, performance regression or unexpected result, before proposing or editing a fix.'",
+   "description": "Find the root cause before changing anything: read the error, reproduce, gather evidence, rank hypotheses, test one at a time, then fix at the source with a failing test first. Use for any bug, test failure, build failure, flaky or intermittent behavior, performance regression or unexpected result, before proposing or editing a fix.",
    "status": "active-library",
    "rewritten": true,
    "lines": 129,
@@ -1401,7 +1401,7 @@
     "reviewer",
     "inspector"
    ],
-   "description": "TypeScript and JavaScript review checks on top of code-review: type safety, async correctness, error handling, Node.js pitfalls, injection sinks, plus a React section for hooks, rendering, server/client boundaries, accessibility and React-specific security. Use when a diff touches .ts, .tsx, .js, .jsx, .mjs or .cjs files.'",
+   "description": "TypeScript and JavaScript review checks on top of code-review: type safety, async correctness, error handling, Node.js pitfalls, injection sinks, plus a React section for hooks, rendering, server/client boundaries, accessibility and React-specific security. Use when a diff touches .ts, .tsx, .js, .jsx, .mjs or .cjs files.",
    "status": "active-library",
    "rewritten": true,
    "lines": 160,

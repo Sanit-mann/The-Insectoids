@@ -29,6 +29,26 @@ export const DEMO_PLAN = {
   ],
 } as const;
 
+/**
+ * A goal that mentions "welcome docs" (e.g. "Write the welcome docs") gets a one-wave plan across three castes
+ * (Phase 2 C1, 03-D3): C-01 coder, C-02 tester and C-03 documenter (both depend on C-01). One wave, so it
+ * starts without plan approval (unless every plan waits); the Queen adds a library skill to two cards.
+ */
+export const DEMO_TEAM_GOAL = /welcome docs/i;
+export const DEMO_TEAM_PLAN = {
+  headline: 'Write the welcome docs with three castes',
+  summary: 'A coder writes welcome.txt, a tester checks it, and a documenter documents it.',
+  waves: [
+    {
+      cards: [
+        { id: 'C-01', title: 'Write welcome.txt', brief: 'Create welcome.txt with a short welcome.', caste: 'coder', priority: 'normal', acceptance: ['welcome.txt exists'], dependsOn: [], skills: ['surgical-patch'] },
+        { id: 'C-02', title: 'Check welcome.txt', brief: 'Check that welcome.txt welcomes the reader.', caste: 'tester', priority: 'normal', acceptance: ['The welcome is checked'], dependsOn: ['C-01'] },
+        { id: 'C-03', title: 'Document welcome.txt', brief: 'Add a short note to the docs about welcome.txt.', caste: 'documenter', priority: 'low', acceptance: ['The note exists'], dependsOn: ['C-01'], skills: ['writing-guidelines'] },
+      ],
+    },
+  ],
+} as const;
+
 export interface DemoTiming {
   queenMs: number;
   insectMs: number;
@@ -52,6 +72,16 @@ export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
   let failedOnce = false;
   return new FakeEngine((req): FakeReply => {
     const init: ClaudeEvent = { kind: 'init', sessionId: `demo-${req.agentId}`, model: req.route.model };
+    const goal = /^# Goal\r?\n(.*)$/m.exec(req.task)?.[1] ?? '';
+    if (req.role === 'queen' && DEMO_TEAM_GOAL.test(goal)) {
+      return {
+        delayMs: t.queenMs,
+        tokens: 4_000,
+        costUsd: 0.01,
+        events: [init, { kind: 'text', text: 'Reading the goal and the project files.' }, { kind: 'text', text: 'Plan: 1 wave, 3 cards, 3 castes.' }],
+        text: `Here is the plan.\n\`\`\`json\n${JSON.stringify(DEMO_TEAM_PLAN)}\n\`\`\``,
+      };
+    }
     if (req.role === 'queen') {
       return {
         delayMs: t.queenMs,

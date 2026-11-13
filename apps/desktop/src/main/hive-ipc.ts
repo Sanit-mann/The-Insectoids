@@ -8,6 +8,10 @@ import {
   BrainHitViewSchema,
   BrainRecordViewSchema,
   BrainSearchRequestSchema,
+  CasteViewSchema,
+  LibraryItemDetailSchema,
+  LibrarySearchRequestSchema,
+  LibrarySearchResultSchema,
   ChangesRequestSchema,
   ChangesViewSchema,
   CodeLookupRequestSchema,
@@ -29,6 +33,8 @@ interface Deps {
 
 /** Same rule as every id in the hive contract. */
 const RecordId = ChangesRequestSchema.shape.cardId;
+/** A library item name (Phase 2 C1): same length rule as ids. */
+const LibraryItemName = RecordId;
 
 /**
  * The hive's IPC (App 07 / Phase 1 Step 8). Every input is validated before it reaches the host,
@@ -84,6 +90,11 @@ export function registerHiveIpc(d: Deps): void {
   handle(HIVE_IPC.brainGraph, async (arg) => BrainGraphViewSchema.parse(await host().call('brainGraph', BrainGraphRequestSchema.parse(arg ?? {}))));
   handle(HIVE_IPC.brainDashboard, async () => BrainDashboardViewSchema.parse(await host().call('brainDashboard')));
   handle(HIVE_IPC.brainEdit, async (arg) => BrainEditResultSchema.parse(await host().call('brainEdit', BrainEditRequestSchema.parse(arg))));
+
+  // Library screen (Phase 2 C1): read-only views of the castes and the catalog in the Brain.
+  handle(HIVE_IPC.libraryCastes, async () => CasteViewSchema.array().parse(await host().call('libraryCastes')));
+  handle(HIVE_IPC.librarySearch, async (arg) => LibrarySearchResultSchema.parse(await host().call('librarySearch', LibrarySearchRequestSchema.parse(arg ?? {}))));
+  handle(HIVE_IPC.libraryItem, async (arg) => LibraryItemDetailSchema.nullable().parse(await host().call('libraryItem', LibraryItemName.parse(arg))));
 
   handle(HIVE_IPC.brainRecord, async (arg) => {
     const id = RecordId.parse(arg);

@@ -51,7 +51,11 @@ export type HostMethod =
   | 'brainGraph'
   | 'brainDashboard'
   | 'brainEdit'
-  | 'e2eAgentEdit';
+  | 'e2eAgentEdit'
+  // Library screen (Phase 2 C1): the castes and the catalog, read-only.
+  | 'libraryCastes'
+  | 'librarySearch'
+  | 'libraryItem';
 
 /**
  * Requests the host makes to main (the reverse direction): the secret broker and the Vault live in

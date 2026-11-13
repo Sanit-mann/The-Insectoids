@@ -20,6 +20,14 @@ const field = (block, key) => { const m = block.match(new RegExp(`^\\s*${key}:\\
 const list = (block, key) => { const v = field(block, key); return v.startsWith('[') ? v.slice(1, -1).split(',').map(s => s.trim()).filter(Boolean) : []; };
 const rewritten = [];
 const usedSources = new Set();
+// A YAML scalar as plain text: drop a block marker, or a wrapping pair of quotes and undo their escapes
+// (stripping only the opening quote used to leave a stray closing one in the catalog).
+function unquote(v) {
+  const t = v.replace(/^[>|]-?\s*/, '').trim();
+  if (t.length >= 2 && t[0] === '"' && t.endsWith('"')) return t.slice(1, -1).replace(/\\(["\\])/g, '$1');
+  if (t.length >= 2 && t[0] === "'" && t.endsWith("'")) return t.slice(1, -1).replace(/''/g, "'");
+  return t;
+}
 function addRewritten(file, kind) {
   const text = fs.readFileSync(file, 'utf8');
   const f = fm(text);
@@ -29,7 +37,7 @@ function addRewritten(file, kind) {
   rewritten.push({
     name: field(f, 'name'), kind, rank: field(f, 'rank') || undefined,
     castes: list(f, 'castes').length ? list(f, 'castes') : [field(f, 'caste') || field(f, 'name')].filter(Boolean),
-    description: desc.replace(/^["'>|-]\s*/, ''), status: 'active-library', rewritten: true,
+    description: unquote(desc), status: 'active-library', rewritten: true,
     lines: text.split('\n').length, file: path.relative(lib, file).split(path.sep).join('/'), sources,
   });
 }

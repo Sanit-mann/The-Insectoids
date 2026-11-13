@@ -242,6 +242,51 @@ const MIGRATIONS: readonly string[] = [
     skipped       INTEGER NOT NULL DEFAULT 0
   );
   `,
+  // v9: the library catalog (Capabilities 03-D8; Phase 2 C1). One row per agent, skill or tool, synced from
+  // the library folder's catalog; usage numbers stay across syncs. Activations log which skills an insect
+  // carried on a card attempt, and how that attempt ended.
+  `
+  CREATE TABLE library_items (
+    name          TEXT PRIMARY KEY,
+    kind          TEXT NOT NULL,
+    status        TEXT NOT NULL,
+    castes        TEXT NOT NULL,
+    description   TEXT NOT NULL,
+    safety        TEXT NOT NULL,
+    file          TEXT,
+    sources       TEXT NOT NULL,
+    uses          INTEGER NOT NULL DEFAULT 0,
+    passed        INTEGER NOT NULL DEFAULT 0,
+    failed        INTEGER NOT NULL DEFAULT 0,
+    tokens        INTEGER NOT NULL DEFAULT 0,
+    last_used_at  INTEGER,
+    synced_at     INTEGER NOT NULL
+  );
+  CREATE INDEX library_items_status ON library_items (status);
+  CREATE VIRTUAL TABLE library_fts USING fts5(
+    name, description,
+    content = 'library_items', content_rowid = 'rowid', tokenize = 'unicode61'
+  );
+  CREATE TRIGGER library_ai AFTER INSERT ON library_items BEGIN
+    INSERT INTO library_fts (rowid, name, description) VALUES (new.rowid, new.name, new.description);
+  END;
+  CREATE TRIGGER library_ad AFTER DELETE ON library_items BEGIN
+    INSERT INTO library_fts (library_fts, rowid, name, description) VALUES ('delete', old.rowid, old.name, old.description);
+  END;
+  CREATE TRIGGER library_au AFTER UPDATE OF name, description ON library_items BEGIN
+    INSERT INTO library_fts (library_fts, rowid, name, description) VALUES ('delete', old.rowid, old.name, old.description);
+    INSERT INTO library_fts (rowid, name, description) VALUES (new.rowid, new.name, new.description);
+  END;
+  CREATE TABLE library_activations (
+    card_id   TEXT NOT NULL,
+    attempt   INTEGER NOT NULL,
+    item      TEXT NOT NULL,
+    at        INTEGER NOT NULL,
+    outcome   TEXT NOT NULL DEFAULT 'running',
+    PRIMARY KEY (card_id, attempt, item)
+  );
+  CREATE INDEX library_activations_item ON library_activations (item, at);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

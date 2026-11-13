@@ -3,6 +3,7 @@ import { DatabaseSync } from 'node:sqlite';
 import type { RecordKind, Trust } from '@insectoids/shared';
 import { ApprovalStore } from './approvals';
 import { CodeMapStore } from './codemap';
+import { LibraryStore } from './library';
 import { transaction } from './db';
 import { GoalStore } from './goals';
 import { ConflictError, SecretError, TrustError } from './errors';
@@ -402,6 +403,14 @@ export class Brain {
   get code(): CodeMapStore {
     this.#code ??= new CodeMapStore(this.#db, this.#now);
     return this.#code;
+  }
+
+  #library: LibraryStore | undefined;
+
+  /** The library catalog and skill activations (Capabilities 03-D8; Phase 2 C1), same database and writer. */
+  get library(): LibraryStore {
+    this.#library ??= new LibraryStore(this.#db, this.#now);
+    return this.#library;
   }
 
   #outcomes: OutcomeStore | undefined;

@@ -1,6 +1,6 @@
 # Library Catalog
 
-Generated 2026-11-12 from [catalog.json](catalog.json).
+Generated 2026-11-13 from [catalog.json](catalog.json).
 
 | | Count |
 |---|---|
@@ -20,7 +20,7 @@ Generated 2026-11-12 from [catalog.json](catalog.json).
 | agent (insect) | [documenter](../agents/documenter/AGENT.md) | documenter | 99 |
 | agent (manager) | [foreman](../agents/foreman/AGENT.md) | foreman | 110 |
 | agent (manager) | [inspector](../agents/inspector/AGENT.md) | inspector | 127 |
-| agent (manager) | [librarian](../agents/librarian/AGENT.md) | librarian | 108 |
+| agent (manager) | [librarian](../agents/librarian/AGENT.md) | librarian | 77 |
 | agent (queen) | [queen](../agents/queen/AGENT.md) | queen | 121 |
 | agent (insect) | [researcher](../agents/researcher/AGENT.md) | researcher | 110 |
 | agent (insect) | [reviewer](../agents/reviewer/AGENT.md) | reviewer | 114 |
