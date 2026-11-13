@@ -287,6 +287,42 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX library_activations_item ON library_activations (item, at);
   `,
+  // v10: the managers' brain side (Hive 02-D8, D9 P3; Phase 2 C2). A card the Watchdog holds is not
+  // claimable until the Foreman decides; the Foreman may give a card one more try, once, with a note or a
+  // stronger model. Incidents are the Watchdog's log (with a recurrence count per signature); the Foreman's
+  // decisions are kept for the Hive monitor.
+  `
+  ALTER TABLE tasks ADD COLUMN held_reason TEXT;
+  ALTER TABLE tasks ADD COLUMN foreman_retries INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tasks ADD COLUMN foreman_note TEXT;
+  ALTER TABLE tasks ADD COLUMN foreman_tier TEXT;
+  CREATE TABLE incidents (
+    id          TEXT PRIMARY KEY,
+    at          INTEGER NOT NULL,
+    sensor      TEXT NOT NULL,
+    step        TEXT NOT NULL,
+    agent       TEXT NOT NULL,
+    run_id      TEXT,
+    goal_id     TEXT,
+    card_id     TEXT,
+    evidence    TEXT NOT NULL,
+    signature   TEXT NOT NULL,
+    recurrence  INTEGER NOT NULL
+  );
+  CREATE INDEX incidents_at ON incidents (at);
+  CREATE INDEX incidents_signature ON incidents (signature);
+  CREATE TABLE foreman_decisions (
+    seq         INTEGER PRIMARY KEY AUTOINCREMENT,
+    at          INTEGER NOT NULL,
+    goal_id     TEXT NOT NULL,
+    card_id     TEXT NOT NULL,
+    card_title  TEXT NOT NULL,
+    wake        TEXT NOT NULL,
+    action      TEXT NOT NULL,
+    reason      TEXT NOT NULL
+  );
+  CREATE INDEX foreman_decisions_card ON foreman_decisions (card_id);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

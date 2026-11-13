@@ -10,3 +10,4 @@ export { FREQUENT_READS, HALF_LIFE_DAYS, importance, rankScore, type ImportanceI
 export { HEALTH_WEIGHTS, brainHealth } from './health';
 export * from './codemap';
 export * from './library';
+export * from './managers';

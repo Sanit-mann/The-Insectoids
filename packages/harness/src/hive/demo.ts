@@ -49,6 +49,40 @@ export const DEMO_TEAM_PLAN = {
   ],
 } as const;
 
+/**
+ * Phase 2 C2, the managers' brain side (one coder card each, one wave, so no plan approval):
+ * - "Loop on purpose": the first attempt repeats one tool call, so the Watchdog warns and then holds the card;
+ *   the Foreman gives it one more try with a note; the second attempt passes.
+ * - "Fail on purpose": the Inspector fails every attempt; the Foreman sends the card to the Queen (goal stuck).
+ * - A goal of 6+ words with the Scout on and the code map ready gets a Scout survey before the Queen plans.
+ * - The Foreman's periodic review reports the numbers it was given.
+ */
+export const DEMO_LOOP_GOAL = /loop on purpose/i;
+export const DEMO_FAIL_GOAL = /fail on purpose/i;
+const oneCardPlan = (title: string, headline: string) => ({
+  headline,
+  summary: headline,
+  waves: [{ cards: [{ id: 'C-01', title, brief: `Create C-01.txt. (${headline})`, caste: 'coder', priority: 'normal', acceptance: ['C-01.txt exists'], dependsOn: [] }] }],
+});
+export const DEMO_LOOP_PLAN = oneCardPlan('Loop on purpose', 'A card whose first insect loops, to show the Watchdog and the Foreman');
+export const DEMO_FAIL_PLAN = oneCardPlan('Fail on purpose', 'A card the Inspector never passes, to show the Foreman sending it to the Queen');
+
+const fenced = (intro: string, value: unknown): string => `${intro}\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
+
+/** The demo Foreman: sends "Fail on purpose" to the Queen; gives anything else one more try with a note. */
+function demoForemanReply(task: string): string {
+  if (task.startsWith('# Board since the last review')) {
+    const finished = /Cards finished since the last review: (\d+)/.exec(task)?.[1] ?? '0';
+    const incidents = /Watchdog incidents: (\d+)/.exec(task)?.[1] ?? '0';
+    const report = `${finished} card${finished === '1' ? '' : 's'} finished, ${incidents} incident${incidents === '1' ? '' : 's'} since the last review. Nothing needs changing.`;
+    return fenced('Reviewed the board.', { report });
+  }
+  const decision = /# Stuck card \S+: Fail on purpose/.test(task)
+    ? { action: 'to-queen', reason: 'The Inspector rejected it on every attempt for the same reason; the card needs re-planning.' }
+    : { action: 'retry-with-note', reason: 'The insect repeated one command instead of reading its error.', note: 'Run the command once, read the output, then write C-01.txt.' };
+  return fenced('Decided.', decision);
+}
+
 export interface DemoTiming {
   queenMs: number;
   insectMs: number;
@@ -73,6 +107,21 @@ export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
   return new FakeEngine((req): FakeReply => {
     const init: ClaudeEvent = { kind: 'init', sessionId: `demo-${req.agentId}`, model: req.route.model };
     const goal = /^# Goal\r?\n(.*)$/m.exec(req.task)?.[1] ?? '';
+    if (req.role === 'queen' && (DEMO_LOOP_GOAL.test(goal) || DEMO_FAIL_GOAL.test(goal))) {
+      const plan = DEMO_LOOP_GOAL.test(goal) ? DEMO_LOOP_PLAN : DEMO_FAIL_PLAN;
+      return { delayMs: t.queenMs, tokens: 3_000, costUsd: 0.01, events: [init, { kind: 'text', text: 'Plan: 1 wave, 1 card.' }], text: fenced('Here is the plan.', plan) };
+    }
+    if (req.role === 'scout') {
+      return {
+        delayMs: t.inspectorMs,
+        tokens: 1_200,
+        events: [init, { kind: 'text', text: 'Reading the code map outline.' }],
+        text: 'area: the project root  question: where the greeting belongs\nkey files: see the outline (high)\nrisks: none found\ngaps: no source files were opened',
+      };
+    }
+    if (req.role === 'foreman') {
+      return { delayMs: t.inspectorMs, tokens: 900, events: [init, { kind: 'text', text: 'Reading the stuck card.' }], text: demoForemanReply(req.task) };
+    }
     if (req.role === 'queen' && DEMO_TEAM_GOAL.test(goal)) {
       return {
         delayMs: t.queenMs,
@@ -104,6 +153,14 @@ export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
         text: `${id} is not done yet.\nVERDICT: FAIL: hello.txt has no greeting. It only holds a placeholder.`,
       };
     }
+    if (req.role === 'inspector' && /^# Verify card \S+: Fail on purpose/m.test(req.task)) {
+      return {
+        delayMs: t.inspectorMs,
+        tokens: 1_500,
+        events: [init, { kind: 'text', text: `Checking ${id} against its "done means".` }],
+        text: `${id} is not done.\nVERDICT: FAIL: C-01.txt only holds a placeholder, not the work the card asks for.`,
+      };
+    }
     if (req.role === 'inspector') {
       return {
         delayMs: t.inspectorMs,
@@ -113,6 +170,17 @@ export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
       };
     }
     const file = `${id}.txt`;
+    if (/^# Card \S+: Loop on purpose/m.test(req.task) && !/This is attempt \d+/.test(req.task)) {
+      // The first attempt keeps running the same command: the Watchdog warns at 5 and holds the card at 10.
+      const call = (n: number): ClaudeEvent => ({ kind: 'tool_use', id: `loop-${n}`, name: 'Bash', input: { command: 'npm test' } });
+      return {
+        delayMs: 50,
+        eventGapMs: 40,
+        tokens: 2_500,
+        events: [init, { kind: 'text', text: 'Running the tests.' }, ...Array.from({ length: 14 }, (_, n) => call(n))],
+        text: 'Still running the tests.\nSTATUS: DONE',
+      };
+    }
     return {
       delayMs: t.insectMs,
       tokens: 2_500,

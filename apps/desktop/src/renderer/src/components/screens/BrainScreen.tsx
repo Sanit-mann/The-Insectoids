@@ -12,6 +12,7 @@ import { MatchBadge, MeaningSearchStrip, TURN_ON_ID } from '@/components/brain/M
 import { Switch } from '@/components/connections/Switch';
 import { InlineError } from '@/components/changes/CardChanges';
 import { useHive } from '@/lib/hive-store';
+import { clearPendingRecord, onBrainRecordOpen, peekPendingRecord } from '@/lib/open-nav';
 import { cn } from '@/lib/utils';
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -78,6 +79,18 @@ function ViewSwitch({ view, onChange }: { view: BrainView; onChange: (v: BrainVi
 
 export function BrainScreen() {
   const [view, setView] = useState<BrainView>('notes');
+  // C2: another screen (e.g. the last periodic review on the Hive screen) may ask to open a record.
+  const [openRequest, setOpenRequest] = useState<{ id: string; n: number } | null>(() => {
+    const id = peekPendingRecord();
+    return id ? { id, n: 0 } : null;
+  });
+  useEffect(() => {
+    clearPendingRecord();
+    return onBrainRecordOpen((id) => {
+      setView('notes');
+      setOpenRequest((r) => ({ id, n: (r?.n ?? 0) + 1 }));
+    });
+  }, []);
   if (view === 'code') {
     return (
       <div className="flex flex-1 flex-col gap-6 p-6">
@@ -87,7 +100,7 @@ export function BrainScreen() {
     );
   }
   if (view === 'graph' || view === 'dashboard') return <WithReader switcher={<ViewSwitch onChange={setView} view={view} />} view={view} />;
-  return <NotesView switcher={<ViewSwitch onChange={setView} view={view} />} />;
+  return <NotesView openRequest={openRequest} switcher={<ViewSwitch onChange={setView} view={view} />} />;
 }
 
 /** Graph or dashboard on the left, the reader beside it once a record is picked (B5). */
@@ -112,14 +125,20 @@ function WithReader({ view, switcher }: { view: 'graph' | 'dashboard'; switcher:
 }
 
 /** The Brain's records: search, filters, the reader, and (B3) health, the Librarian and lessons. */
-function NotesView({ switcher }: { switcher: ReactNode }) {
+function NotesView({ switcher, openRequest }: { switcher: ReactNode; openRequest: { id: string; n: number } | null }) {
   const { snapshot } = useHive();
   const [query, setQuery] = useState('');
   const [kinds, setKinds] = useState<RecordKind[]>([]);
   /** Also show replaced facts and faded (archived) notes (Phase 2 B2). */
   const [history, setHistory] = useState(false);
   const [found, setFound] = useState<{ key: string; results: Results } | null>(null);
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(openRequest?.id ?? null);
+  // A record opened from another screen while this view is showing (adjusting state during render).
+  const [seenRequest, setSeenRequest] = useState(openRequest);
+  if (openRequest !== seenRequest) {
+    setSeenRequest(openRequest);
+    if (openRequest) setOpenId(openRequest.id);
+  }
   const [attempt, setAttempt] = useState(0);
   const q = query.trim();
   const key = JSON.stringify([q, kinds, history, attempt]);

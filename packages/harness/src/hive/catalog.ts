@@ -35,7 +35,7 @@ export const MAX_ACTIVE_SKILLS = 5;
 /** The most skills found by searching the card's own text. */
 export const MAX_FOUND_SKILLS = 2;
 
-const ALWAYS_ON_AGENTS = new Set<string>([...ALL_CASTES, 'queen', 'inspector', 'librarian']);
+const ALWAYS_ON_AGENTS = new Set<string>([...ALL_CASTES, 'queen', 'inspector', 'librarian', 'scout', 'foreman']);
 const DEFAULT_SKILLS = new Set(Object.values(ROLE_SKILLS).flat());
 
 interface CatalogFileItem {

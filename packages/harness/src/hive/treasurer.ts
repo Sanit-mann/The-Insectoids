@@ -1,7 +1,7 @@
 import type { EngineId } from '@insectoids/shared';
 import type { OutcomeStat } from '@insectoids/brain';
 import type { Effort } from '../claude/args';
-import { EFFORTS, type ModelTiers, type Route, type RouteInput, TIERS, type Tier, budgetForTier } from './router';
+import { EFFORTS, type ModelTiers, type Route, type RouteInput, TIERS, type Tier, budgetForTier, isManagerRole } from './router';
 
 /**
  * The Treasurer's learning router (Hive 02-D9 P1; Phase 2 A5).
@@ -104,7 +104,7 @@ export function learnRoute(o: LearnOptions): Route {
   const { input, rule } = o;
   const minSamples = o.minSamples ?? MIN_SAMPLES;
   const threshold = o.threshold ?? GOOD_ENOUGH;
-  if (input.role === 'queen' || input.role === 'inspector' || input.role === 'librarian' || input.attempts > 0 || !o.engines.length) return rule;
+  if (input.role === 'queen' || input.role === 'inspector' || isManagerRole(input.role) || input.minTier || input.attempts > 0 || !o.engines.length) return rule;
 
   const ti = TIERS.indexOf(rule.tier);
   const ei = EFFORTS.indexOf(rule.effort);

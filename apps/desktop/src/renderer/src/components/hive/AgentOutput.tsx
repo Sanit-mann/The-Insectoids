@@ -3,7 +3,7 @@ import { Hand } from 'lucide-react';
 import { useLayoutEffect, useRef } from 'react';
 import { engineName } from '@/components/connections/engine-names';
 import { StatusDot } from '@/components/StatusDot';
-import { LANE_LABEL, agentName, formatTokens, formatUsd, laneDot, modelLabel, roleLabel } from './format';
+import { LANE_LABEL, ROLE_HINT, agentName, formatTokens, formatUsd, laneDot, modelLabel, roleLabel } from './format';
 
 /**
  * Selected agent: task, what actually ran, and its live output (read-only).
@@ -31,6 +31,7 @@ export function AgentOutput({ agent }: { agent: AgentView }) {
         <span className="ml-auto text-xs text-muted">{roleLabel(agent)}</span>
       </div>
       <div className="text-muted">{agent.title}</div>
+      {ROLE_HINT[agent.role] ? <div className="text-xs text-muted">{ROLE_HINT[agent.role]}</div> : null}
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
         <span>{LANE_LABEL[agent.status]}</span>
         <span className="text-muted">·</span>

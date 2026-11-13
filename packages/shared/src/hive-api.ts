@@ -188,6 +188,8 @@ export const CardViewSchema = z.object({
   undone: z.boolean(),
   /** Library skills switched on for the card's latest attempt (Capabilities 03-D8; Phase 2 C1), at most 5. */
   skills: z.array(z.string()).default([]),
+  /** Set while the Watchdog holds the card (breaker step "pause the card") until the Foreman decides (C2). */
+  heldReason: z.string().nullable().default(null),
   updatedAt: z.number(),
 });
 export type CardView = z.infer<typeof CardViewSchema>;
@@ -218,7 +220,8 @@ export const AgentViewSchema = z.object({
   runId: Id,
   agentId: z.string(),
   /** 'librarian': the Librarian's LLM review of the Brain (B3); it belongs to no goal or card. */
-  role: z.enum(['queen', 'insect', 'inspector', 'librarian']),
+  /** C2: 'scout' surveys the code before the Queen plans; 'foreman' decides on stuck cards and runs periodic reviews. */
+  role: z.enum(['queen', 'insect', 'inspector', 'librarian', 'scout', 'foreman']),
   caste: CasteSchema.nullable(),
   goalId: z.string().nullable(),
   cardId: z.string().nullable(),
@@ -380,6 +383,50 @@ export const CodeLookupResultSchema = z.object({
 });
 export type CodeLookupResult = z.infer<typeof CodeLookupResultSchema>;
 
+// ---- Managers' brain side (Phase 2 C2; Hive 02-D8, D9 P3, D12) ---------------------------------
+
+/**
+ * Watchdog breaker ladder (02-D9 P3), plain code:
+ * warn = recorded and told to the Queen, the agent keeps going;
+ * pause-card = the agent is stopped and the card is held until the Foreman decides;
+ * stop-agent = a hard limit: the agent is stopped at once and its card goes back with an incident note;
+ * pause-hive = a hive-wide trip (several agents at once, or the Queen herself): the hive pauses until the user resumes it.
+ */
+export const BreakerStepSchema = z.enum(['warn', 'pause-card', 'stop-agent', 'pause-hive']);
+export const SensorSchema = z.enum(['loop', 'error-repeat', 'stall', 'overspend', 'crash', 'hive']);
+export const IncidentViewSchema = z.object({
+  id: z.string(),
+  at: z.number(),
+  sensor: SensorSchema,
+  step: BreakerStepSchema,
+  /** e.g. "Ant-03", "Queen". */
+  agentId: z.string(),
+  runId: z.string().nullable(),
+  goalId: z.string().nullable(),
+  cardId: z.string().nullable(),
+  /** Plain words with counts, e.g. "Ran the same command 5 times: npm test". */
+  evidence: z.string(),
+  /** How many times this signature (sensor + caste + error text) has tripped before. */
+  recurrence: z.number().int(),
+});
+export type IncidentView = z.infer<typeof IncidentViewSchema>;
+
+export const ForemanActionSchema = z.enum(['retry-with-note', 'stronger-model', 'to-queen']);
+export const ManagersViewSchema = z.object({
+  /** The Scout surveys the code (with the code map) before the Queen plans a goal. */
+  scoutBeforePlanning: z.boolean(),
+  /** A periodic review after every N finished cards; 0 = off. */
+  reviewEveryCards: z.number().int().min(0).max(500),
+  /** Finished cards until the next review (null when off). */
+  cardsUntilReview: z.number().int().nullable(),
+  lastReview: z.object({ at: z.number(), summary: z.string(), recordId: z.string().nullable() }).nullable(),
+  /** The Foreman's latest decisions on stuck cards, newest first (max 20). */
+  foremanDecisions: z.array(
+    z.object({ at: z.number(), goalId: z.string(), cardId: z.string(), cardTitle: z.string(), action: ForemanActionSchema, reason: z.string() }),
+  ),
+});
+export type ManagersView = z.infer<typeof ManagersViewSchema>;
+
 export const HiveSnapshotSchema = z.object({
   /** null until the user picks a project folder. */
   project: ProjectViewSchema.nullable(),
@@ -393,6 +440,16 @@ export const HiveSnapshotSchema = z.object({
   /** Current lessons for this project and global, newest first (max 50). */
   lessons: z.array(LessonViewSchema),
   codeMap: CodeMapViewSchema,
+  /** Watchdog incidents (C2), newest first, last 50. */
+  incidents: z.array(IncidentViewSchema).default([]),
+  /** The managers' brain side (C2): Scout, Foreman decisions, periodic reviews. */
+  managers: ManagersViewSchema.default({
+    scoutBeforePlanning: true,
+    reviewEveryCards: 20,
+    cardsUntilReview: 20,
+    lastReview: null,
+    foremanDecisions: [],
+  }),
   hive: z.object({
     paused: z.boolean(),
     pausedReason: z.string().nullable(),
@@ -436,6 +493,14 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('restoreRecord'), id: Id }),
   /** The user archives a record (Phase 2 B5): it leaves search, stays readable, and can be brought back. */
   z.object({ type: z.literal('archiveRecord'), id: Id }),
+  /** Managers' settings (C2). */
+  z.object({
+    type: z.literal('setManagers'),
+    scoutBeforePlanning: z.boolean().optional(),
+    reviewEveryCards: z.number().int().min(0).max(500).optional(),
+  }),
+  /** Run the periodic review now (C2; uses a little of the AI subscription). */
+  z.object({ type: z.literal('runReview') }),
   /** Run the Librarian now: its free audit always; its LLM review only when an engine is ready (spends tokens). */
   z.object({ type: z.literal('runLibrarian'), review: z.boolean() }),
   /** Rebuild the code map now (otherwise it refreshes changed files by itself). */

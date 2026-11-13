@@ -15,7 +15,20 @@ export type NewCard = Omit<TaskCard, 'status' | 'attempts' | 'claimedBy' | 'leas
 };
 
 /** A card on the board. */
-export type BoardCard = TaskCard & { maxAttempts: number; escalated: boolean; createdAt: number; updatedAt: number };
+export type BoardCard = TaskCard & {
+  maxAttempts: number;
+  escalated: boolean;
+  createdAt: number;
+  updatedAt: number;
+  /** Set while the Watchdog holds the card (C2): not claimable until the Foreman decides. */
+  heldReason: string | null;
+  /** The Foreman gave this card one more try (C2); it never does so twice. */
+  foremanRetries: number;
+  /** The Foreman's note for the next attempt's brief. */
+  foremanNote: string | null;
+  /** The model tier the Foreman asked for (e.g. 'strongest'), or null. */
+  foremanTier: string | null;
+};
 
 export interface ClaimRequest {
   agentId: string;
@@ -41,7 +54,7 @@ const PRIORITY_RANK: Record<Priority, number> = { critical: 0, high: 1, normal: 
  */
 export const CLAIM_SQL = `
 UPDATE tasks SET status = 'claimed', claimed_by = ?, lease_expires_at = ?, updated_at = ?
-WHERE id = ? AND caste = ? AND status = 'open'
+WHERE id = ? AND caste = ? AND status = 'open' AND held_reason IS NULL
   AND NOT EXISTS (
     SELECT 1 FROM json_each(tasks.depends_on) AS d
     LEFT JOIN tasks AS dep ON dep.id = d.value
@@ -65,6 +78,10 @@ interface TaskRow {
   max_attempts: number;
   escalated: number;
   result: string | null;
+  held_reason: string | null;
+  foreman_retries: number;
+  foreman_note: string | null;
+  foreman_tier: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -89,6 +106,10 @@ function toCard(r: TaskRow): BoardCard {
     }),
     maxAttempts: r.max_attempts,
     escalated: r.escalated === 1,
+    heldReason: r.held_reason ?? null,
+    foremanRetries: r.foreman_retries ?? 0,
+    foremanNote: r.foreman_note ?? null,
+    foremanTier: r.foreman_tier ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -237,6 +258,79 @@ export class Taskboard {
       for (const { id } of rows) this.#retryOrEscalate(this.#must(id), 'foreman', 'lease expired');
       return rows.map((r) => r.id);
     });
+  }
+
+  // ---- the managers' brain side (C2) -----------------------------------------------------------
+
+  /**
+   * The Watchdog holds an open card (breaker step "pause the card"): no insect can claim it until the
+   * Foreman decides. The card keeps its status and attempts.
+   */
+  hold(id: string, by: string, reason: string): BoardCard {
+    return transaction(this.db, () => {
+      const cur = this.#must(id);
+      if (cur.status !== 'open') throw new Error(`Only an open card can be held; ${id} is ${cur.status}.`);
+      const at = this.now();
+      this.db.prepare('UPDATE tasks SET held_reason = ?, updated_at = ? WHERE id = ?').run(reason, at, id);
+      this.#event(id, cur.status, cur.status, by, `held: ${reason}`, at);
+      return this.#must(id);
+    });
+  }
+
+  /** The hold ends (the Foreman decided, or the card failed for good anyway). */
+  unhold(id: string, by: string, note: string | null = null): BoardCard {
+    return transaction(this.db, () => {
+      const cur = this.#must(id);
+      if (cur.heldReason === null) return cur;
+      const at = this.now();
+      this.db.prepare('UPDATE tasks SET held_reason = NULL, updated_at = ? WHERE id = ?').run(at, id);
+      this.#event(id, cur.status, cur.status, by, note ?? 'hold released', at);
+      return this.#must(id);
+    });
+  }
+
+  /**
+   * The Foreman gives a card one more try, once (Hive 02-D8; C2): a failed card goes back to open with one
+   * extra attempt, a held card is released. The note goes into the next brief; `tier` asks the router for a
+   * stronger model. A second Foreman retry on the same card is refused: it goes to the Queen instead.
+   */
+  foremanRetry(id: string, by: string, o: { note: string | null; tier: string | null }): BoardCard {
+    return transaction(this.db, () => {
+      const cur = this.#must(id);
+      if (cur.foremanRetries >= 1) throw new Error(`The Foreman already gave ${id} one more try.`);
+      if (cur.status !== 'failed' && cur.status !== 'open') throw new Error(`Only a failed or held card can be retried; ${id} is ${cur.status}.`);
+      const at = this.now();
+      const reopen = cur.status === 'failed';
+      this.db
+        .prepare(
+          `UPDATE tasks SET status = 'open', escalated = 0, held_reason = NULL, claimed_by = NULL, lease_expires_at = NULL,
+             max_attempts = ?, foreman_retries = foreman_retries + 1, foreman_note = ?, foreman_tier = ?, updated_at = ? WHERE id = ?`,
+        )
+        .run(reopen ? cur.attempts + 1 : cur.maxAttempts, o.note, o.tier, at, id);
+      this.#event(id, cur.status, 'open', by, `one more try${o.tier ? ` on the ${o.tier} model` : ''}${o.note ? `: ${o.note}` : ''}`, at);
+      return this.#must(id);
+    });
+  }
+
+  /** The Foreman sends a held card to the Queen: it fails for good (escalated), so the goal waits for a re-plan. */
+  escalate(id: string, by: string, note: string): BoardCard {
+    return transaction(this.db, () => {
+      const cur = this.#must(id);
+      if (cur.status === 'failed') return cur;
+      if (cur.status !== 'open') throw new Error(`Only an open card can be escalated; ${id} is ${cur.status}.`);
+      const at = this.now();
+      this.db
+        .prepare(`UPDATE tasks SET status = 'failed', escalated = 1, held_reason = NULL, claimed_by = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`)
+        .run(at, id);
+      this.#event(id, 'open', 'failed', by, note, at);
+      return this.#must(id);
+    });
+  }
+
+  /** How many times this card's lease ran out (the Foreman wakes on repeats). */
+  leaseExpiries(id: string): number {
+    const row = this.db.prepare(`SELECT COUNT(*) AS n FROM task_events WHERE task_id = ? AND note = 'lease expired'`).get(id) as { n: number };
+    return Number(row.n);
   }
 
   /** Cards that failed for good and need the Queen's attention. */

@@ -9,17 +9,27 @@ export interface ModelTiers {
   light: string;
 }
 
-/** Who runs: the Queen, the Inspector, the Librarian (a manager, B3), or an insect of a caste. */
-export type AgentRole = 'queen' | 'inspector' | 'librarian' | Caste;
+/**
+ * Who runs: the Queen, the Inspector, a manager's brain (the Librarian, B3; the Scout and the Foreman, C2),
+ * or an insect of a caste.
+ */
+export type AgentRole = 'queen' | 'inspector' | 'librarian' | 'scout' | 'foreman' | Caste;
 
-/** Insects work on cards; the Queen, the Inspector and the Librarian don't. */
-export const isInsectRole = (role: AgentRole): boolean => role !== 'queen' && role !== 'inspector' && role !== 'librarian';
+const NOT_INSECTS: ReadonlySet<string> = new Set(['queen', 'inspector', 'librarian', 'scout', 'foreman']);
+
+/** Insects work on cards; the Queen, the Inspector and the managers don't. */
+export const isInsectRole = (role: AgentRole): boolean => !NOT_INSECTS.has(role);
+
+/** The managers' brains (B3, C2): short read-only runs that never touch a card's work. */
+export const isManagerRole = (role: AgentRole): boolean => role === 'librarian' || role === 'scout' || role === 'foreman';
 
 export interface RouteInput {
   role: AgentRole;
   priority: Priority;
   /** Failed attempts so far on this card. */
   attempts: number;
+  /** At least this model tier (the Foreman asked for a stronger model, C2). */
+  minTier?: Tier;
 }
 
 export type Tier = 'light' | 'standard' | 'strongest';
@@ -49,6 +59,9 @@ function ruleReason(input: RouteInput): string {
   if (input.role === 'queen') return 'rule: the Queen plans on the strongest model';
   if (input.role === 'inspector') return `rule: inspecting a ${input.priority} priority card`;
   if (input.role === 'librarian') return 'rule: the Librarian reviews the Brain on the standard model, low effort';
+  if (input.role === 'scout') return 'rule: the Scout surveys the code on the light model';
+  if (input.role === 'foreman') return 'rule: the Foreman decides on the standard model, low effort';
+  if (input.minTier) return `rule: the Foreman asked for the ${input.minTier} model`;
   if (input.attempts > 0) return `rule: retry ${input.attempts}, so more effort or a stronger model`;
   return `rule: ${input.priority} priority card`;
 }
@@ -68,6 +81,15 @@ export function routeCard(input: RouteInput, models: ModelTiers, engine: EngineI
     return { engine, tier: 'standard', model: models.standard, effort: 'low', reason: ruleReason(input), maxTurns: 12, maxBudgetUsd: 1, timeoutMs: 10 * MIN };
   }
 
+  if (input.role === 'scout') {
+    // A read-only survey from a code-map outline: the light tier is enough (scout AGENT.md: min_tier light).
+    return { engine, tier: 'light', model: models.light, effort: 'medium', reason: ruleReason(input), maxTurns: 15, maxBudgetUsd: 0.5, timeoutMs: 10 * MIN };
+  }
+  if (input.role === 'foreman') {
+    // One short decision or review over a compact summary.
+    return { engine, tier: 'standard', model: models.standard, effort: 'low', reason: ruleReason(input), maxTurns: 6, maxBudgetUsd: 1, timeoutMs: 10 * MIN };
+  }
+
   let tier: number;
   let effort: number;
   if (input.role === 'inspector') {
@@ -81,6 +103,7 @@ export function routeCard(input: RouteInput, models: ModelTiers, engine: EngineI
     else if (tier < 2) tier++;
     else if (effort < 3) effort++;
   }
+  if (input.minTier) tier = Math.max(tier, TIERS.indexOf(input.minTier));
   const tierName = TIERS[tier]!;
   return {
     engine,
@@ -126,7 +149,7 @@ export interface EngineCandidate {
 }
 
 /** Roles that never change files or run side-effecting commands: an engine limited to read-only work may take them. */
-const READ_ONLY_ROLES: ReadonlySet<RouteInput['role']> = new Set(['queen', 'librarian', 'reviewer', 'researcher', 'analyst']);
+const READ_ONLY_ROLES: ReadonlySet<RouteInput['role']> = new Set(['queen', 'librarian', 'scout', 'foreman', 'reviewer', 'researcher', 'analyst']);
 
 export const isReadOnlyRole = (role: RouteInput['role']): boolean => READ_ONLY_ROLES.has(role);
 

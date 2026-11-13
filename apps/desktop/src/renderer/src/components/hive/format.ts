@@ -16,16 +16,21 @@ export const LANE_LABEL: Record<LaneStatus, string> = {
 const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 export const casteLabel = cap;
 
-export const roleLabel = (a: Pick<AgentView, 'role' | 'caste'>): string =>
-  a.role === 'queen'
-    ? 'Queen'
-    : a.role === 'inspector'
-      ? 'Inspector'
-      : a.role === 'librarian'
-        ? 'Librarian'
-        : a.caste
-          ? cap(a.caste)
-          : 'Insect';
+const MANAGER_LABEL: Partial<Record<AgentView['role'], string>> = {
+  queen: 'Queen',
+  inspector: 'Inspector',
+  librarian: 'Librarian',
+  scout: 'Scout',
+  foreman: 'Foreman',
+};
+
+export const roleLabel = (a: Pick<AgentView, 'role' | 'caste'>): string => MANAGER_LABEL[a.role] ?? (a.caste ? cap(a.caste) : 'Insect');
+
+/** One line on what a manager lane is doing (C2), shown under its name. Insects have their card title instead. */
+export const ROLE_HINT: Partial<Record<AgentView['role'], string>> = {
+  scout: 'Surveys the code before the Queen plans',
+  foreman: 'Decides on stuck cards and runs reviews',
+};
 
 /** "Coder · Ant-07", "Queen", "Inspector · Ant-03". */
 export function agentName(a: Pick<AgentView, 'role' | 'caste' | 'agentId'>): string {

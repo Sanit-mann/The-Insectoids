@@ -514,3 +514,42 @@ Three milestones, each ending in something the user can try.
   - **Flakes seen:**
     - **Engines tab:** `connections.spec` "the Engines tab lists every engine…" failed once in 5 full runs, with no trace kept. It then passed 30 single runs and 2 more full runs. Watch it.
     - **Unit-test crash:** one unit run crashed a Vitest worker natively (exit 0xC0000409) in `llm-providers.test.ts`, which C1 didn't touch. It didn't happen in the next two runs. Watch it.
+- **C2 Managers' brain side: done (2026-11-14).** Built by two parallel workers (backend; Hive screen panels and e2e) on the contract additions (`snapshot.incidents`, `snapshot.managers`, `CardView.heldReason`, the lane roles `scout` and `foreman`, the commands `setManagers` and `runReview`). Unit tests: 818 pass, 49 of them new, with no unhandled errors. e2e: 119 passed, 3 skipped, in three full runs in a row; the copy-command test skipped because Windows refused clipboard writes again. Lint and typecheck are clean. No real engine runs.
+  - **Watchdog** (plain code, no AI in the fast path):
+    - **Who it watches:** the Queen and the insects.
+    - **Sensors and limits:**
+      - repeating itself: the same tool call 5 times warns, 10 pauses the card;
+      - the same error: 4 times warns, 8 pauses the card;
+      - no progress: 5 minutes warns, another 5 pauses the card;
+      - over budget: above 3× the card's share of the budget warns, and over 1.5 million tokens in one run is a hard stop;
+      - crashes: the first crash warns and a fresh insect retries; a second crash on the same card stops it and holds the card;
+      - hive-wide: 3 serious trips in 10 minutes pause the hive.
+    - **The Queen herself (02-D12):** a second trip pauses the hive with a "Watchdog:" reason.
+    - **Ladder:**
+      - **warn:** an incident plus one Queen line, at most once per 10 minutes per agent and reason;
+      - **pause the card:** the run stops and the card is held (`held_reason`; the claim SQL skips it) until the Foreman decides;
+      - **stop the agent:** hard limits;
+      - **pause the hive.**
+    - **No steering mid-run:** the engines take no input during a run, and the Watchdog `AGENT.md` says so.
+    - **Incident log:** migration v10, with signatures and recurrence counts.
+  - **Foreman brain:**
+    - **When it wakes:** attempts exhausted, a held card, or a repeated lease expiry. One short run: standard model, low effort, no tools.
+    - **Choices:** retry with a note, retry on a stronger model, or send it to the Queen.
+    - **Limits:** at most one extra try per card, ever; a malformed reply means "to the Queen". Its decisions are listed on the Hive screen.
+  - **Scout:** before the Queen plans a goal of 6+ words, when the code map is ready and the setting is on.
+    - **The run:** one light read-only run over a code-map outline that the host builds.
+    - **The output:** the survey goes into the Queen's planner prompt and into the Brain as an unconfirmed update. A Scout failure never blocks planning.
+    - **Brain rule change:** an agent may now write at a *lower* trust than the default, never higher.
+  - **Periodic review:**
+    - **When:** every N finished cards (Off / 10 / 20 / 50; default 20), only while the hive is idle, or with "Run a review now".
+    - **What the Foreman does:** reads a summary of board metrics and incidents and writes a "Hive review" record plus a Queen line. It reports only; it tunes nothing.
+  - **UI (Hive screen):**
+    - a Watchdog panel: each incident's step and sensor as icon plus words, the agent, a card link, the evidence and "seen N times before";
+    - a Managers panel: the Scout switch, review frequency, "Run a review now", the last review and the Foreman's decisions;
+    - lane hints for the Scout and Foreman, and a "Paused by the Watchdog" badge on held cards;
+    - pieces: Kokonut UI `empty-state` and `inline-alert`, shadcn `button`; the rest is custom.
+  - **Scripted scenarios** (fake engine): "Loop on purpose", "Fail on purpose", "Survey the code first, then say hello".
+  - **Not built yet:**
+    - lease-loop detection only wakes the Foreman after a second expiry;
+    - managers' reports go to the activity feed, not the Queen's own chat;
+    - Watchdog thresholds aren't adjustable in the UI.

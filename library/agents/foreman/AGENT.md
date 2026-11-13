@@ -63,15 +63,23 @@ These run in the harness and the Brain service. The Foreman relies on them and r
 
 ## Judgment (when its brain wakes)
 
-The LLM wakes only on these events:
+Its brain is one short, read-only LLM run (standard model, low effort, no workspace, no network) over a summary the code builds: the card, its brief and "done means", what happened on each attempt, and the Watchdog's incidents for it. Built today (Phase 2 C2):
 
-1. **Attempts exhausted.** Read the card, its failure notes and outcomes. Choose one: retry with added context from the Brain; ask the Treasurer for a stronger model or higher effort; or send it to the Queen for re-scoping. Never retry the same way a fourth time.
-2. **Repeated lease expiry** on one card from different insects. The card itself is probably the problem (too big, unclear, broken environment). Mark it `blocked` with a diagnosis and send it to the Queen.
-3. **`too big` reports.** Draft a suggested split (smaller cards, each with acceptance and file paths) and pass it to the Queen. Only the Queen posts or changes cards.
-4. **Dependency deadlock.** A cycle in `depends_on`, or a card waiting on a `failed` card. Report the chain to the Queen with a suggested fix.
-5. **No caste fits.** A card's `skill` matches no caste. Tell the Queen; she may re-label it or propose a new caste.
-6. **Merge or file conflicts** between finished cards blocking the queue. Pause the conflicting cards and send the Queen a single note naming the files.
-7. **Periodic review** (every N finished cards, set by the user). Look at the board metrics: long queue waits for one caste, cards that often fail at the same stage, wasted insect starts. Tune the scaling and aging values within the bounds the user set, and log each change with its reason.
+1. **Attempts exhausted.** The card failed on every attempt it had.
+2. **Held by the Watchdog.** The Watchdog stopped its insect (a loop, repeated errors, a stall, a second crash) and holds the card.
+3. **Repeated lease expiry.** Its insects went silent until the lease ran out, twice: the card is held and the brain wakes.
+
+For each, it answers with exactly one of:
+
+- **retry-with-note:** one more attempt, with its note added to the card's brief;
+- **stronger-model:** one more attempt routed to the strongest model;
+- **to-queen:** the card goes to the Queen; the goal stops as stuck, with the Foreman's reason, until she re-plans with the user.
+
+A card gets **at most one** extra try from the Foreman, ever. If it is stuck again afterwards, it goes to the Queen without another LLM run ("never retry the same way a fourth time"). A reply that can't be read sends the card to the Queen. Every decision is kept (the Hive monitor shows them) and reported as one line in the Queen's feed.
+
+4. **Periodic review.** Every N finished cards (default 20, set by the user in Settings; 0 = off), and whenever the user asks, it reads code-built board metrics (cards finished and retried, by caste; cards failed for good; Watchdog incidents and repeats; its own decisions) and writes a short report. The report is saved in the Brain and shown through the Queen. **It tunes nothing itself:** no settings, limits, scaling or aging values change. Suggestions are words for the user.
+
+Not built yet, still the plan: drafting a split for "too big" cards, dependency deadlocks, "no caste fits", and merge-conflict queues. Today those reach the user through the Queen as a stuck goal.
 
 ## Never
 

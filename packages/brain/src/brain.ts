@@ -4,6 +4,7 @@ import type { RecordKind, Trust } from '@insectoids/shared';
 import { ApprovalStore } from './approvals';
 import { CodeMapStore } from './codemap';
 import { LibraryStore } from './library';
+import { ForemanLog, IncidentStore } from './managers';
 import { transaction } from './db';
 import { GoalStore } from './goals';
 import { ConflictError, SecretError, TrustError } from './errors';
@@ -411,6 +412,21 @@ export class Brain {
   get library(): LibraryStore {
     this.#library ??= new LibraryStore(this.#db, this.#now);
     return this.#library;
+  }
+
+  #incidents: IncidentStore | undefined;
+  #foreman: ForemanLog | undefined;
+
+  /** The Watchdog's incidents (Hive 02-D9 P3; Phase 2 C2). */
+  get incidents(): IncidentStore {
+    this.#incidents ??= new IncidentStore(this.#db, this.#now);
+    return this.#incidents;
+  }
+
+  /** The Foreman's decisions on stuck cards (Hive 02-D8; Phase 2 C2). */
+  get foreman(): ForemanLog {
+    this.#foreman ??= new ForemanLog(this.#db, this.#now);
+    return this.#foreman;
   }
 
   #outcomes: OutcomeStore | undefined;
@@ -1102,7 +1118,8 @@ export class Brain {
 
   #initialTrust(input: WriteInput, actor: Actor): Trust {
     if (actor.type === 'user') return input.trust ?? 'confirmed';
-    if (!NEEDS_CONFIRMATION.has(input.kind)) return 'confirmed';
+    // An agent may always write at a lower trust than the default (e.g. the Scout's survey, C2).
+    if (!NEEDS_CONFIRMATION.has(input.kind)) return input.trust && input.trust !== 'confirmed' ? input.trust : 'confirmed';
     if (input.trust === 'confirmed') throw new TrustError(`Only the user can confirm a ${input.kind}.`);
     return input.trust ?? (input.kind === 'decision' ? 'proposed' : 'unconfirmed');
   }

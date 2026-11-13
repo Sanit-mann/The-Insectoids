@@ -3,7 +3,7 @@ import type { KeyboardEvent } from 'react';
 import { StatusDot } from '@/components/StatusDot';
 import { engineName } from '@/components/connections/engine-names';
 import { cn } from '@/lib/utils';
-import { LANE_LABEL, agentName, formatDuration, formatTokens, formatUsd, laneDot, modelLabel, roleLabel } from './format';
+import { LANE_LABEL, ROLE_HINT, agentName, formatDuration, formatTokens, formatUsd, laneDot, modelLabel, roleLabel } from './format';
 
 interface LanesTableProps {
   agents: AgentView[];
@@ -69,6 +69,11 @@ export function LanesTable({ agents, selectedId, onSelect, now }: LanesTableProp
                 </th>
                 <td className="max-w-[280px] truncate px-3 py-2.5 text-muted" title={a.title}>
                   {a.title}
+                  {ROLE_HINT[a.role] ? (
+                    <span className="block truncate text-[11px]" data-testid="lane-role-hint">
+                      {ROLE_HINT[a.role]}
+                    </span>
+                  ) : null}
                 </td>
                 <td className="px-3 py-2.5 text-xs text-muted" title={a.routeReason ? `Why this model: ${a.routeReason}` : undefined}>
                   {engineName(a.engine) ? <span className="mr-1.5 rounded border border-line px-1.5 py-0.5 font-sans text-[11px]">{engineName(a.engine)}</span> : null}

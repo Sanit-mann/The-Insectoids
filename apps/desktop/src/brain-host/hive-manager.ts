@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
-import { type Brain, type BoardCard, type Goal, ConflictError, SecretError, brainHealth } from '@insectoids/brain';
+import { type Brain, type BoardCard, type Goal, ConflictError, STOP_WORDS, SecretError, brainHealth } from '@insectoids/brain';
 import {
   approvalFor,
   auditSummary,
@@ -53,6 +53,7 @@ import {
   firstSentence,
   frontmatterDescription,
   loadCatalog,
+  type WatchdogThresholds,
 } from '@insectoids/harness';
 import {
   type ActivityView,
@@ -88,6 +89,8 @@ import {
   EngineIdSchema,
   type EngineCard,
   type EngineUsage,
+  type IncidentView,
+  type ManagersView,
 } from '@insectoids/shared';
 import { Workspace } from '@insectoids/workspace';
 import { meaningSearchOffView } from './meaning-search';
@@ -168,6 +171,10 @@ export interface HiveManagerOptions {
    * `wasmDir`: tree-sitter's WASM folder (the host bundle can't resolve the package). Absent: off.
    */
   codeMap?: { wasmDir?: string; refreshEveryMs?: number };
+  /** The Watchdog's thresholds (Phase 2 C2), for tests; false switches it off. Default: WATCHDOG_DEFAULTS. */
+  watchdog?: Partial<WatchdogThresholds> | false;
+  /** The Foreman's brain on stuck cards (C2). Default on. */
+  foremanBrain?: boolean;
   /** e2e only: seed agent records (near-duplicates, a superseded fact, an old note, two lessons) on the project shelf. */
   seedBrainForE2E?: boolean;
   /** e2e only: the demo Inspector fails C-01's first attempt once (a lesson is learned). */
@@ -210,7 +217,19 @@ interface HostSettings {
   limitHits?: Partial<Record<EngineId, number>>;
   /** The Librarian's review clock (B3): last review, the start of the weekly wait, cards finished since. */
   librarian?: { lastReviewAt: number | null; since: number; cardsSince: number };
+  /** The managers' brain side (C2): the user's settings, the review clock and the last review. */
+  managers?: ManagerSettings;
 }
+
+interface ManagerSettings {
+  scoutBeforePlanning: boolean;
+  /** A periodic review after every N finished cards; 0 = off. */
+  reviewEveryCards: number;
+  cardsSince: number;
+  lastReview: { at: number; summary: string; recordId: string | null } | null;
+}
+
+const DEFAULT_MANAGERS: ManagerSettings = { scoutBeforePlanning: true, reviewEveryCards: 20, cardsSince: 0, lastReview: null };
 
 const DAY = 86_400_000;
 const LIBRARIAN = 'Librarian';
@@ -299,6 +318,9 @@ export class HiveManager {
   #review: { lastReviewAt: number | null; since: number; cardsSince: number };
   #codeMap: CodeMapBuilder | null = null;
   #codeMapTimer: NodeJS.Timeout | null = null;
+  /** The managers' brain side (C2): settings, the review clock, and whether a review runs now. */
+  #managers: ManagerSettings;
+  #hiveReviewing = false;
 
   constructor(o: HiveManagerOptions) {
     this.#o = o;
@@ -309,6 +331,7 @@ export class HiveManager {
     this.#engineLimits = settings.limits ?? {};
     this.#limitHits = settings.limitHits ?? {};
     this.#review = settings.librarian ?? { lastReviewAt: null, since: this.#now(), cardsSince: 0 };
+    this.#managers = settings.managers ?? { ...DEFAULT_MANAGERS };
     // The Treasurer (Phase 2 A5): limits steer the router, outcomes teach it.
     this.#engines.setLimitState((id) => this.#limitState(id));
     this.#engines.setLearning({ stats: (role) => o.brain.outcomes.stats(role), rng: seededRng(o.seed ?? this.#now()) });
@@ -530,6 +553,122 @@ export class HiveManager {
     }
   }
 
+  // ---- the managers' brain side (Phase 2 C2) -------------------------------------------------------
+
+  #incidentViews(goalIds: ReadonlySet<string>): IncidentView[] {
+    try {
+      return this.#o.brain.incidents
+        .list({ limit: 200 })
+        .filter((i) => i.goalId === null || goalIds.has(i.goalId))
+        .slice(0, 50)
+        .map((i) => ({ id: i.id, at: i.at, sensor: i.sensor, step: i.step, agentId: i.agentId, runId: i.runId, goalId: i.goalId, cardId: i.cardId, evidence: i.evidence, recurrence: i.recurrence }));
+    } catch {
+      return [];
+    }
+  }
+
+  #managersView(goalIds: ReadonlySet<string>): ManagersView {
+    const m = this.#managers;
+    let decisions: ManagersView['foremanDecisions'];
+    try {
+      decisions = this.#o.brain.foreman
+        .list(100)
+        .filter((d) => goalIds.has(d.goalId))
+        .slice(0, 20)
+        .map((d) => ({ at: d.at, goalId: d.goalId, cardId: d.cardId, cardTitle: d.cardTitle, action: d.action, reason: d.reason }));
+    } catch {
+      decisions = [];
+    }
+    return {
+      scoutBeforePlanning: m.scoutBeforePlanning,
+      reviewEveryCards: m.reviewEveryCards,
+      cardsUntilReview: m.reviewEveryCards > 0 ? Math.max(0, m.reviewEveryCards - m.cardsSince) : null,
+      lastReview: m.lastReview,
+      foremanDecisions: decisions,
+    };
+  }
+
+  /**
+   * What the Scout reads instead of the whole project (C2): symbols that match the goal's words, by file, then
+   * the other mapped files. Null when no project is open or its code map isn't ready (the Scout then stays out).
+   */
+  #scoutOutline(goal: string): string | null {
+    const p = this.#project;
+    if (!p || !this.#codeMap || this.#codeMap.view().state !== 'ready') return null;
+    const code = this.#o.brain.code;
+    const shelf = p.view.shelf;
+    const files = [...code.hashes(shelf).keys()].sort();
+    if (!files.length) return null;
+    const words = [...new Set(goal.toLowerCase().match(/[a-z][a-z0-9_]{3,}/g) ?? [])].filter((w) => !STOP_WORDS.has(w)).slice(0, 8);
+    const byFile = new Map<string, string[]>();
+    for (const w of words) {
+      for (const h of code.findSymbols(shelf, w, 8).hits) {
+        const list = byFile.get(h.path) ?? [];
+        const entry = `${h.name} (${h.kind}, line ${h.line})`;
+        if (list.length < 6 && !list.includes(entry)) list.push(entry);
+        byFile.set(h.path, list);
+      }
+    }
+    const lines = [...byFile].slice(0, 25).map(([path, syms]) => `${path}: ${syms.join(', ')}`);
+    const rest = files.filter((f) => !byFile.has(f));
+    if (rest.length) lines.push(`Other mapped files (${rest.length}):`, ...rest.slice(0, Math.max(10, 40 - lines.length)).map((f) => `- ${f}`));
+    return lines.join('\n');
+  }
+
+  /** Why the Foreman's periodic review can't run now, or null. `dueOnly`: the automatic one also waits for an idle hive. */
+  #hiveReviewBlocked(dueOnly: boolean): string | null {
+    if (!this.#project) return 'Open a project first.';
+    if (this.#hiveReviewing) return 'A review is already running.';
+    if (!this.#engines.defaultEngine()) return 'No AI engine is ready.';
+    if (this.#paused) return 'The hive is paused.';
+    if (dueOnly && this.#working() > 0) return 'Agents are working.';
+    return null;
+  }
+
+  /** The periodic review after every N finished cards (0 = off), when the hive is idle. */
+  #maybeHiveReview(): void {
+    const m = this.#managers;
+    if (this.#disposed || m.reviewEveryCards <= 0 || m.cardsSince < m.reviewEveryCards || this.#hiveReviewBlocked(true)) return;
+    this.#track(this.#runHiveReview());
+  }
+
+  /** The Foreman reviews the board; its report is saved in the Brain and told to the user through the Queen. */
+  async #runHiveReview(): Promise<void> {
+    const p = this.#project;
+    if (!p || this.#hiveReviewing) return;
+    this.#hiveReviewing = true;
+    const since = this.#managers.lastReview?.at ?? null;
+    this.#managers = { ...this.#managers, cardsSince: 0 };
+    this.#writeSettings({ managers: this.#managers });
+    this.#changed('managers');
+    try {
+      const r = await p.hive.review(since);
+      if (this.#disposed) return;
+      if (!r.ok || !r.summary) {
+        this.#note('foreman', `The Foreman's review gave nothing usable (${r.error ?? 'no report'}).`);
+        return;
+      }
+      const at = this.#now();
+      let recordId: string | null = null;
+      try {
+        recordId = this.#o.brain.write(
+          { kind: 'update', shelf: p.view.shelf, title: `Hive review, ${new Date(at).toISOString().slice(0, 10)}`, body: r.summary, source: 'foreman-review' },
+          { type: 'agent', id: 'Foreman' },
+        ).id;
+      } catch {
+        recordId = null;
+      }
+      this.#managers = { ...this.#managers, lastReview: { at, summary: r.summary, recordId } };
+      this.#writeSettings({ managers: this.#managers });
+      this.#note('foreman', r.summary);
+    } catch (err) {
+      this.#note('error', `The Foreman's review failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      this.#hiveReviewing = false;
+      this.#changed('managers');
+    }
+  }
+
   /** A card finished (verified, or failed for good): counts toward the next review. */
   #cardFinished(): void {
     this.#review = { ...this.#review, cardsSince: this.#review.cardsSince + 1 };
@@ -650,6 +789,24 @@ export class HiveManager {
     }
     if (cmd.type === 'tidyBrain') {
       if (!this.#audit(true)) this.#note('brain-tidy', 'The Brain is tidy: nothing to fade.');
+      return;
+    }
+    if (cmd.type === 'setManagers') {
+      this.#managers = {
+        ...this.#managers,
+        ...(cmd.scoutBeforePlanning !== undefined ? { scoutBeforePlanning: cmd.scoutBeforePlanning } : {}),
+        ...(cmd.reviewEveryCards !== undefined ? { reviewEveryCards: cmd.reviewEveryCards } : {}),
+      };
+      this.#writeSettings({ managers: this.#managers });
+      this.#changed('managers');
+      queueMicrotask(() => this.#maybeHiveReview());
+      return;
+    }
+    if (cmd.type === 'runReview') {
+      const blocked = this.#hiveReviewBlocked(false);
+      if (blocked) throw new Error(`The Foreman can't review now: ${blocked}`);
+      this.#track(this.#runHiveReview());
+      await Promise.resolve();
       return;
     }
     if (cmd.type === 'runLibrarian') {
@@ -826,6 +983,10 @@ export class HiveManager {
       defaultBudgetTokens: this.#limits.goalBudgetTokens,
       approveEveryPlan: this.#limits.approveEveryPlan,
       castes: [...ALL_CASTES],
+      // The managers' brain side (C2).
+      ...(this.#o.watchdog !== undefined ? { watchdog: this.#o.watchdog } : {}),
+      ...(this.#o.foremanBrain !== undefined ? { foremanBrain: this.#o.foremanBrain } : {}),
+      scout: { enabled: () => this.#managers.scoutBeforePlanning, outline: (goal: string) => this.#scoutOutline(goal) },
       ...(this.#brainAccess() ? { brainAccess: this.#brainAccess()! } : {}),
       ...(this.#o.services ? { services: this.#o.services } : {}),
       limits: {
@@ -994,6 +1155,8 @@ export class HiveManager {
       librarian: this.#librarianView(),
       lessons: this.#lessonViews(),
       codeMap: this.#codeMap?.view() ?? codeMapOffView('The code map is off in this build.'),
+      incidents: this.#incidentViews(goalIds),
+      managers: this.#managersView(goalIds),
       hive: { paused: this.#paused, pausedReason: this.#pausedReason, insectCap: this.#limits.insectCap, working: this.#working() },
       goals: goals.map((g) => this.#goalView(g)),
       cards,
@@ -1048,6 +1211,7 @@ export class HiveManager {
       leaseExpiresAt: c.leaseExpiresAt ?? null, attempts: c.attempts, maxAttempts: c.maxAttempts, escalated: c.escalated,
       result: c.result ?? null,
       skills: (this.#cardSkills ?? this.#latestSkills([c.id])).get(c.id) ?? [],
+      heldReason: c.heldReason,
       undone: c.status === 'done' && Boolean(undo && (undo.goalReset || undo.cards.has(c.id))),
       updatedAt: c.updatedAt,
     };
@@ -1257,7 +1421,7 @@ export class HiveManager {
       const lane: AgentView = {
         runId: r.runId,
         agentId: e.agentId ?? r.runId,
-        role: r.role === 'queen' || r.role === 'inspector' || r.role === 'librarian' ? r.role : 'insect',
+        role: r.role === 'queen' || r.role === 'inspector' || r.role === 'librarian' || r.role === 'scout' || r.role === 'foreman' ? r.role : 'insect',
         caste: isInsectRole(r.role) ? (r.role as AgentView['caste']) : null,
         goalId: e.goalId ?? null,
         cardId: e.cardId ?? null,
@@ -1290,12 +1454,20 @@ export class HiveManager {
       }
       this.#changed('run-ended');
       // The hive may just have gone idle: a review that came due while it was busy can run now.
-      if (this.#working() === 0) queueMicrotask(() => this.#maybeReview());
+      if (this.#working() === 0) {
+        queueMicrotask(() => {
+          this.#maybeReview();
+          this.#maybeHiveReview();
+        });
+      }
       return;
     }
     if (e.type === 'card-verified' || (e.type === 'card-rejected' && e.cardId && this.#o.brain.taskboard.get(e.cardId)?.status === 'failed')) {
       this.#cardFinished();
       queueMicrotask(() => this.#maybeReview());
+      this.#managers = { ...this.#managers, cardsSince: this.#managers.cardsSince + 1 };
+      this.#writeSettings({ managers: this.#managers });
+      queueMicrotask(() => this.#maybeHiveReview());
     }
     if (e.type === 'card-blocked' && e.agentId && e.cardId) {
       const runId = this.#laneByAgentCard.get(`${e.agentId}|${e.cardId}`);
@@ -1449,6 +1621,7 @@ export class HiveManager {
         limits?: unknown;
         limitHits?: unknown;
         librarian?: unknown;
+        managers?: unknown;
       };
       const ids = (v: unknown): EngineId[] =>
         Array.isArray(v) ? v.flatMap((x) => (EngineIdSchema.safeParse(x).success ? [x as EngineId] : [])) : [];
@@ -1458,6 +1631,7 @@ export class HiveManager {
         limits: readLimits(raw.limits),
         limitHits: readHits(raw.limitHits),
         ...readReviewClock(raw.librarian),
+        ...readManagers(raw.managers),
       };
     } catch {
       return {};
@@ -1479,6 +1653,26 @@ function readReviewClock(v: unknown): Pick<HostSettings, 'librarian'> {
   const since = num(r['since']);
   if (since === null) return {};
   return { librarian: { lastReviewAt: num(r['lastReviewAt']), since, cardsSince: Math.floor(num(r['cardsSince']) ?? 0) } };
+}
+
+/** The managers' settings from the settings file; anything malformed falls back to the defaults. */
+function readManagers(v: unknown): Pick<HostSettings, 'managers'> {
+  if (!v || typeof v !== 'object') return {};
+  const r = v as Record<string, unknown>;
+  const int = (x: unknown, max: number): number | null => (typeof x === 'number' && Number.isInteger(x) && x >= 0 && x <= max ? x : null);
+  const lr = r['lastReview'] as Record<string, unknown> | null | undefined;
+  const lastReview =
+    lr && typeof lr === 'object' && typeof lr['at'] === 'number' && typeof lr['summary'] === 'string'
+      ? { at: lr['at'], summary: lr['summary'], recordId: typeof lr['recordId'] === 'string' ? lr['recordId'] : null }
+      : null;
+  return {
+    managers: {
+      scoutBeforePlanning: typeof r['scoutBeforePlanning'] === 'boolean' ? r['scoutBeforePlanning'] : DEFAULT_MANAGERS.scoutBeforePlanning,
+      reviewEveryCards: int(r['reviewEveryCards'], 500) ?? DEFAULT_MANAGERS.reviewEveryCards,
+      cardsSince: int(r['cardsSince'], 1_000_000) ?? 0,
+      lastReview,
+    },
+  };
 }
 
 function readLimits(v: unknown): Partial<Record<EngineId, EngineLimits>> {

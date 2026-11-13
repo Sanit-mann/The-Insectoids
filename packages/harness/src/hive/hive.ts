@@ -13,7 +13,20 @@ import { type Plan, parsePlan, parseStatus, parseVerdict } from './protocol';
 import type { EngineId } from '@insectoids/shared';
 import { detectUsageLimit } from '../engines/limits';
 import { type AuditSummary, type LibrarianProposal, LibrarianProposalSchema, applyLibrarianProposal, lessonFrom, librarianPrompt, parseLibrarianReply } from './librarian';
-import { type ModelTiers, type Route, type RouteInput, budgetState, isInsectRole, routeCard, runTokens } from './router';
+import { type ModelTiers, type Route, type RouteInput, type Tier, TIERS, budgetState, isInsectRole, routeCard, runTokens } from './router';
+import type { ForemanWake, Incident } from '@insectoids/brain';
+import { type RunWatch, type Trip, Watchdog, type WatchdogThresholds } from './watchdog';
+import {
+  type ForemanChoice,
+  foremanDecisionPrompt,
+  foremanReviewPrompt,
+  foremanSituation,
+  parseForemanReply,
+  parseReviewReply,
+  reviewSummary,
+  scoutPrompt,
+  surveyFrom,
+} from './managers';
 
 export interface HiveOptions {
   brain: Brain;
@@ -68,6 +81,21 @@ export interface HiveOptions {
    * The Queen's related-records lookup then finds notes by meaning, not just matching words.
    */
   embedQuery?: (text: string) => Promise<{ vector: Float32Array; model: string } | null>;
+  /**
+   * The Watchdog's reflexes (Phase 2 C2): thresholds to override (tests use short stall windows), or false
+   * to switch it off. Default on with WATCHDOG_DEFAULTS.
+   */
+  watchdog?: Partial<WatchdogThresholds> | false;
+  /**
+   * The Foreman's brain (C2): one short LLM decision when a card is stuck (out of attempts, held by the
+   * Watchdog, or its lease keeps running out). Default on. Off = Phase 1 behaviour: the goal is stuck at once.
+   */
+  foremanBrain?: boolean;
+  /**
+   * The Scout (C2): before the Queen plans a goal of at least 6 words, one read-only survey from a code-map
+   * outline. `enabled` is the user's setting; `outline` returns null when the code map isn't ready.
+   */
+  scout?: { enabled(): boolean; outline(goal: string): string | null };
 }
 
 export interface HiveLimits {
@@ -106,11 +134,18 @@ export interface HiveEvent {
     | 'card-undone'
     | 'goal-undone'
     | 'merge-undone'
-    | 'merge-redone';
+    | 'merge-redone'
+    // C2: the managers' brain side. Their reports reach the user through the Queen's feed (02-D4).
+    | 'watchdog'
+    | 'card-held'
+    | 'foreman'
+    | 'scout';
   goalId?: string;
   cardId?: string;
   agentId?: string;
   message: string;
+  /** Set on 'watchdog': the incident as stored. */
+  incident?: Incident;
   engineEvent?: ClaudeEvent;
   /** Set on run-started, engine and run-ended: which run (one agent session) this is about. */
   run?: RunInfo;
@@ -139,7 +174,7 @@ export interface RunInfo {
 export type MergeState = 'not-merged' | 'awaiting-approval' | 'merged' | 'undone';
 
 interface Job {
-  kind: 'insect' | 'inspector' | 'librarian';
+  kind: 'insect' | 'inspector' | 'librarian' | 'foreman' | 'scout';
   cardId: string;
   done: Promise<void>;
   stop(): void;
@@ -165,9 +200,19 @@ export class Hive {
   readonly #approved = new Map<string, string[]>();
   /** Last failure note per card, for the next attempt's brief. */
   readonly #lastFailure = new Map<string, string>();
+  /** The Watchdog (C2), or null when switched off. */
+  readonly #watchdog: Watchdog | null;
+  /** Runs under watch, by run id: the stall timer checks them. */
+  readonly #watches = new Map<string, { watch: RunWatch; stop: () => void }>();
+  #stallTimer: ReturnType<typeof setInterval> | null = null;
+  /** A breaker step the Watchdog took on an agent's current run; the run's owner acts on it when the run ends. */
+  readonly #breakers = new Map<string, Trip>();
+  /** Why a held card waits for the Foreman (default: the Watchdog held it). */
+  readonly #holdWake = new Map<string, ForemanWake>();
 
   constructor(o: HiveOptions) {
     this.#o = { leaseMs: 20 * 60_000, defaultBudgetTokens: 2_000_000, ...o };
+    this.#watchdog = o.watchdog === false ? null : new Watchdog(o.watchdog ?? {}, () => this.#now());
   }
 
   #route(input: RouteInput): Route {
@@ -409,13 +454,191 @@ export class Hive {
   /** One Foreman pass. */
   async tick(): Promise<void> {
     const { brain } = this.#o;
-    brain.taskboard.sweepExpiredLeases();
+    for (const id of brain.taskboard.sweepExpiredLeases()) this.#leaseLoop(id);
     for (const goal of brain.goals.list('running')) {
       if (this.#paused) break;
       this.#inspectReviews(goal);
+      this.#foremanPass(goal);
       this.#dispatch(goal);
       await this.#advance(goal);
     }
+  }
+
+  // ---- the Foreman's brain (Hive 02-D8; Phase 2 C2) -------------------------------------------------
+
+  /** A card whose lease ran out twice is probably the problem itself: hold it for the Foreman. */
+  #leaseLoop(id: string): void {
+    if (this.#o.foremanBrain === false) return;
+    try {
+      const board = this.#o.brain.taskboard;
+      const card = board.get(id);
+      if (!card || card.status !== 'open' || card.heldReason || board.leaseExpiries(id) < 2) return;
+      board.hold(id, 'Foreman', 'Its insects went silent until the lease ran out, twice.');
+      this.#holdWake.set(id, 'lease-loop');
+      this.#emit({ type: 'card-held', goalId: card.goalId, cardId: id, message: `"${card.title}" is held: its insects went silent twice. The Foreman decides what happens next.` });
+    } catch {
+      // Bookkeeping must never stop the hive.
+    }
+  }
+
+  /** The Foreman's latest decision on a failed card, if it is final (to the Queen, made after the card failed). */
+  #finalDecision(card: BoardCard): { reason: string } | null {
+    if (this.#o.foremanBrain === false) return { reason: 'A card failed after all its attempts.' };
+    const last = this.#o.brain.foreman.forCard(card.id).at(-1);
+    return last && last.action === 'to-queen' && last.at >= card.updatedAt ? last : null;
+  }
+
+  /** Wake the Foreman for each stuck card of the goal that it hasn't decided on yet. */
+  #foremanPass(goal: Goal): void {
+    if (this.#o.foremanBrain === false) return;
+    for (const card of this.#o.brain.taskboard.list({ goalId: goal.id })) {
+      const held = card.status === 'open' && card.heldReason !== null;
+      const failed = card.status === 'failed' && !this.#finalDecision(card);
+      if (!held && !failed) continue;
+      if (this.#jobs.has(`Foreman:${card.id}`)) continue;
+      this.#startForeman(goal, card, held ? (this.#holdWake.get(card.id) ?? 'held') : 'attempts-exhausted');
+    }
+  }
+
+  #startForeman(goal: Goal, card: BoardCard, wake: ForemanWake): void {
+    const key = `Foreman:${card.id}`;
+    let stopRun: (() => void) | undefined;
+    const done = (async () => {
+      let choice: ForemanChoice;
+      if (card.foremanRetries >= 1) {
+        // Never retry the same way again (foreman AGENT.md): one more try per card, then the Queen.
+        choice = { action: 'to-queen', reason: 'The Foreman already gave this card one more try, and it is stuck again.', note: null };
+      } else {
+        const scratch = join(this.#o.dataDir, 'foreman');
+        mkdirSync(scratch, { recursive: true });
+        const prompt = foremanDecisionPrompt(this.#o.library, foremanSituation(this.#o.brain, card, wake));
+        const result = await this.#runWith(goal.id, card.id, {
+          role: 'foreman',
+          agentId: 'Foreman',
+          title: `Decide: ${card.title}`,
+          cwd: scratch,
+          system: prompt.system,
+          task: prompt.task,
+          route: this.#route({ role: 'foreman', priority: card.priority, attempts: 0 }),
+          guard: { workspace: scratch, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
+        }, (stop) => (stopRun = stop));
+        // Paused or cancelled meanwhile: decide on a later pass.
+        if (!result.ok && (result.error === 'stopped' || result.error === 'quota' || result.error === 'auth')) return;
+        choice = result.ok ? parseForemanReply(result.text) : { action: 'to-queen', reason: `The Foreman's run failed (${result.error ?? 'error'}), so the card goes to the Queen.`, note: null };
+      }
+      this.#applyForeman(goal, card.id, wake, choice);
+    })().finally(() => this.#jobs.delete(key));
+    this.#jobs.set(key, { kind: 'foreman', cardId: card.id, done: done.then(() => undefined, () => undefined), stop: () => stopRun?.() });
+  }
+
+  #applyForeman(goal: Goal, cardId: string, wake: ForemanWake, choice: ForemanChoice): void {
+    const { brain } = this.#o;
+    const board = brain.taskboard;
+    const card = board.get(cardId);
+    if (!card) return;
+    const stuck = card.status === 'failed' || (card.status === 'open' && card.heldReason !== null);
+    if (!stuck) return;
+    let action = choice.action;
+    try {
+      if (action !== 'to-queen') {
+        board.foremanRetry(cardId, 'Foreman', { note: choice.note, tier: action === 'stronger-model' ? 'strongest' : null });
+      } else if (card.status === 'open') {
+        board.escalate(cardId, 'Foreman', `Foreman: ${choice.reason}`);
+      }
+    } catch {
+      action = 'to-queen';
+      if (board.get(cardId)?.status === 'open') board.escalate(cardId, 'Foreman', `Foreman: ${choice.reason}`);
+    }
+    this.#holdWake.delete(cardId);
+    brain.foreman.record({ goalId: goal.id, cardId, cardTitle: card.title, wake, action, reason: choice.reason });
+    const what =
+      action === 'retry-with-note'
+        ? `gave "${card.title}" one more try with a note`
+        : action === 'stronger-model'
+          ? `gave "${card.title}" one more try on the strongest model`
+          : `sent "${card.title}" back to the Queen`;
+    this.#emit({ type: 'foreman', goalId: goal.id, cardId, agentId: 'Foreman', message: `The Foreman ${what}: ${choice.reason}` });
+  }
+
+  /**
+   * The Foreman's periodic review (C2): one short read-only run over board metrics and recent Watchdog
+   * incidents (built by code). It changes nothing; the caller stores the report and tells the user via the Queen.
+   */
+  async review(since: number | null): Promise<{ ok: boolean; summary: string | null; error: string | null }> {
+    const key = 'Foreman:review';
+    if (this.#jobs.has(key)) return { ok: false, summary: null, error: 'A review is already running.' };
+    const scratch = join(this.#o.dataDir, 'foreman');
+    mkdirSync(scratch, { recursive: true });
+    const summary = reviewSummary(this.#o.brain, since);
+    const prompt = foremanReviewPrompt(this.#o.library, summary);
+    let stopRun: (() => void) | undefined;
+    const done = this.#runWith(null, undefined, {
+      role: 'foreman',
+      agentId: 'Foreman',
+      title: 'Hive review',
+      cwd: scratch,
+      system: prompt.system,
+      task: prompt.task,
+      route: this.#route({ role: 'foreman', priority: 'normal', attempts: 0 }),
+      guard: { workspace: scratch, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
+    }, (stop) => (stopRun = stop)).finally(() => this.#jobs.delete(key));
+    this.#jobs.set(key, { kind: 'foreman', cardId: '', done: done.then(() => undefined, () => undefined), stop: () => stopRun?.() });
+    const result = await done;
+    if (!result.ok) return { ok: false, summary: null, error: `The review run failed (${result.error ?? 'error'}).` };
+    return { ok: true, summary: parseReviewReply(result.text, summary), error: null };
+  }
+
+  // ---- the Scout (Hive 02 Managers; Phase 2 C2) ---------------------------------------------------
+
+  /**
+   * Before the Queen plans: one read-only survey from a code-map outline, when the user has the Scout on,
+   * the goal has at least 6 words and the code map is ready. Saved to the Brain as an unconfirmed update.
+   * Any failure just means the Queen plans without it.
+   */
+  async #scout(goal: Goal): Promise<string | null> {
+    const s = this.#o.scout;
+    if (!s || !s.enabled() || goal.text.trim().split(/\s+/).length < 6) return null;
+    let outline: string | null;
+    try {
+      outline = s.outline(goal.text);
+    } catch {
+      outline = null;
+    }
+    if (!outline) return null;
+    const key = `Scout:${goal.id}`;
+    const scratch = join(this.#o.dataDir, 'goals', goal.id, 'scout');
+    mkdirSync(scratch, { recursive: true });
+    const prompt = scoutPrompt(this.#o.library, { goal: goal.text, outline });
+    let stopRun: (() => void) | undefined;
+    const done = this.#runWith(goal.id, undefined, {
+      role: 'scout',
+      agentId: 'Scout',
+      title: `Survey: ${goal.title}`,
+      cwd: this.#o.repoDir,
+      system: prompt.system,
+      task: prompt.task,
+      route: this.#route({ role: 'scout', priority: 'normal', attempts: 0 }),
+      guard: { workspace: scratch, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
+    }, (stop) => (stopRun = stop)).finally(() => this.#jobs.delete(key));
+    this.#jobs.set(key, { kind: 'scout', cardId: `${goal.id}.scout`, done: done.then(() => undefined, () => undefined), stop: () => stopRun?.() });
+    let survey: string | null;
+    try {
+      const result = await done;
+      survey = result.ok ? surveyFrom(result.text) : null;
+    } catch {
+      survey = null;
+    }
+    if (!survey) {
+      this.#emit({ type: 'scout', goalId: goal.id, agentId: 'Scout', message: 'The Scout could not survey the code; the Queen plans without it.' });
+      return null;
+    }
+    try {
+      this.#o.brain.write({ kind: 'update', shelf: goal.shelf, title: `Scout survey: ${goal.title}`, body: survey, source: goal.id, trust: 'unconfirmed' }, { type: 'agent', id: 'Scout' });
+    } catch {
+      // A survey that trips the secrets guard is still given to the Queen, just not stored.
+    }
+    this.#emit({ type: 'scout', goalId: goal.id, agentId: 'Scout', message: `The Scout surveyed the code for "${goal.title}".` });
+    return survey;
   }
 
   /** Run Foreman passes until nothing is running and nothing changes (tests, demos). */
@@ -437,7 +660,9 @@ export class Hive {
     mkdirSync(scratch, { recursive: true });
     const services = await this.#o.services?.available().catch(() => []) ?? [];
     const meaning = await this.#o.embedQuery?.(goal.text).catch(() => null);
+    const survey = await this.#scout(goal);
     const base = queenPrompt(library, {
+      ...(survey ? { survey } : {}),
       services,
       goal: goal.text,
       bootCard: brain.bootCard(goal.shelf),
@@ -623,10 +848,13 @@ export class Hive {
       this.#emit({ type: 'card-started', goalId: goal.id, cardId: card.id, agentId, message: card.title });
 
       const beat = setInterval(() => brain.taskboard.heartbeat(card.id, agentId, this.#o.leaseMs!), Math.max(1_000, this.#o.leaseMs! / 3));
+      // The Foreman's one more try (C2) comes with its note for this insect.
+      const foremanNote = card.foremanNote ? `## The Foreman's note\n${card.foremanNote}` : '';
+      const brief = [card.brief, foremanNote, resumeNote ?? ''].filter(Boolean).join('\n\n');
       const prompt = insectPrompt(this.#o.library, card.caste, {
         id: local(card.id),
         title: card.title,
-        brief: resumeNote ? `${card.brief}\n\n${resumeNote}` : card.brief,
+        brief,
         acceptance: card.acceptance,
         attempts: card.attempts,
         ...(this.#lastFailure.has(card.id) ? { lastFailure: this.#lastFailure.get(card.id)! } : {}),
@@ -642,7 +870,12 @@ export class Hive {
           cwd: cardPath,
           system: prompt.system,
           task: prompt.task,
-          route: (route = this.#route({ role: card.caste, priority: card.priority, attempts: card.attempts })),
+          route: (route = this.#route({
+            role: card.caste,
+            priority: card.priority,
+            attempts: card.attempts,
+            ...(card.foremanTier && (TIERS as readonly string[]).includes(card.foremanTier) ? { minTier: card.foremanTier as Tier } : {}),
+          })),
           guard: {
             workspace: cardPath,
             home: this.#o.home,
@@ -660,6 +893,44 @@ export class Hive {
         }, (stop) => (stopRun = stop));
       } finally {
         clearInterval(beat);
+      }
+
+      // The Watchdog stopped this run (C2): the attempt is used, and on "pause the card" the card is held
+      // until the Foreman decides. A hard stop (stop-agent) just sends the card back with the incident note.
+      const breaker = this.#breakers.get(agentId);
+      this.#breakers.delete(agentId);
+      if (breaker) {
+        this.#lastFailure.set(card.id, `The Watchdog stopped the last run: ${breaker.evidence}`);
+        this.#settleSkills(card, 'failed');
+        const after = brain.taskboard.giveUp(card.id, agentId, `Watchdog: ${breaker.evidence}`);
+        // Hold it before anything awaits: the next Foreman pass must not hand the card to a new insect first.
+        if (breaker.step === 'pause-card' && after.status === 'open') this.#holdCard(card, breaker.evidence);
+        await workspace.removeCard(goal.id, id);
+        return;
+      }
+
+      if (!result.ok && result.error === 'crash' && this.#watchdog) {
+        // First crash: one fresh insect restarts the card (the usual retry). Second crash on the card: a hard
+        // stop, and the card is held for the Foreman.
+        const before = this.#o.brain.incidents.list({ cardId: card.id, limit: 50 }).filter((i) => i.sensor === 'crash').length;
+        const again = before > 0;
+        const trip: Trip = {
+          sensor: 'crash',
+          step: again ? 'stop-agent' : 'warn',
+          evidence: again ? 'The insect crashed again on this card.' : 'The insect crashed; a fresh insect restarts the card.',
+          signature: `crash|${card.caste}|`,
+        };
+        const run = { runId: `${agentId}:crash`, agentId, role: card.caste, goalId: goal.id, cardId: card.id };
+        this.#incident(run, trip);
+        if (again) {
+          this.#lastFailure.set(card.id, `${result.error}: ${clip(result.text || result.stderrTail, 300)}`);
+          this.#settleSkills(card, 'failed');
+          const after = brain.taskboard.giveUp(card.id, agentId, 'Watchdog: crashed again');
+          if (after.status === 'open') this.#holdCard(card, trip.evidence);
+          this.#serious();
+          await workspace.removeCard(goal.id, id);
+          return;
+        }
       }
 
       if (!result.ok) {
@@ -779,9 +1050,17 @@ export class Hive {
   async #advance(goal: Goal): Promise<void> {
     const { brain } = this.#o;
     const cards = brain.taskboard.list({ goalId: goal.id });
-    if (cards.some((c) => c.status === 'failed')) {
+    const failed = cards.filter((c) => c.status === 'failed');
+    if (failed.length) {
+      // The Foreman decides first (C2); the goal is stuck only once it sent every failed card to the Queen.
+      const finals = failed.map((c) => this.#finalDecision(c));
+      if (finals.some((f) => !f)) return;
       brain.goals.setStatus(goal.id, 'stuck');
-      this.#emit({ type: 'goal-stuck', goalId: goal.id, message: 'A card failed after all its attempts; the Queen needs to re-plan with you.' });
+      const message =
+        this.#o.foremanBrain === false
+          ? 'A card failed after all its attempts; the Queen needs to re-plan with you.'
+          : `Foreman: ${finals[0]!.reason} The Queen needs to re-plan with you.`;
+      this.#emit({ type: 'goal-stuck', goalId: goal.id, message });
       return;
     }
     const wave = cards.filter((c) => c.wave === goal.currentWave);
@@ -917,6 +1196,10 @@ ${brief}`,
     };
     const ids = { ...(goalId ? { goalId } : {}), ...(cardId ? { cardId } : {}), agentId: req.agentId };
     this.#emit({ type: 'run-started', ...ids, message: info.title, run: info });
+    // The Watchdog watches the Queen and every insect (C2). The other runs are short, read-only and capped.
+    const watched = { runId: info.runId, agentId: req.agentId, role: req.role, goalId, cardId: cardId ?? null };
+    const watch = this.#watchdog && (req.role === 'queen' || isInsectRole(req.role)) ? this.#watchdog.watch(watched) : null;
+    let stopNow: (() => void) | null = null;
     let result: EngineResult;
     try {
       const run = this.#o.engine.run({
@@ -924,15 +1207,31 @@ ${brief}`,
         onEvent: (e) => {
           req.onEvent?.(e);
           this.#emit({ type: 'engine', ...ids, message: e.kind, engineEvent: e, run: info });
+          const trip = watch?.event(e);
+          if (watch && trip) this.#onTrip(watch, trip, () => stopNow?.());
         },
       });
+      stopNow = run.stop;
       onStop?.(run.stop);
+      if (watch) this.#watch(info.runId, watch, run.stop);
       result = this.#classifyLimit(await run.done);
     } catch (err) {
       this.#emit({ type: 'run-ended', ...ids, message: 'crash', run: { ...info, ok: false, error: 'crash' } });
       throw err;
+    } finally {
+      this.#unwatch(info.runId);
     }
     const tokens = runTokens(result.usage);
+    if (watch && !watch.stopped && cardId && goalId) {
+      const trip = this.#watchdog!.overspend(watched, tokens, this.#cardShare(goalId, cardId));
+      if (trip) {
+        this.#incident(watched, trip);
+        if (trip.step === 'stop-agent') {
+          this.#breakers.set(req.agentId, trip);
+          this.#serious();
+        }
+      }
+    }
     if (goalId) this.#o.brain.goals.addSpend(goalId, tokens, result.costUsd);
     this.#recordOutcome(info.runId, goalId, cardId, req, result);
     if (result.error === 'quota') {
@@ -946,6 +1245,108 @@ ${brief}`,
       run: { ...info, ...(result.model ? { model: result.model } : {}), ok: result.ok, ...(result.error ? { error: result.error } : {}), tokens, costUsd: result.costUsd },
     });
     return result;
+  }
+
+  // ---- the Watchdog (Hive 02-D9 P3, D12; Phase 2 C2) -------------------------------------------------
+
+  #watch(runId: string, watch: RunWatch, stop: () => void): void {
+    this.#watches.set(runId, { watch, stop });
+    if (this.#stallTimer || !this.#watchdog) return;
+    const every = Math.min(5_000, Math.max(50, Math.floor(this.#watchdog.t.stallMs / 4)));
+    this.#stallTimer = setInterval(() => {
+      for (const { watch: w, stop: s } of [...this.#watches.values()]) {
+        const trip = w.idle();
+        if (trip) this.#onTrip(w, trip, s);
+      }
+    }, every);
+    this.#stallTimer.unref?.();
+  }
+
+  #unwatch(runId: string): void {
+    this.#watches.delete(runId);
+    if (this.#watches.size === 0 && this.#stallTimer) {
+      clearInterval(this.#stallTimer);
+      this.#stallTimer = null;
+    }
+  }
+
+  /** A sensor tripped on a running agent: record it, then take the breaker step. */
+  #onTrip(watch: RunWatch, trip: Trip, stop: () => void): void {
+    this.#incident(watch.run, trip);
+    if (trip.step === 'warn') return;
+    watch.markStopped();
+    if (trip.step === 'pause-hive') {
+      // The Queen herself looped or stalled (02-D12): pause the hive and alert the user in the Hive monitor.
+      stop();
+      this.pause(`Watchdog: the Queen ${trip.sensor === 'stall' ? 'stalled' : 'kept repeating herself'} (${trip.evidence}) The hive is paused; resume it when you're ready.`);
+      return;
+    }
+    this.#breakers.set(watch.run.agentId, trip);
+    stop();
+    this.#serious();
+  }
+
+  /** Store an incident and tell the Queen's feed. Bookkeeping trouble never stops the hive. */
+  #incident(run: { runId: string; agentId: string; goalId: string | null; cardId: string | null }, trip: Trip): void {
+    let incident: Incident | undefined;
+    try {
+      incident = this.#o.brain.incidents.record({
+        sensor: trip.sensor,
+        step: trip.step,
+        agentId: run.agentId,
+        runId: run.runId,
+        goalId: run.goalId,
+        cardId: run.cardId,
+        evidence: trip.evidence,
+        signature: trip.signature,
+      });
+    } catch {
+      incident = undefined;
+    }
+    const verb = { warn: 'warned', 'pause-card': 'stopped and held the card of', 'stop-agent': 'stopped', 'pause-hive': 'paused the hive because of' }[trip.step];
+    this.#emit({
+      type: 'watchdog',
+      ...(run.goalId ? { goalId: run.goalId } : {}),
+      ...(run.cardId ? { cardId: run.cardId } : {}),
+      agentId: run.agentId,
+      message: `The Watchdog ${verb} ${run.agentId}: ${trip.evidence}`,
+      ...(incident ? { incident } : {}),
+    });
+  }
+
+  /** A serious trip (pause-card or worse); several within the window pause the whole hive. */
+  #serious(): void {
+    if (!this.#watchdog?.serious()) return;
+    const t = this.#watchdog.t;
+    const trip: Trip = {
+      sensor: 'hive',
+      step: 'pause-hive',
+      evidence: `${t.hiveTrips} agents were stopped within ${Math.round(t.hiveWindowMs / 60_000)} minutes; something shared may be broken (the engine, the network or the project).`,
+      signature: 'hive||',
+    };
+    this.#incident({ runId: 'hive', agentId: 'Watchdog', goalId: null, cardId: null }, trip);
+    this.pause(`Watchdog: ${trip.evidence} The hive is paused; resume it when you're ready.`);
+  }
+
+  /** The Watchdog holds the card (breaker step "pause the card"); the Foreman wakes on the next pass. */
+  #holdCard(card: BoardCard, evidence: string): void {
+    try {
+      this.#o.brain.taskboard.hold(card.id, 'Watchdog', clip(evidence, 200));
+      this.#holdWake.set(card.id, 'held');
+      this.#emit({ type: 'card-held', goalId: card.goalId, cardId: card.id, message: `"${card.title}" is held: ${clip(evidence, 200)} The Foreman decides what happens next.` });
+    } catch {
+      // A card that moved on meanwhile isn't held.
+    }
+  }
+
+  /** The card's per-attempt share of its goal's budget (null when the goal has no budget or plan). */
+  #cardShare(goalId: string, cardId: string): number | null {
+    const goal = this.#o.brain.goals.get(goalId);
+    const plan = goal?.plan as Plan | null | undefined;
+    const cards = plan?.waves.flatMap((w) => w.cards).length ?? 0;
+    const card = this.#o.brain.taskboard.get(cardId);
+    if (!goal?.budgetTokens || !cards || !card) return null;
+    return goal.budgetTokens / (cards * Math.max(1, card.maxAttempts));
   }
 
   /** A failed run whose text says a usage or rate limit stopped it becomes a `quota` result (Phase 2 A5). */

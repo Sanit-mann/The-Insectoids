@@ -1,6 +1,6 @@
 import type { CardView, GoalView } from '@insectoids/shared';
 import { Columns3 } from 'lucide-react';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { StatusDot } from '@/components/StatusDot';
 import { CARD_STATUS, casteLabel } from '@/components/hive/format';
 import { useNow } from '@/components/hive/useNow';
@@ -8,6 +8,8 @@ import { CardDetail } from '@/components/taskboard/CardDetail';
 import { EmptyHint, ReadError, SkeletonColumns } from '@/components/taskboard/states';
 import { type KanbanColumn, KanbanBoard } from '@/components/ui/kanban-board';
 import { useHive } from '@/lib/hive-store';
+import { clearPendingCard, onCardOpen, peekPendingCard } from '@/lib/open-nav';
+import { HeldBadge } from '@/components/taskboard/HeldBadge';
 import { cn } from '@/lib/utils';
 
 type WaveFilter = 'all' | number;
@@ -43,6 +45,7 @@ function CardFace({ card }: { card: CardView }) {
         <span className="ml-auto text-[11px] text-muted">{casteLabel(card.priority)}</span>
       </span>
       <span className="font-semibold leading-snug">{card.title}</span>
+      {card.heldReason ? <HeldBadge reason={card.heldReason} compact /> : null}
       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
         {card.status === 'failed' && (
           <span className="flex items-center gap-1 text-text">
@@ -63,12 +66,24 @@ function CardFace({ card }: { card: CardView }) {
 export function TaskboardScreen() {
   const { snapshot, error, loading } = useHive();
   const now = useNow(1000);
-  const [goalId, setGoalId] = useState<string | null>(null);
+  // C2: another screen (the Watchdog panel, the Foreman's decisions) may ask to open a card here.
+  const [goalId, setGoalId] = useState<string | null>(() => peekPendingCard()?.goalId ?? null);
   const [wave, setWave] = useState<WaveFilter>('all');
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(() => peekPendingCard()?.cardId ?? null);
+
+  useEffect(() => {
+    clearPendingCard();
+    return onCardOpen((t) => {
+      if (t.goalId) setGoalId(t.goalId);
+      setWave('all');
+      setOpenId(t.cardId);
+    });
+  }, []);
 
   const goals = useMemo(() => snapshot?.goals ?? [], [snapshot]);
-  const goal = goals.find((g) => g.id === goalId) ?? defaultGoal(goals);
+  // A card id from an incident may be the short local id ("C-02"); the board's ids are goal-scoped.
+  const target = openId ? snapshot?.cards.find((c) => c.id === openId || c.id.endsWith(`.${openId}`)) : undefined;
+  const goal = goals.find((g) => g.id === goalId) ?? (target ? goals.find((g) => g.id === target.goalId) : undefined) ?? defaultGoal(goals);
   const goalCards = useMemo(() => (goal && snapshot ? snapshot.cards.filter((c) => c.goalId === goal.id) : []), [goal, snapshot]);
   const waveCount = Math.max(goal?.plan?.waves.length ?? 0, ...goalCards.map((c) => c.wave), 0);
   const shown = wave === 'all' ? goalCards : goalCards.filter((c) => c.wave === wave);
@@ -76,7 +91,7 @@ export function TaskboardScreen() {
     ...col,
     cards: shown.filter((c) => has.includes(c.status)).sort((a, b) => a.wave - b.wave || a.updatedAt - b.updatedAt),
   }));
-  const opened = goalCards.find((c) => c.id === openId) ?? null;
+  const opened = goalCards.find((c) => c.id === openId || (openId !== null && c.id.endsWith(`.${openId}`))) ?? null;
 
   if (loading && !snapshot) return <SkeletonColumns label="Loading the taskboard" />;
   if (error && !snapshot) return <ReadError message={error} />;
@@ -151,7 +166,7 @@ export function TaskboardScreen() {
             getId={(c) => c.id}
             getLabel={(c) => `${c.title}. ${CARD_STATUS[c.status].label}. ${casteLabel(c.caste)}, wave ${c.wave}.`}
             renderCard={(c) => <CardFace card={c} />}
-            selectedId={openId}
+            selectedId={opened?.id ?? null}
             onOpen={(id) => setOpenId((cur) => (cur === id ? null : id))}
             emptyText="No cards"
           />

@@ -108,6 +108,11 @@ export interface FakeReply {
   /** Events to report while "running" (e.g. a guard denial). */
   events?: ClaudeEvent[];
   delayMs?: number;
+  /**
+   * Report the events one by one this far apart, while the run is still going (a stop between two events
+   * ends it as "stopped"). Without it, events are reported at the end, all at once.
+   */
+  eventGapMs?: number;
 }
 
 export class FakeEngine implements Engine {
@@ -131,11 +136,18 @@ export class FakeEngine implements Engine {
     let stopped = false;
     const done = (async (): Promise<EngineResult> => {
       await new Promise((r) => setTimeout(r, reply.delayMs ?? 0));
+      if (reply.eventGapMs !== undefined && !stopped) {
+        for (const e of reply.events ?? []) {
+          if (stopped) break;
+          req.onEvent?.(e);
+          await new Promise((r) => setTimeout(r, reply.eventGapMs));
+        }
+      }
       this.#running--;
       if (insect) this.#insects--;
       if (stopped) return result(reply, false, 'stopped');
       reply.effects?.(req.cwd);
-      for (const e of reply.events ?? []) req.onEvent?.(e);
+      if (reply.eventGapMs === undefined) for (const e of reply.events ?? []) req.onEvent?.(e);
       return result(reply, reply.ok ?? true, reply.error);
     })();
     return {

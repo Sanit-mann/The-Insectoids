@@ -34,7 +34,10 @@ describe('the catalog from the library folder', () => {
     for (const c of ALL_CASTES) expect(byName.get(c)).toMatchObject({ kind: 'agent', status: 'active', safety: 'vetted' });
     for (const s of new Set(Object.values(ROLE_SKILLS).flat())) expect(byName.get(s)?.status, s).toBe('active');
     expect(byName.get('accessibility')).toMatchObject({ status: 'ready', safety: 'vetted', file: 'skills/accessibility/SKILL.md' });
-    expect(byName.get('foreman')?.status).toBe('ready');
+    // C2: the Scout and the Foreman run in the hive now; the Watchdog has no LLM brain yet, so it stays ready.
+    expect(byName.get('foreman')?.status).toBe('active');
+    expect(byName.get('scout')?.status).toBe('active');
+    expect(byName.get('watchdog')?.status).toBe('ready');
     const dormant = items.filter((i) => i.status === 'dormant');
     expect(dormant.length).toBeGreaterThan(800);
     expect(dormant.every((i) => i.file === null && i.safety === 'unscanned')).toBe(true);

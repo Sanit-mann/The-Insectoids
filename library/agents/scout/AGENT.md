@@ -62,6 +62,15 @@ The explorer manager (02 Managers, optional). Before the Queen plans in unfamili
 - Duplicate a survey another Scout already did and that is still fresh.
 - Talk to the user.
 
+## In the hive today (Phase 2 C2)
+
+- **When:** before the Queen plans a goal of at least 6 words, if the user has "Scout before planning" on (the default) and the project's code map is ready. Otherwise the Queen plans without it.
+- **What it gets:** the goal and a code-map outline the hive builds for it: the symbols whose names match the goal's words, grouped by file, then the other mapped files. It reads that first and may open a file to confirm something; it has no Brain tools and no network in this run.
+- **Cost:** one run on the light model, medium effort, at most 15 turns.
+- **Output:** its survey (the compact format below, at most about 3,000 characters) goes into the Queen's planning brief and into the Brain as an **unconfirmed** update titled "Scout survey: <goal>".
+- **If it fails:** a failed or empty survey never blocks planning. The Queen plans without it, and the feed says so in one line.
+- **Not yet:** surveys on demand for other managers, reusing a fresh earlier survey, and topic (web) surveys.
+
 ## How it works
 
 1. **Read the question** on the Scout card. If it names the exact file or symbol already, answer from the code map in one step and stop.

@@ -1,6 +1,6 @@
 ---
 name: watchdog
-description: Health manager that detects loops, crashes, stalls and overspending agents and runs the breaker ladder (steer, then constrain, then stop). Its reflexes are code and react in milliseconds; its brain wakes only to diagnose unclear or repeated incidents. Use to guard agent health; never to do or judge task work.
+description: Health manager that detects loops, repeated errors, stalls, crashes and overspending agents and runs the breaker ladder (warn, pause the card, stop the agent, pause the hive). Its reflexes are code and react in milliseconds; the Foreman decides what happens to a card it holds. Use to guard agent health; never to do or judge task work.
 metadata:
   kind: agent
   rank: manager
@@ -44,30 +44,33 @@ The health manager (02 Managers). It watches every running agent and catches the
 
 ## Reflexes (code tools it relies on; no LLM)
 
-**Sensors** (from the harness, free):
+**Sensors** (from the harness, free; the code is `packages/harness/src/hive/watchdog.ts`). They watch the Queen and every insect; the Inspector and the managers' own runs are short, read-only and capped by their route, so they are not watched.
 
-| Sensor | Trips when |
+| Sensor | Trips when (defaults) |
 |---|---|
-| Crash | The agent process exits with an error. |
-| Stall | The agent is alive but makes no progress (no new tool calls, output or file changes) across two consecutive checkpoints. |
-| Loop | The same tool call with the same arguments repeats N times; the same error or stack trace repeats; the same file is edited back and forth; output text repeats. |
-| Retry storm | One card fails again and again on different insects, or many cards fail with the same error. |
-| Overspend | The Treasurer's meter shows an agent above its budget for the period, or burning several times the median for its caste. |
-| Hive-wide | Many agents trip at once (likely a provider outage or broken environment), or the hive-wide budget is near its limit. |
+| Loop | The same tool call with the same arguments repeats 5 times in one run (warn); 10 times (next step). |
+| Error repeat | The same tool error text comes back 4 times in one run (warn); 8 times (next step). The guard's "needs the user's approval" answers don't count: that is the approval flow. |
+| Stall | No engine event (no tool call, no output) for 5 minutes (warn); another 5 minutes (next step). Any event resets the clock. |
+| Overspend | Checked when a run ends. Over 3× its card's per-attempt share of the goal budget: warn. Over the hard cap (1.5 million tokens in one run): a hard stop, and that run's work is not kept. |
+| Crash | The engine process exits with an error (a crash). |
+| Hive-wide | 3 serious trips (pause the card or worse) within 10 minutes: probably a shared cause (the engine, the network, the project). |
 
-**Breaker ladder** (per agent):
+**Breaker ladder** (per run, in plain code):
 
-1. **Steer.** Inject a short notice: what was detected, with evidence, and one suggested way out ("You ran the same failing test 5 times. Read the error, form one hypothesis, or report `blocked`."). The same agent is not warned twice for the same reason within 10 minutes.
-2. **Constrain.** If it continues: lower effort or model (with the Treasurer), remove the tools it is misusing, shorten its remaining budget.
-3. **Stop.** If it still continues, or on any hard limit: make sure the harness has captured its handoff checkpoint (01-E2), stop the process, release the card to the board with an incident note, and tell the Foreman.
+1. **Warn.** The first trip of a sensor: the incident is recorded and the Queen's feed gets one line. The agent keeps going. The same agent is not warned twice for the same sensor within 10 minutes (the ladder still counts the trip).
+2. **Pause the card.** The same sensor trips again on that run: the run is stopped, the attempt counts, and the card is held (no insect can claim it) until the Foreman decides. The incident note goes to the next attempt's brief.
+3. **Stop the agent.** A hard limit (the hard token cap, or a second crash on the same card): stopped at once, the attempt counts. After a second crash the card is also held for the Foreman.
+4. **Pause the hive.** On a hive-wide trip, or when the Queen herself trips a second time (02-D12): the hive pauses with a reason that starts "Watchdog:", shown in the Hive monitor. Only the user resumes it.
 
-Crashes skip to a single automatic **restart** of a fresh insect on the same card; a second crash on that card stops and escalates. A hard budget stop goes straight to step 3.
+A first crash is recorded as a warning, and one fresh insect restarts the card (the usual retry). Steering a running agent with a message and constraining it (a lower model, fewer tools) are not built yet: the engines take no input mid-run. Today the ladder goes from a warning straight to pausing the card.
 
-**Hive breaker.** On a hive-wide trip: pause new spawns (or the whole hive), keep state, and alert the Queen. Resume only after the cause is fixed and a test card passes.
+**Incident log.** Every trip is stored in the Brain (`incidents`: sensor, step, agent, run, goal, card, evidence, signature) with a recurrence count per signature (sensor + role + what repeated), so repeats are visible in the Hive monitor and in the Foreman's periodic review.
 
-**Incident log.** Every trip is stored with a failure signature (agent caste, card, sensor, error text) and a recurrence count, so repeats are visible.
+**Thresholds** are plain settings in the code (`WATCHDOG_DEFAULTS`). The user can't tune them yet, and the Watchdog never tunes them itself.
 
-## Judgment (when its brain wakes)
+## Judgment (when its brain wakes; not built yet)
+
+In this version the Watchdog has no LLM brain: every trip and stop is code, and the Foreman decides what happens to a held card. The judgment below is the plan for later.
 
 1. **Is it really a loop?** Some work looks repetitive but is fine (a long test suite, a large batch edit, a long download). Check the progress evidence before escalating past steer, and record the pattern as an exception if it is legitimate.
 2. **Recurring signatures.** When the same signature recurs across cards or agents, diagnose the shared cause (broken environment, missing dependency, bad card, a skill giving wrong instructions, a model too weak for the caste) using the systematic-debugging skill, and send the finding to the right owner: Foreman (card), Treasurer (model), Librarian (skill or lesson), Queen (plan).

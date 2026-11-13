@@ -4,6 +4,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { AgentOutput } from '@/components/hive/AgentOutput';
 import { LANE_LABEL, agentName } from '@/components/hive/format';
 import { LanesTable } from '@/components/hive/LanesTable';
+import { ManagersPanel } from '@/components/hive/ManagersPanel';
+import { WatchdogPanel } from '@/components/hive/WatchdogPanel';
 import { useNow } from '@/components/hive/useNow';
 import { AgentLanesTimeline, type LaneTone, type TimelineLane } from '@/components/kokonutui/ai-agent-lanes';
 import { EmptyHint, ReadError } from '@/components/taskboard/states';
@@ -49,6 +51,8 @@ export function HiveScreen() {
   const working = agents.filter((a) => a.status === 'working').length;
   const blocked = agents.filter((a) => a.status === 'blocked').length;
   const paused = snapshot?.hive.paused ?? false;
+  // Incidents may carry the short card id ("C-02"); the board's ids are goal-scoped.
+  const cardTitle = (id: string): string | null => snapshot?.cards.find((c) => c.id === id || c.id.endsWith(`.${id}`))?.title ?? null;
 
   const announcement = useThrottled(
     agents.length === 0
@@ -147,6 +151,18 @@ export function HiveScreen() {
           {selected && <AgentOutput agent={selected} />}
         </div>
       )}
+
+      {/* C2: the Watchdog's incidents and the managers' brain side, always visible once the hive is loaded. */}
+      {snapshot ? (
+        <div className="flex flex-wrap items-start gap-4 border-t border-line px-5 py-5">
+          <div className="min-w-0 flex-[1_1_380px]">
+            <WatchdogPanel cardTitle={cardTitle} incidents={snapshot.incidents} now={now} />
+          </div>
+          <div className="min-w-0 flex-[1_1_380px]">
+            <ManagersPanel managers={snapshot.managers} now={now} />
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

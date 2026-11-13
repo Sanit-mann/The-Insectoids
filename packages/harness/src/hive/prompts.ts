@@ -4,10 +4,13 @@ import type { Caste } from '@insectoids/shared';
 import { MAX_CARDS_PER_WAVE, MAX_PLAN_SKILLS, MAX_WAVES } from './protocol';
 
 /** Skills each role carries by default in Phase 1 (Capabilities 03-D8: at most ~5 active). */
-export const ROLE_SKILLS: Record<'queen' | 'inspector' | 'librarian' | Caste, string[]> = {
+export const ROLE_SKILLS: Record<'queen' | 'inspector' | 'librarian' | 'scout' | 'foreman' | Caste, string[]> = {
   queen: ['writing-plans'],
   inspector: ['verification-before-completion'],
   librarian: ['compact-output'],
+  // C2: the managers' brains. Lean on purpose: they read a compact summary, not the whole project.
+  scout: ['compact-output'],
+  foreman: ['compact-output'],
   coder: ['executing-a-task-card', 'coding-discipline'],
   tester: ['executing-a-task-card', 'test-driven-development'],
   reviewer: ['executing-a-task-card', 'code-review'],
@@ -111,6 +114,8 @@ export function queenPrompt(
     services?: ReadonlyArray<{ id: string; description: string }>;
     /** Library skills that fit this goal (03-D8 "Find"); a card may name a few in "skills". */
     skills?: ReadonlyArray<{ name: string; description: string }>;
+    /** The Scout's survey of the code for this goal (Phase 2 C2), when it ran. */
+    survey?: string;
   },
 ): PromptPair {
   const system = [
@@ -132,6 +137,7 @@ Don't say whether the plan needs the user's approval; the hive decides that from
     `# Goal\n${o.goal}`,
     o.bootCard && `# What the Brain knows\n${o.bootCard}`,
     o.context && `# Related records\n${o.context}`,
+    o.survey && `# The Scout's survey (facts from the code map; unconfirmed)\n${o.survey}`,
     o.projectListing && `# Project files (top level)\n${o.projectListing}`,
     'Plan this goal now. Read files if you need to; do not change anything.',
   ]
