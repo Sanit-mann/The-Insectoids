@@ -136,6 +136,7 @@ export class BrainClient {
   // Convenience wrappers, one per method.
   ping = () => this.call('ping', {});
   search = (p: ParamsOf<'search'>) => this.call('search', p);
+  code = (p: ParamsOf<'code'>) => this.call('code', p);
   read = (p: ParamsOf<'read'>) => this.call('read', p);
   get = (id: string) => this.call('get', { id });
   history = (id: string) => this.call('history', { id });

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { BrainStatus } from '@insectoids/shared';
 
-/** Polls the Brain host's health: often while it starts or retries, rarely once it runs. */
+/** The Brain host's health: re-read on every status push from main, plus a slow poll as a safety net. */
 export function useBrainStatus(): BrainStatus | null {
   const [status, setStatus] = useState<BrainStatus | null>(null);
   useEffect(() => {
@@ -20,9 +20,17 @@ export function useBrainStatus(): BrainStatus | null {
         });
     };
     poll();
+    // Main pushes every Brain status change: re-read at once instead of waiting for the next poll.
+    const off = window.insectoids.hive.onEvent((e) => {
+      if (e.type === 'changed' && e.reason.startsWith('brain-')) {
+        clearTimeout(timer);
+        poll();
+      }
+    });
     return () => {
       alive = false;
       clearTimeout(timer);
+      off();
     };
   }, []);
   return status;

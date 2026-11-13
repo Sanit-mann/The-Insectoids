@@ -6,7 +6,7 @@ import { BrainClient, BrainServiceError, type BrainService, startBrainService } 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type BrainAccess, clientAccess, createBrainMcpServer, unavailableAccess } from './index';
 
-const READ_TOOLS = ['brain_boot_card', 'brain_get', 'brain_history', 'brain_links', 'brain_read', 'brain_search'];
+const READ_TOOLS = ['brain_boot_card', 'brain_code', 'brain_get', 'brain_history', 'brain_links', 'brain_read', 'brain_search'];
 const WRITE_TOOLS = ['brain_archive', 'brain_link', 'brain_update', 'brain_write'];
 const user = { type: 'user' } as const;
 
@@ -57,7 +57,7 @@ const toolNames = async (client: Client) => (await client.listTools()).tools.map
 const idIn = (text: string): string => /Saved as ([\w-]+)/.exec(text)?.[1] ?? '';
 
 describe('tool listing', () => {
-  it('a read-only insect only sees read tools; a writer sees all ten', async () => {
+  it('a read-only insect only sees read tools; a writer sees all eleven', async () => {
     expect(await toolNames(await agent({ write: false }))).toEqual(READ_TOOLS);
     expect(await toolNames(await agent())).toEqual([...READ_TOOLS, ...WRITE_TOOLS].sort());
   });
@@ -211,5 +211,33 @@ describe('B2: supersede, near-duplicates and history through MCP', () => {
     await call(client, 'brain_write', { kind: 'update', title: 'Checkout', body: 'The checkout page uses Stripe Elements for card entry.' });
     const dup = await call(client, 'brain_write', { kind: 'update', title: 'Checkout', body: 'the checkout page uses stripe elements, for card entry' });
     expect(dup.text).toMatch(/^Already known as "Checkout"/);
+  });
+});
+
+describe('B4: brain_code', () => {
+  it('prints compact lines with docs, outlines with imports, and callers; agents get no shelf argument', async () => {
+    brain.code.putFile('site', {
+      path: 'src/util.ts',
+      language: 'typescript',
+      contentHash: 'h1',
+      size: 10,
+      imports: ['node:fs'],
+      symbols: [
+        { name: 'slugify', qualified: 'slugify', kind: 'function', line: 3, endLine: 5, signature: 'export function slugify(text: string): string {', doc: 'Turns text into a slug.', parent: null },
+        { name: 'Box', qualified: 'Box', kind: 'class', line: 7, endLine: 9, signature: 'class Box {', doc: null, parent: null },
+        { name: 'make', qualified: 'Box.make', kind: 'method', line: 8, endLine: 8, signature: 'static make() {', doc: null, parent: 'Box' },
+      ],
+      edges: [{ from: 'Box.make', callee: 'slugify', toPath: null, line: 8 }],
+    });
+    const ant = await agent({ write: false });
+    const tool = (await ant.listTools()).tools.find((t) => t.name === 'brain_code')!;
+    expect(Object.keys(tool.inputSchema.properties ?? {})).not.toContain('shelf');
+    expect((await call(ant, 'brain_code', { query: 'slugify' })).text).toBe(
+      '1 symbol(s) match "slugify".\nsrc/util.ts:3 function slugify — export function slugify(text: string): string {\n    Turns text into a slug.',
+    );
+    expect((await call(ant, 'brain_code', { query: 'util.ts', mode: 'file' })).text).toBe(
+      'src/util.ts: 3 symbol(s).\nsrc/util.ts:3 function slugify — export function slugify(text: string): string {\n    Turns text into a slug.\nsrc/util.ts:7 class Box — class Box {\n  src/util.ts:8 method make — static make() {\nimports: node:fs',
+    );
+    expect((await call(ant, 'brain_code', { query: 'slugify', mode: 'callers' })).text).toContain('src/util.ts:8 method Box.make — static make() {');
   });
 });

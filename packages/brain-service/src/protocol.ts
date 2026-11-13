@@ -9,7 +9,7 @@
  */
 import { z } from 'zod';
 import { RecordKindSchema, TrustSchema } from '@insectoids/shared';
-import type { BrainRecord, LinkView, RecordVersion, SearchHit } from '@insectoids/brain';
+import type { BrainRecord, CodeLookup, LinkView, RecordVersion, SearchHit } from '@insectoids/brain';
 
 export const PROTOCOL_VERSION = 1;
 /** Largest frame either side accepts (bytes, one JSON line). */
@@ -87,6 +87,18 @@ export const Params = {
       shelf: Shelf.optional(),
     })
     .strict(),
+  /**
+   * The code map (Phase 2 B4): symbols by name, a file's outline, callers or callees. Read-only. Agents see
+   * their project's map only; the user names the shelf.
+   */
+  code: z
+    .object({
+      query: Text(200),
+      mode: z.enum(['symbol', 'file', 'callers', 'callees']).optional(),
+      limit: z.number().int().min(1).max(100).optional(),
+      shelf: Shelf.optional(),
+    })
+    .strict(),
   get: z.object({ id: Id }).strict(),
   history: z.object({ id: Id }).strict(),
   links: z.object({ id: Id }).strict(),
@@ -140,6 +152,7 @@ export interface Results {
   ping: { v: number; identity: Identity };
   search: SearchHit[];
   read: { text: string; ids: string[]; truncated: boolean };
+  code: CodeLookup;
   get: BrainRecord | null;
   history: RecordVersion[];
   links: LinkView[];
@@ -160,3 +173,20 @@ export const WRITE_METHODS: ReadonlySet<Method> = new Set(['write', 'update', 'a
 export const USER_METHODS: ReadonlySet<Method> = new Set(['admin.issueToken', 'admin.revokeToken', 'unarchive']);
 
 export const isMethod = (m: string): m is Method => Object.hasOwn(Params, m);
+
+/**
+ * Code map lookups as compact lines for agents and the CLI (B4): `path:line kind name — signature`, the
+ * doc's first sentence indented below, then imports (file mode) and a note when the list was cut.
+ */
+export function formatCodeLookup(r: Results['code'], mode: 'symbol' | 'file' | 'callers' | 'callees' = 'symbol'): string {
+  const lines = [r.message];
+  for (const h of r.hits) {
+    const name = h.parent && mode !== 'file' ? `${h.parent}.${h.name}` : h.name;
+    const indent = mode === 'file' && h.parent ? '  ' : '';
+    lines.push(`${indent}${h.path}:${h.line} ${h.kind} ${name} — ${h.signature}`);
+    if (h.doc) lines.push(`${indent}    ${h.doc}`);
+  }
+  if (r.imports.length) lines.push(`imports: ${r.imports.join(', ')}`);
+  if (r.truncated) lines.push('(more matches: narrow the query)');
+  return lines.join('\n');
+}

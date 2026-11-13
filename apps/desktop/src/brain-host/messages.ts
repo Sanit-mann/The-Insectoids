@@ -18,6 +18,8 @@ export interface DoorPaths {
   servicesMcp: string;
   /** onnxruntime-web's WASM folder, for meaning search's model (Phase 2 B1). */
   ortWasmDir?: string;
+  /** @vscode/tree-sitter-wasm's wasm folder (runtime + grammars), for the code map (Phase 2 B4). */
+  codemapWasmDir?: string;
 }
 
 /** What the hive host needs besides the Brain (Phase 1 Step 8: the Hive lives in this process). */
@@ -37,7 +39,7 @@ export interface HiveSetup {
 }
 
 /** Host RPC methods (main -> host). Inputs and outputs are validated in main against the shared schemas. */
-export type HostMethod = 'snapshot' | 'command' | 'changes' | 'project' | 'brainRecent' | 'setLimits';
+export type HostMethod = 'snapshot' | 'command' | 'changes' | 'project' | 'brainRecent' | 'setLimits' | 'codeLookup';
 
 /**
  * Requests the host makes to main (the reverse direction): the secret broker and the Vault live in

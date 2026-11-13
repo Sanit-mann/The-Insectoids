@@ -55,7 +55,7 @@ describe('the bundled MCP door over stdio', () => {
     const mcp = await spawnDoor({ [BRAIN_ENV.endpoint]: service.endpoint, [BRAIN_ENV.token]: token });
 
     expect(mcp.getServerVersion()?.name).toBe('insectoids-brain');
-    expect((await mcp.listTools()).tools).toHaveLength(10);
+    expect((await mcp.listTools()).tools).toHaveLength(11);
 
     const saved = textOf(await mcp.callTool({ name: 'brain_write', arguments: { kind: 'outcome', title: 'Hero shipped', body: 'Hero section built and tested.' } }));
     const id = /Saved as ([\w-]+)/.exec(saved)?.[1];

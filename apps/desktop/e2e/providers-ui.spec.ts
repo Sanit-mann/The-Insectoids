@@ -1,5 +1,6 @@
 import { type Locator, type Page, expect, test } from '@playwright/test';
 import { type LaunchedApp, launchApp } from './support/launch';
+import { holdUntilDone } from './support/hold';
 
 /**
  * API providers tab (Connections 04-D3; Phase 2 · A4). Fake values only: the planted key below is not a
@@ -22,15 +23,8 @@ test.afterAll(async () => {
 
 const tab = (win: Page, name: string) => win.getByRole('tab', { name: new RegExp(`^${name}`) });
 
-async function hold(win: Page, button: Locator): Promise<void> {
-  await button.scrollIntoViewIfNeeded();
-  const box = (await button.boundingBox())!;
-  await win.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await win.mouse.down();
-  await win.waitForTimeout(1500);
-  await win.mouse.up();
-  await win.mouse.move(0, 0);
-}
+/** Hold until the button says it's done (see support/hold.ts), never a fixed wait. */
+const hold = (win: Page, button: Locator): Promise<void> => holdUntilDone(win, button);
 
 const pageNeverShowsKey = async (win: Page): Promise<void> => {
   const seen = await win.evaluate((needle) => {

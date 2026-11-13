@@ -1,15 +1,12 @@
 import { type Locator, type Page, expect, test } from '@playwright/test';
+import { holdUntilDone } from './support/hold';
 import { type LaunchedApp, launchApp, repoGit } from './support/launch';
 
 /** Approve a card: hold-to-approve for destructive items, a click otherwise. */
 async function approveIn(card: Locator, page: Page): Promise<void> {
   const hold = card.getByRole('button', { name: /press and hold/i });
   if (await hold.count()) {
-    const box = (await hold.boundingBox())!;
-    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-    await page.mouse.down();
-    await page.waitForTimeout(1500);
-    await page.mouse.up();
+    await holdUntilDone(page, hold);
   } else {
     await card.getByRole('button', { name: /^Approve/ }).click();
   }

@@ -18,6 +18,8 @@ export const HIVE_IPC = {
   changes: 'hive:changes',
   brainSearch: 'hive:brain-search',
   brainRecord: 'hive:brain-record',
+  /** Look up the code map (Phase 2 B4): symbols, files, who calls what. */
+  codeLookup: 'hive:code-lookup',
   /** Opens the folder picker in main; returns the chosen project or null if cancelled. */
   pickProject: 'hive:pick-project',
   /** main -> renderer push. */
@@ -314,6 +316,60 @@ export const LessonViewSchema = z.object({
 });
 export type LessonView = z.infer<typeof LessonViewSchema>;
 
+/**
+ * The code map (Memory 01-E3, D6; Phase 2 B4): per file of the current project, its symbols (functions,
+ * classes, methods, …), imports and calls, parsed with tree-sitter (no AI). Refreshed by content hash.
+ */
+export const CodeMapViewSchema = z.object({
+  state: z.enum(['off', 'building', 'ready', 'error']),
+  files: z.number().int(),
+  symbols: z.number().int(),
+  /** e.g. [{ language: 'typescript', files: 120 }]. */
+  languages: z.array(z.object({ language: z.string(), files: z.number().int() })),
+  /** Files seen but not mapped (unsupported language, too large, binary). */
+  skipped: z.number().int(),
+  lastBuiltAt: z.number().nullable(),
+  /** While building: files done of total. */
+  progress: z.object({ done: z.number().int(), total: z.number().int() }).nullable(),
+  message: z.string(),
+});
+export type CodeMapView = z.infer<typeof CodeMapViewSchema>;
+
+export const CodeSymbolKindSchema = z.enum(['function', 'class', 'method', 'interface', 'type', 'enum', 'variable', 'module']);
+
+export const CodeLookupRequestSchema = z.object({
+  query: z.string().trim().min(1).max(200),
+  /** symbol: find by name; file: a file's outline; callers / callees: who calls it, what it calls. */
+  mode: z.enum(['symbol', 'file', 'callers', 'callees']),
+});
+
+export const CodeHitSchema = z.object({
+  /** Path relative to the project root, with forward slashes. */
+  path: z.string(),
+  name: z.string(),
+  kind: CodeSymbolKindSchema,
+  /** 1-based lines. */
+  line: z.number().int(),
+  endLine: z.number().int(),
+  /** The declaration line, shortened (e.g. "export function slugify(text: string): string"). */
+  signature: z.string(),
+  /** From a doc comment or the first comment line, if any (no AI). */
+  doc: z.string().nullable(),
+  /** Containing class or namespace, if any. */
+  parent: z.string().nullable(),
+});
+export type CodeHit = z.infer<typeof CodeHitSchema>;
+
+export const CodeLookupResultSchema = z.object({
+  hits: z.array(CodeHitSchema),
+  /** For mode "file": its imports (module specifiers). */
+  imports: z.array(z.string()),
+  /** True when more matched than were returned. */
+  truncated: z.boolean(),
+  message: z.string(),
+});
+export type CodeLookupResult = z.infer<typeof CodeLookupResultSchema>;
+
 export const HiveSnapshotSchema = z.object({
   /** null until the user picks a project folder. */
   project: ProjectViewSchema.nullable(),
@@ -326,6 +382,7 @@ export const HiveSnapshotSchema = z.object({
   librarian: LibrarianViewSchema,
   /** Current lessons for this project and global, newest first (max 50). */
   lessons: z.array(LessonViewSchema),
+  codeMap: CodeMapViewSchema,
   hive: z.object({
     paused: z.boolean(),
     pausedReason: z.string().nullable(),
@@ -369,6 +426,8 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('restoreRecord'), id: Id }),
   /** Run the Librarian now: its free audit always; its LLM review only when an engine is ready (spends tokens). */
   z.object({ type: z.literal('runLibrarian'), review: z.boolean() }),
+  /** Rebuild the code map now (otherwise it refreshes changed files by itself). */
+  z.object({ type: z.literal('rebuildCodeMap') }),
   /** The user confirms a lesson (it then always shows at boot) or retires it (archived, never deleted). */
   z.object({ type: z.literal('confirmLesson'), id: Id }),
   z.object({ type: z.literal('retireLesson'), id: Id }),
@@ -479,6 +538,7 @@ export interface HiveApi {
   changes(req: z.infer<typeof ChangesRequestSchema>): Promise<ChangesView>;
   brainSearch(req: z.infer<typeof BrainSearchRequestSchema>): Promise<BrainHitView[]>;
   brainRecord(id: string): Promise<BrainRecordView | null>;
+  codeLookup(req: z.infer<typeof CodeLookupRequestSchema>): Promise<CodeLookupResult>;
   pickProject(): Promise<ProjectView | null>;
   /** Returns an unsubscribe function. */
   onEvent(listener: (e: HivePush) => void): () => void;

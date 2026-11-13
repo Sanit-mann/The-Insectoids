@@ -124,6 +124,7 @@ export function HoldButton({
   const progress = useMotionValue(0);
   const animationRef = useRef<AnimationPlaybackControls | null>(null);
   const resetRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const holdTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onHoldCompleteRef = useRef(onHoldComplete);
   const shouldReduceMotion = useReducedMotion();
   const clipPath = useTransform(progress, (p) => `inset(0 ${(1 - p) * 100}% 0 0)`);
@@ -137,6 +138,7 @@ export function HoldButton({
       animationRef.current?.stop();
       if (labelTimerRef.current) clearTimeout(labelTimerRef.current);
       if (resetRef.current) clearTimeout(resetRef.current);
+      if (holdTimerRef.current) clearTimeout(holdTimerRef.current);
     },
     [],
   );
@@ -164,23 +166,35 @@ export function HoldButton({
     }
   };
 
+  const clearHoldTimer = () => {
+    if (holdTimerRef.current) {
+      clearTimeout(holdTimerRef.current);
+      holdTimerRef.current = null;
+    }
+  };
+
   const startHold = () => {
     if (phaseRef.current !== 'idle' || disabled) return;
     updatePhase('holding');
     animationRef.current?.stop();
     // Picks up from wherever a previous drain left the fill.
     const remaining = (1 - progress.get()) * holdDuration;
-    animationRef.current = animate(progress, 1, {
-      duration: remaining / 1000,
-      ease: 'linear',
-      onComplete: () => {
-        if (phaseRef.current === 'holding') complete();
-      },
-    });
+    animationRef.current = animate(progress, 1, { duration: remaining / 1000, ease: 'linear' });
+    // Completion follows the clock, not the fill: a hidden or busy window can pause animation frames,
+    // and the hold must still finish on time (Insectoids change).
+    clearHoldTimer();
+    holdTimerRef.current = setTimeout(() => {
+      holdTimerRef.current = null;
+      if (phaseRef.current === 'holding') {
+        progress.set(1);
+        complete();
+      }
+    }, remaining);
   };
 
   const endHold = () => {
     if (phaseRef.current !== 'holding') return;
+    clearHoldTimer();
     updatePhase('idle');
     animationRef.current?.stop();
     animationRef.current = animate(progress, 0, {

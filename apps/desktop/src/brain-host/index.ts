@@ -106,6 +106,8 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
       llm: llmAccess(),
       providers: readyProviders,
       meaning: ms,
+      // The code map (B4): tree-sitter's WASM comes from the door paths (the bundle can't resolve the package).
+      codeMap: { ...(m.doors.codemapWasmDir ? { wasmDir: m.doors.codemapWasmDir } : {}) },
       push: (push) => send({ type: 'push', push }),
       log: (line) => console.log(line),
       // e2e only: seed B2 records, and move the decay clock forward to test fading without waiting.
@@ -172,6 +174,9 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
       return hive.project;
     case 'brainRecent':
       return hive.brainRecent((params ?? {}) as Parameters<HiveManager['brainRecent']>[0]);
+    case 'codeLookup':
+      // Validated in main against CodeLookupRequestSchema before it gets here.
+      return hive.codeLookup(params as Parameters<HiveManager['codeLookup']>[0]);
     case 'setLimits':
       // Built in main from the shared PRESETS table; checked again by setLimits.
       hive.setLimits(params as Parameters<HiveManager['setLimits']>[0]);

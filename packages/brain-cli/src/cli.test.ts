@@ -196,3 +196,37 @@ describe('B2: --supersedes and --history', () => {
     expect(dup.out).toMatch(/^Already known as "Checkout" \(r1\)/);
   });
 });
+
+describe('code (B4)', () => {
+  beforeEach(() => {
+    brain.code.putFile('site', {
+      path: 'src/util.ts',
+      language: 'typescript',
+      contentHash: 'h1',
+      size: 10,
+      imports: ['./a.js'],
+      symbols: [
+        { name: 'slugify', qualified: 'slugify', kind: 'function', line: 3, endLine: 5, signature: 'export function slugify(text: string): string {', doc: 'Turns text into a slug.', parent: null },
+        { name: 'helper', qualified: 'helper', kind: 'function', line: 7, endLine: 9, signature: 'function helper() {', doc: null, parent: null },
+      ],
+      edges: [{ from: 'slugify', callee: 'helper', toPath: null, line: 4 }],
+    });
+  });
+
+  it('finds symbols, outlines files, lists callers and callees', async () => {
+    expect((await run(['code', 'slug'])).out).toBe(
+      '1 symbol(s) match "slug".\nsrc/util.ts:3 function slugify — export function slugify(text: string): string {\n    Turns text into a slug.\n',
+    );
+    expect((await run(['code', 'util.ts', '--file'])).out).toContain('imports: ./a.js');
+    expect((await run(['code', 'helper', '--callers'])).out).toContain('src/util.ts:3 function slugify');
+    expect((await run(['code', 'slugify', '--callees'])).out).toContain('src/util.ts:7 function helper');
+    const json = JSON.parse((await run(['code', 'helper', '--json'])).out) as { hits: Array<{ name: string }> };
+    expect(json.hits.map((h) => h.name)).toEqual(['helper']);
+  });
+
+  it('refuses two modes at once', async () => {
+    const r = await run(['code', 'x', '--file', '--callers']);
+    expect(r.code).toBe(EXIT.usage);
+    expect(r.err).toMatch(/one of --file, --callers, --callees/);
+  });
+});

@@ -1,8 +1,9 @@
-import { Brain, Network, Search } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { Brain, Code2, NotebookText, Network, Search } from 'lucide-react';
+import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { BrainHitView, RecordKind } from '@insectoids/shared';
 import { BrainCareRow } from '@/components/brain/BrainCare';
 import { BrainReader } from '@/components/brain/BrainReader';
+import { CodeMapView } from '@/components/brain/CodeMapView';
 import { KINDS, kindInfo } from '@/components/brain/kinds';
 import { HitStatusBadge } from '@/components/brain/HitStatus';
 import { MatchBadge, MeaningSearchStrip, TURN_ON_ID } from '@/components/brain/MeaningSearch';
@@ -20,7 +21,69 @@ type Results = { state: 'idle' } | { state: 'loading' } | { state: 'error'; mess
  * filter by kind; read a record with its trust, versions and links. Above them (B3): Brain health, the
  * Librarian and the lessons the hive learned. The graph arrives later in Phase 2.
  */
+type BrainView = 'notes' | 'code';
+const VIEWS: Array<{ id: BrainView; label: string; icon: typeof Code2 }> = [
+  { id: 'notes', label: 'Notes', icon: NotebookText },
+  { id: 'code', label: 'Code', icon: Code2 },
+];
+
+/** Notes | Code (Phase 2 B4): the Brain's records, or the code map of the current project. Arrow keys switch. */
+function ViewSwitch({ view, onChange }: { view: BrainView; onChange: (v: BrainView) => void }) {
+  const refs = useRef<Array<HTMLButtonElement | null>>([]);
+  const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
+    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const i = VIEWS.findIndex((v) => v.id === view);
+    const next = (i + step + VIEWS.length) % VIEWS.length;
+    onChange(VIEWS[next]!.id);
+    refs.current[next]?.focus();
+  };
+  return (
+    <div aria-label="Brain view" className="flex w-full gap-1.5" data-testid="brain-view-switch" onKeyDown={onKeyDown} role="tablist">
+      {VIEWS.map((v, i) => {
+        const on = v.id === view;
+        const Icon = v.icon;
+        return (
+          <button
+            aria-selected={on}
+            className={cn(
+              'inline-flex min-h-10 items-center gap-2 rounded-[10px] border px-4 text-sm font-medium',
+              on ? 'border-honey bg-active text-honey-text' : 'border-line text-muted hover:text-text',
+            )}
+            key={v.id}
+            onClick={() => onChange(v.id)}
+            ref={(el) => {
+              refs.current[i] = el;
+            }}
+            role="tab"
+            tabIndex={on ? 0 : -1}
+            type="button"
+          >
+            <Icon aria-hidden="true" className="size-4" />
+            {v.label}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
 export function BrainScreen() {
+  const [view, setView] = useState<BrainView>('notes');
+  if (view === 'code') {
+    return (
+      <div className="flex flex-1 flex-col gap-6 p-6">
+        <ViewSwitch onChange={setView} view={view} />
+        <CodeMapView />
+      </div>
+    );
+  }
+  return <NotesView switcher={<ViewSwitch onChange={setView} view={view} />} />;
+}
+
+/** The Brain's records: search, filters, the reader, and (B3) health, the Librarian and lessons. */
+function NotesView({ switcher }: { switcher: ReactNode }) {
   const { snapshot } = useHive();
   const [query, setQuery] = useState('');
   const [kinds, setKinds] = useState<RecordKind[]>([]);
@@ -58,6 +121,7 @@ export function BrainScreen() {
 
   return (
     <div className="flex flex-1 flex-wrap items-start gap-6 p-6">
+      {switcher}
       <BrainCareRow onOpen={setOpenId} />
       <section aria-label="Search the Brain" className="flex w-full flex-[1_1_300px] flex-col gap-3 md:max-w-[400px]">
         <p className="m-0 text-xs text-muted" data-testid="brain-tidy-intro">

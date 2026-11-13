@@ -33,8 +33,11 @@ test('the Brain host restarts after a crash and keeps its data', async () => {
   expect(pid, 'the Brain host runs as its own process').not.toBeNull();
   process.kill(pid!, 'SIGKILL');
 
-  // The app notices and starts a new host (backoff starts at 1 s). The restart can be quicker than the
-  // UI's status refresh, so the proof is a new process, then "ready" again.
+  // A search right after the crash waits for the restarted Brain instead of failing: the user never
+  // sees "Restarting the Brain…" as an error (this used to fail under load).
+  const hitsAfter = await win.evaluate(() => (globalThis as unknown as AppWindow).insectoids.hive.brainSearch({ query: 'tiny text tools' }));
+
+  // The app started a new host (backoff starts at 1 s), and the status line says "ready" again.
   await expect
     .poll(async () => {
       const now = await brainPid(launched);
@@ -44,7 +47,6 @@ test('the Brain host restarts after a crash and keeps its data', async () => {
   await expect(status).toHaveAttribute('data-state', 'ready', { timeout: 30_000 });
 
   // Nothing lost, and the hive works again.
-  const hitsAfter = await win.evaluate(() => (globalThis as unknown as AppWindow).insectoids.hive.brainSearch({ query: 'tiny text tools' }));
   expect(hitsAfter.map((h) => h.id)).toEqual(hitsBefore.map((h) => h.id));
   const result = await win.evaluate(() => (globalThis as unknown as AppWindow).insectoids.hive.command({ type: 'submitGoal', text: 'Say hello after the crash' }));
   expect(result).toEqual({ ok: true });

@@ -54,6 +54,7 @@ export function brainRules(write: boolean): string {
     '## The Brain',
     '- The hive shares one Brain: the long-term memory for this project. Use the `brain` MCP tools (or the `brain` command in a shell if they are missing).',
     '- Search it before guessing at project conventions, earlier decisions or why something is the way it is.',
+    '- Look code up with `brain_code` before reading whole files (shell: `brain code <name> [--file|--callers|--callees]`): where a symbol is defined, a file outline, who calls what.',
     write
       ? '- Record what the next agent should know: short, specific facts, proposed decisions and outcomes. Never secrets. Facts and decisions you write wait for the user to confirm them.'
       : '- Your Brain access is read-only in this run.',

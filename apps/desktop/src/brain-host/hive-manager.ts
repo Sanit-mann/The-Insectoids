@@ -72,6 +72,8 @@ import {
 } from '@insectoids/shared';
 import { Workspace } from '@insectoids/workspace';
 import { meaningSearchOffView } from './meaning-search';
+import { CodeMapBuilder, codeMapOffView } from './code-map';
+import type { CodeLookupResult } from '@insectoids/shared';
 import type { DoorPaths } from './messages';
 
 /** Longest wait for running agents to wrap up when the project closes. */
@@ -141,6 +143,12 @@ export interface HiveManagerOptions {
    * `reviewEveryMs` (default a week), only while an engine is ready and the hive is idle and not paused.
    */
   librarian?: { reviewEveryCards?: number; reviewEveryMs?: number };
+  /**
+   * The code map (Phase 2 B4): symbols, imports and calls of the project, refreshed by content hash on project
+   * open, after merges, on the user's rebuild and every `refreshEveryMs` (default 10 min) while idle.
+   * `wasmDir`: tree-sitter's WASM folder (the host bundle can't resolve the package). Absent: off.
+   */
+  codeMap?: { wasmDir?: string; refreshEveryMs?: number };
   /** e2e only: seed agent records (near-duplicates, a superseded fact, an old note, two lessons) on the project shelf. */
   seedBrainForE2E?: boolean;
   /** e2e only: the demo Inspector fails C-01's first attempt once (a lesson is learned). */
@@ -268,6 +276,8 @@ export class HiveManager {
   #health: BrainHealth | null = null;
   #lastAuditAt: number | null = null;
   #review: { lastReviewAt: number | null; since: number; cardsSince: number };
+  #codeMap: CodeMapBuilder | null = null;
+  #codeMapTimer: NodeJS.Timeout | null = null;
 
   constructor(o: HiveManagerOptions) {
     this.#o = o;
@@ -281,6 +291,38 @@ export class HiveManager {
     // The Treasurer (Phase 2 A5): limits steer the router, outcomes teach it.
     this.#engines.setLimitState((id) => this.#limitState(id));
     this.#engines.setLearning({ stats: (role) => o.brain.outcomes.stats(role), rng: seededRng(o.seed ?? this.#now()) });
+    if (o.codeMap) {
+      this.#codeMap = new CodeMapBuilder({
+        brain: o.brain,
+        ...(o.codeMap.wasmDir ? { wasmDir: o.codeMap.wasmDir } : {}),
+        ...(o.codeMap.refreshEveryMs !== undefined ? { refreshEveryMs: o.codeMap.refreshEveryMs } : {}),
+        idle: () => this.#idle(),
+        onChange: () => this.#changed('code-map'),
+        ...(o.log ? { log: o.log } : {}),
+      });
+    }
+  }
+
+  /** Look the current project's code map up (the app's Brain screen). */
+  codeLookup(req: { query: string; mode: 'symbol' | 'file' | 'callers' | 'callees' }): CodeLookupResult {
+    if (!this.#codeMap) return { hits: [], imports: [], truncated: false, message: 'The code map is off in this build.' };
+    return this.#codeMap.lookup(req);
+  }
+
+  /** Tests: wait for the code map's current refresh. */
+  async codeMapIdle(): Promise<void> {
+    await this.#codeMap?.settled();
+  }
+
+  /** After a merge the project's files changed: refresh the map shortly (merges often come in a burst). */
+  #codeMapSoon(): void {
+    if (!this.#codeMap || this.#disposed) return;
+    if (this.#codeMapTimer) clearTimeout(this.#codeMapTimer);
+    this.#codeMapTimer = setTimeout(() => {
+      this.#codeMapTimer = null;
+      void this.#codeMap?.refresh();
+    }, 2_000);
+    this.#codeMapTimer.unref?.();
   }
 
   /**
@@ -543,6 +585,8 @@ export class HiveManager {
     if (this.#tidyTimer) clearInterval(this.#tidyTimer);
     if (this.#outTimer) clearTimeout(this.#outTimer);
     if (this.#changedTimer) clearTimeout(this.#changedTimer);
+    if (this.#codeMapTimer) clearTimeout(this.#codeMapTimer);
+    await this.#codeMap?.dispose();
     await this.#closeProject();
   }
 
@@ -563,6 +607,13 @@ export class HiveManager {
     if (cmd.type === 'pause') return this.#pause(cmd.reason ?? 'Paused by you.');
     if (cmd.type === 'resume') return this.#resume();
     if (cmd.type === 'checkEngine') return this.#recheckEngines();
+    if (cmd.type === 'rebuildCodeMap') {
+      if (!this.#codeMap) throw new Error('The code map is off in this build.');
+      this.#mustProject();
+      // Read every file again (not only changed ones); runs in the background, progress shows in the snapshot.
+      void this.#codeMap.refresh({ force: true });
+      return;
+    }
     if (cmd.type === 'tidyBrain') {
       if (!this.#audit(true)) this.#note('brain-tidy', 'The Brain is tidy: nothing to fade.');
       return;
@@ -750,6 +801,7 @@ export class HiveManager {
     this.#project = { view, workspace, hive, timer, undo: new Map() };
     for (const g of this.#goals()) await this.#refreshUndo(this.#project, g.id);
     this.#note('project', `Project: ${view.name} (${view.branch ?? 'detached HEAD'}).`);
+    this.#codeMap?.setProject(root, view.shelf);
   }
 
   async #closeProject(): Promise<void> {
@@ -896,6 +948,7 @@ export class HiveManager {
       brainHealth: this.#health ?? brainHealth({ total: 0, stale: 0, waiting: 0, orphans: 0, unused: 0, lessons: 0 }, 0, null),
       librarian: this.#librarianView(),
       lessons: this.#lessonViews(),
+      codeMap: this.#codeMap?.view() ?? codeMapOffView('The code map is off in this build.'),
       hive: { paused: this.#paused, pausedReason: this.#pausedReason, insectCap: this.#limits.insectCap, working: this.#working() },
       goals: goals.map((g) => this.#goalView(g)),
       cards,
@@ -981,6 +1034,8 @@ export class HiveManager {
   // ---- events → read model ---------------------------------------------------------------------
 
   #onHiveEvent(e: HiveEvent): void {
+    // A card merged into the goal branch, or a goal merged into (or out of) main: the files changed.
+    if (e.type === 'card-verified' || e.type === 'goal-done' || e.type === 'merge-undone' || e.type === 'merge-redone') this.#codeMapSoon();
     if (e.type === 'engine') {
       const run = e.run;
       if (!run || !e.engineEvent) return;

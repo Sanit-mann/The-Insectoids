@@ -221,3 +221,28 @@ describe('meaning search through the service (Phase 2 B1)', () => {
     expect((await ant.search({ query: 'keys' })).map((h) => [h.id, h.match])).toEqual([[id, 'words']]);
   });
 });
+
+describe('the code map (B4)', () => {
+  const file = (path: string, name: string) => ({
+    path,
+    language: 'typescript',
+    contentHash: 'h',
+    size: 10,
+    imports: [],
+    symbols: [{ name, qualified: name, kind: 'function' as const, line: 1, endLine: 3, signature: `function ${name}()`, doc: null, parent: null }],
+    edges: [],
+  });
+
+  it('agents look up only their project map, read-only tokens included; the user names a shelf', async () => {
+    brain.code.putFile('site', file('src/a.ts', 'slugify'));
+    brain.code.putFile('shop', file('src/b.ts', 'secretShopFn'));
+    const ant = await asAgent({ write: false });
+    expect((await ant.code({ query: 'slug' })).hits.map((h) => h.name)).toEqual(['slugify']);
+    expect((await ant.code({ query: 'secretShopFn' })).hits).toEqual([]);
+    expect(await code(ant.code({ query: 'x', shelf: 'shop' }))).toBe('forbidden');
+    expect((await ant.code({ query: 'a.ts', mode: 'file' })).message).toMatch(/src\/a\.ts: 1 symbol/);
+    const user = await open(service.masterToken);
+    expect(await code(user.code({ query: 'x' }))).toBe('bad_request');
+    expect((await user.code({ query: 'secret', shelf: 'shop' })).hits.map((h) => h.path)).toEqual(['src/b.ts']);
+  });
+});

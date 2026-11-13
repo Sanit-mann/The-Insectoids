@@ -151,8 +151,9 @@ function startBrain(brainDir: string): BrainHost {
     },
     onStatus: (s) => {
       scheduleTrayUpdate();
-      // A (re)started Brain has fresh data: the window re-reads everything.
-      if (s.state === 'ready') forwardPush({ type: 'changed', reason: 'brain-ready' });
+      // Every Brain status change reaches the window at once (its status line re-reads), and a (re)started
+      // Brain has fresh data: the window re-reads everything.
+      forwardPush({ type: 'changed', reason: s.state === 'ready' ? 'brain-ready' : `brain-${s.state}` });
     },
     log: (line) => console.log(line),
   });

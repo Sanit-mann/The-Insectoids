@@ -8,3 +8,4 @@ export * from './outcomes';
 export { cosine, packI8, rrf, unpackI8, STOP_WORDS } from './vectors';
 export { FREQUENT_READS, HALF_LIFE_DAYS, importance, rankScore, type ImportanceInput } from './importance';
 export { HEALTH_WEIGHTS, brainHealth } from './health';
+export * from './codemap';

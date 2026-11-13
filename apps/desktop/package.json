@@ -18,6 +18,7 @@
     "@insectoids/brain": "workspace:*",
     "@insectoids/brain-cli": "workspace:*",
     "@insectoids/brain-service": "workspace:*",
+    "@insectoids/codemap": "workspace:*",
     "@insectoids/embeddings": "workspace:*",
     "@insectoids/harness": "workspace:*",
     "@insectoids/shared": "workspace:*",

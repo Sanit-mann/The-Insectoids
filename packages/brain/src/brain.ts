@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
 import type { RecordKind, Trust } from '@insectoids/shared';
 import { ApprovalStore } from './approvals';
+import { CodeMapStore } from './codemap';
 import { transaction } from './db';
 import { GoalStore } from './goals';
 import { ConflictError, SecretError, TrustError } from './errors';
@@ -346,6 +347,14 @@ export class Brain {
   get taskboard(): Taskboard {
     this.#taskboard ??= new Taskboard(this.#db, this.#now);
     return this.#taskboard;
+  }
+
+  #code: CodeMapStore | undefined;
+
+  /** The code map (Memory 01-E3; Phase 2 B4), in the same database behind the same single writer. */
+  get code(): CodeMapStore {
+    this.#code ??= new CodeMapStore(this.#db, this.#now);
+    return this.#code;
   }
 
   #outcomes: OutcomeStore | undefined;

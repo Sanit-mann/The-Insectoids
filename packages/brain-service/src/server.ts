@@ -181,6 +181,24 @@ export async function startBrainService(opts: BrainServiceOptions): Promise<Brai
         ...m,
       });
     },
+    code: (p, who) => {
+      if (who.type === 'agent' && p.shelf && p.shelf !== who.shelf) {
+        throw new ServiceError('forbidden', `This token is limited to the ${who.shelf} shelf.`);
+      }
+      const shelf = who.type === 'agent' ? who.shelf : p.shelf;
+      if (!shelf) throw new ServiceError('bad_request', 'code needs a shelf.');
+      const code = brain.code;
+      switch (p.mode ?? 'symbol') {
+        case 'file':
+          return code.outline(shelf, p.query);
+        case 'callers':
+          return code.callers(shelf, p.query, p.limit);
+        case 'callees':
+          return code.callees(shelf, p.query, p.limit);
+        default:
+          return code.findSymbols(shelf, p.query, p.limit);
+      }
+    },
     get: (p, who) => {
       const rec = brain.get(p.id);
       if (!rec || !visible(who, rec.shelf)) return null;

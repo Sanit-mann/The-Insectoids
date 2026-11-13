@@ -423,3 +423,28 @@ Three milestones, each ending in something the user can try.
   - **Regression found while integrating and fixed:**
     - **The bug:** the new start-up audit ran *after* the e2e seed. With the 90-day test clock, it faded the freshly seeded records, so three B2 e2e tests found nothing.
     - **The fix:** the audit now runs before seeding, with a host regression test; the B2 tests weren't changed.
+- **B4 Code map: done (2026-11-13).** Built by two parallel workers (map and doors; Brain screen view) on the contract additions (`snapshot.codeMap`, `rebuildCodeMap`, `HiveApi.codeLookup`, `HIVE_IPC.codeLookup`). Unit tests: 727 pass with no unhandled errors. e2e: 97 passed, 2 skipped by design, in three full runs in a row. No AI, no network, no real engine runs.
+  - **Parser:** `@vscode/tree-sitter-wasm` 0.3.1 (Microsoft, MIT, no install scripts; it bundles `web-tree-sitter` and the grammar WASM files). No native modules, matching `node:sqlite`. New package `packages/codemap`.
+  - **What it reads:**
+    - TypeScript (`.ts .mts .cts`), TSX, JavaScript (`.js .mjs .cjs .jsx`) and Python. `.d.ts` files are skipped as types only.
+    - Per file it stores symbols (function, class, method, interface, type, enum, variable, module) with lines, signature, parent and the first sentence of the doc comment, plus imports (resolved to project files where possible) and calls (caller → callee, resolved to a file when the import says so).
+  - **Storage (migration v8):** `code_files` (with content hash), `code_symbols`, `code_edges` and `code_map_state`, on the project's shelf. The Brain host stays the single writer.
+  - **Refresh:**
+    - **File list:** `git ls-files`, giving tracked files plus untracked files that `.gitignore` doesn't exclude. Files over 512 KB are skipped and counted.
+    - **What gets re-read:** only files whose content hash changed. Deleted files are forgotten, and changing the extract version re-reads everything once.
+    - **When:** it builds when a project opens, refreshes every 10 minutes while the hive is idle, and rebuilds on demand. The work goes file by file with yields, so the hive never waits on it; one bad file is logged, never fatal.
+    - **Measured on this repo:** 298 files and 1,717 symbols in 1.44 s; a refresh with nothing changed takes 0.30 s.
+  - **Doors** (agents look code up instead of reading whole files):
+    - MCP tool `brain_code`, with modes symbol / file / callers / callees;
+    - CLI `brain code <query> [--file | --callers | --callees]`;
+    - app IPC `codeLookup`.
+  - **UI:** a Notes | Code switch on the Brain screen. Code shows the map's state, languages and counts, a lookup box with the four modes, and "Rebuild".
+  - **Not built yet:** the one-line AI "purpose" per file (08-D6), to be written lazily when a goal needs it. The doc comment's first sentence stands in for now.
+  - **Fixes found while integrating (all e2e flakes under parallel load):**
+    - **The Brain restart race:**
+      - **The bug:** a call made while the Brain host was restarting after a crash failed with "The Brain host stopped." After a crash the state is `failed`, with a retry already scheduled.
+      - **The fix:** `BrainHost.call()` / `read()` now wait (up to 15 s) for a host that is coming back, and retry read-only calls once after a restart. Every Brain status change is pushed to the renderer, so the status line updates at once. The crash test now searches immediately after the kill.
+    - **Hold-to-confirm buttons:**
+      - **The bug:** the hold only completed when its fill animation finished, and a busy or background window can pause animation frames.
+      - **The fix:** completion now follows a plain timer, and the fill is only visual (a change to the Kokonut UI `hold-button`).
+      - **The tests:** they hold until the button reports `data-complete` (`e2e/support/hold.ts`), pinned to one element, since some buttons rename themselves mid-hold. They no longer use a fixed 1.5 s wait. If the page shifts and the button rightly cancels the hold, the helper measures it again and presses again.

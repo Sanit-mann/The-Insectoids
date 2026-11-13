@@ -5,12 +5,15 @@ import {
   BrainSearchRequestSchema,
   ChangesRequestSchema,
   ChangesViewSchema,
+  CodeLookupRequestSchema,
+  CodeLookupResultSchema,
   CommandResultSchema,
   HIVE_IPC,
   HiveCommandSchema,
   HiveSnapshotSchema,
   ProjectViewSchema,
 } from '@insectoids/shared';
+import type { BrainClient } from '@insectoids/brain-service';
 import type { BrainHost } from './brain-host';
 
 interface Deps {
@@ -31,11 +34,6 @@ export function registerHiveIpc(d: Deps): void {
     const h = d.host();
     if (!h) throw new Error('The Brain is not running.');
     return h;
-  };
-  const brain = () => {
-    const c = host().client;
-    if (!c) throw new Error(host().status.message);
-    return c;
   };
   const handle = (channel: string, fn: (arg: unknown) => Promise<unknown>): void => {
     ipcMain.handle(channel, async (event, arg: unknown) => {
@@ -61,20 +59,29 @@ export function registerHiveIpc(d: Deps): void {
     }
     const project = ProjectViewSchema.nullable().parse(await host().call('project'));
     // As the user: the project's shelf plus global (Memory 01-D2).
-    const hits = await brain().search({
-      query: req.query,
-      shelf: project?.shelf ?? 'global',
-      limit: 30,
-      ...(req.kinds ? { kinds: req.kinds } : {}),
-      ...(req.includeHistory ? { includeHistory: true } : {}),
-    });
+    const hits = await host().read((c) =>
+      c.search({
+        query: req.query,
+        shelf: project?.shelf ?? 'global',
+        limit: 30,
+        ...(req.kinds ? { kinds: req.kinds } : {}),
+        ...(req.includeHistory ? { includeHistory: true } : {}),
+      }),
+    );
     // Words + meaning when meaning search is on (the service embeds the query in the Brain host); each hit says how it was found.
     return BrainHitViewSchema.array().parse(hits.map(({ id, kind, shelf, title, summary, match, status }) => ({ id, kind, shelf, title, summary, match, status })));
   });
 
+  // The code map (Phase 2 B4): read-only lookups on the current project's map, answered by the Brain host.
+  handle(HIVE_IPC.codeLookup, async (arg) => CodeLookupResultSchema.parse(await host().call('codeLookup', CodeLookupRequestSchema.parse(arg))));
+
   handle(HIVE_IPC.brainRecord, async (arg) => {
     const id = RecordId.parse(arg);
-    const c = brain();
+    // Read-only: survives a Brain crash-and-restart mid-read (BrainHost.read waits and retries once).
+    return host().read(async (c) => recordView(c, id));
+  });
+
+  async function recordView(c: BrainClient, id: string) {
     const rec = await c.get(id);
     if (!rec) return null;
     const [history, links] = await Promise.all([c.history(id), c.links(id)]);
@@ -110,7 +117,7 @@ export function registerHiveIpc(d: Deps): void {
       archivedReason: rec.archivedReason,
       mergedFrom: live.filter((l) => l.rel === 'merged_into' && l.direction === 'in').map(({ id, title }) => ({ id, title })),
     });
-  });
+  }
 
   handle(HIVE_IPC.pickProject, async () => {
     const win = d.window();

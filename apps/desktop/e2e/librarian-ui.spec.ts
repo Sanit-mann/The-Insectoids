@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { type AppWindow, type LaunchedApp, launchApp } from './support/launch';
+import { holdUntilDone } from './support/hold';
 
 /**
  * Brain screen, Phase 2 B3: Brain health (score and what makes it up), the Librarian (free checks; an AI
@@ -61,10 +62,7 @@ test('lessons can be confirmed and retired from the Brain screen', async () => {
 
   const retireRow = win.locator(`[data-testid="lesson"][data-lesson="${toRetire!.id}"]`);
   const hold = retireRow.getByRole('button', { name: /Hold to retire/ });
-  await hold.hover();
-  await win.mouse.down();
-  await win.waitForTimeout(1500);
-  await win.mouse.up();
+  await holdUntilDone(win, hold);
   await expect(retireRow).toHaveCount(0, { timeout: 10_000 });
   // Retired, not deleted: still readable in the Brain as an archived record.
   const record = await win.evaluate((id) => (globalThis as unknown as AppWindow).insectoids.hive.brainRecord(id), toRetire!.id);

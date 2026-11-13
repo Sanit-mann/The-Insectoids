@@ -16,6 +16,7 @@ describe('resolveDoorPaths', () => {
       hiveTools: join(repo, 'packages', 'hive-tools-mcp', 'dist', 'hive-tools-mcp.mjs'),
       servicesMcp: join(repo, 'packages', 'services-mcp', 'dist', 'services-mcp.mjs'),
       ortWasmDir: join(repo, 'packages', 'embeddings', 'node_modules', 'onnxruntime-web', 'dist'),
+      codemapWasmDir: join(repo, 'packages', 'codemap', 'node_modules', '@vscode', 'tree-sitter-wasm', 'wasm'),
     });
   });
 

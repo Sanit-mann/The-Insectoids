@@ -1,7 +1,7 @@
 import { parseArgs } from 'node:util';
 import { RecordKindSchema } from '@insectoids/shared';
 import { BrainServiceError } from '@insectoids/brain-service/client';
-import type { ErrorCode, Identity, Method, ParamsOf, Results } from '@insectoids/brain-service/protocol';
+import { type ErrorCode, type Identity, type Method, type ParamsOf, type Results, formatCodeLookup } from '@insectoids/brain-service/protocol';
 
 /** What the CLI needs from a Brain connection (BrainClient fits). */
 export interface CliClient {
@@ -33,6 +33,8 @@ Usage: brain <command> [args] [--json]
   search <query> [--kind k]... [--limit n] [--history]   matching records (--history: also superseded/archived)
   read <query> [--kind k]... [--budget n]      best matches packed into ~n tokens (default 800)
   get <id> | history <id> | links <id>
+  code <query> [--file|--callers|--callees] [--limit n]   the project code map: where a symbol is, a file
+                                 outline, who calls it / what it calls. Use it before reading whole files.
   write --kind k --title t --body <text|-> [--summary s] [--source s] [--supersedes id]
   update <id> [--title t] [--body <text|->] [--summary s]
   archive <id>                   hide from search; nothing is ever deleted
@@ -62,7 +64,9 @@ const HINTS: Record<ErrorCode, string> = {
   internal: 'Unexpected Brain error; mention it in your report.',
 };
 
-type OptName = 'kind' | 'limit' | 'budget' | 'title' | 'body' | 'summary' | 'source' | 'rel' | 'json' | 'help' | 'history' | 'supersedes';
+type OptName =
+  | 'kind' | 'limit' | 'budget' | 'title' | 'body' | 'summary' | 'source' | 'rel' | 'json' | 'help' | 'history' | 'supersedes'
+  | 'file' | 'callers' | 'callees';
 const OPTIONS = {
   kind: { type: 'string', multiple: true },
   limit: { type: 'string' },
@@ -74,6 +78,9 @@ const OPTIONS = {
   rel: { type: 'string' },
   history: { type: 'boolean' },
   supersedes: { type: 'string' },
+  file: { type: 'boolean' },
+  callers: { type: 'boolean' },
+  callees: { type: 'boolean' },
   json: { type: 'boolean' },
   help: { type: 'boolean', short: 'h' },
 } as const;
@@ -87,6 +94,7 @@ const COMMANDS: Record<string, [number, number, OptName[]]> = {
   get: [1, 1, []],
   history: [1, 1, []],
   links: [1, 1, []],
+  code: [1, Infinity, ['file', 'callers', 'callees', 'limit']],
   write: [0, 0, ['kind', 'title', 'body', 'summary', 'source', 'supersedes']],
   update: [1, 1, ['title', 'body', 'summary']],
   archive: [1, 1, []],
@@ -146,6 +154,9 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
       if ((v.kind as string[]).length > 1) throw new UsageError('write takes one --kind.');
     }
     if (cmd === 'link' && !v.rel) throw new UsageError('link needs --rel.');
+    if (cmd === 'code' && [v.file, v.callers, v.callees].filter(Boolean).length > 1) {
+      throw new UsageError('code takes one of --file, --callers, --callees.');
+    }
     if (cmd === 'update' && v.title === undefined && v.body === undefined && v.summary === undefined) {
       throw new UsageError('update needs at least one of --title, --body, --summary.');
     }
@@ -208,6 +219,13 @@ export async function runCli(argv: string[], io: CliIO): Promise<number> {
         const tokenBudget = intOpt(str('budget'), 'budget');
         const r = await c.call('read', { query: pos.join(' '), ...(kinds ? { kinds } : {}), ...(tokenBudget !== undefined ? { tokenBudget } : {}) });
         emit(r, () => (r.text ? `${r.text}${r.truncated ? '\n(more matches: narrow the query or raise --budget)' : ''}` : 'No matches.'));
+        break;
+      }
+      case 'code': {
+        const mode = v.file ? 'file' : v.callers ? 'callers' : v.callees ? 'callees' : 'symbol';
+        const limit = intOpt(str('limit'), 'limit');
+        const r = await c.call('code', { query: pos.join(' '), mode, ...(limit !== undefined ? { limit } : {}) });
+        emit(r, () => formatCodeLookup(r, mode));
         break;
       }
       case 'get': {

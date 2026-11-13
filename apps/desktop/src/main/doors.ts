@@ -12,8 +12,9 @@ export function resolveDoorPaths(o: { mainDir: string; isPackaged: boolean; reso
   const runtime = { command: o.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } };
   if (o.isPackaged) {
     const dir = join(o.resourcesPath, 'doors');
-    // TODO(Phase 3, packaging): ship onnxruntime-web's ort-wasm-simd-threaded.{wasm,mjs} in resources/ort.
-    return { runtime, guardHook: join(dir, 'guard-hook.mjs'), brainMcp: join(dir, 'brain-mcp.mjs'), brainCli: join(dir, 'brain.mjs'), hiveTools: join(dir, 'hive-tools-mcp.mjs'), servicesMcp: join(dir, 'services-mcp.mjs'), ortWasmDir: join(o.resourcesPath, 'ort') };
+    // TODO(Phase 3, packaging): ship onnxruntime-web's ort-wasm-simd-threaded.{wasm,mjs} in resources/ort, and
+    // @vscode/tree-sitter-wasm's wasm/ folder (tree-sitter.js, tree-sitter.wasm, the grammars) in resources/tree-sitter.
+    return { runtime, guardHook: join(dir, 'guard-hook.mjs'), brainMcp: join(dir, 'brain-mcp.mjs'), brainCli: join(dir, 'brain.mjs'), hiveTools: join(dir, 'hive-tools-mcp.mjs'), servicesMcp: join(dir, 'services-mcp.mjs'), ortWasmDir: join(o.resourcesPath, 'ort'), codemapWasmDir: join(o.resourcesPath, 'tree-sitter') };
   }
   // mainDir is apps/desktop/out/main; the repo root is four levels up.
   const packages = join(o.mainDir, '..', '..', '..', '..', 'packages');
@@ -26,6 +27,8 @@ export function resolveDoorPaths(o: { mainDir: string; isPackaged: boolean; reso
     servicesMcp: join(packages, 'services-mcp', 'dist', 'services-mcp.mjs'),
     // Dev: the embeddings package's own onnxruntime-web (pnpm links it there); the host bundle can't resolve it.
     ortWasmDir: join(packages, 'embeddings', 'node_modules', 'onnxruntime-web', 'dist'),
+    // Dev: the code map's tree-sitter runtime and grammars (Phase 2 B4), from the codemap package's own install.
+    codemapWasmDir: join(packages, 'codemap', 'node_modules', '@vscode', 'tree-sitter-wasm', 'wasm'),
   };
 }
 

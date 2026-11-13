@@ -1,7 +1,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
 import { BrainClient, BrainServiceError } from '@insectoids/brain-service/client';
-import { type ErrorCode, type Identity, type Method, Params, type ParamsOf, type Results } from '@insectoids/brain-service/protocol';
+import { type ErrorCode, type Identity, type Method, Params, type ParamsOf, type Results, formatCodeLookup } from '@insectoids/brain-service/protocol';
 import type { BrainRecord } from '@insectoids/brain';
 
 export const SERVER_NAME = 'insectoids-brain';
@@ -91,6 +91,7 @@ function instructions(identity: Identity | null, unavailableReason?: string): st
   const lines = [
     "The Insectoids Brain: this project's shared hive memory (decisions, facts, tasks, outcomes).",
     'Start with brain_boot_card. Prefer brain_read for answers packed within a token budget; use brain_get only for a record you need in full.',
+    'Look code up with brain_code before reading whole files: where a symbol is, a file outline, who calls it.',
   ];
   if (canWrite) {
     lines.push(
@@ -138,6 +139,7 @@ export function createBrainMcpServer(source: BrainClient | BrainAccess, opts: Br
   const read = isUser ? Params.read.shape : Params.read.omit({ shelf: true }).shape;
   const boot = isUser ? Params.bootCard.shape : Params.bootCard.omit({ shelf: true }).shape;
   const write = isUser ? Params.write.shape : Params.write.omit({ shelf: true }).shape;
+  const codeShape = isUser ? Params.code.shape : Params.code.omit({ shelf: true }).shape;
 
   server.registerTool(
     'brain_boot_card',
@@ -161,6 +163,17 @@ export function createBrainMcpServer(source: BrainClient | BrainAccess, opts: Br
       run('read', args, (r) =>
         !r.text ? 'No matches.' : r.truncated ? `${r.text}\n(More matches beyond the budget: narrow the query or raise tokenBudget.)` : r.text,
       ),
+  );
+
+  server.registerTool(
+    'brain_code',
+    {
+      description:
+        'Look code up in the project code map before reading whole files. mode "symbol" (default): where a function, class, method or type is defined (exact, then prefix, then contains). "file": a file outline and its imports (full path or its ending). "callers" / "callees": who calls a symbol, what it calls. One line per hit: path:line kind name — signature, then its doc.',
+      inputSchema: codeShape,
+      annotations: READ_ONLY,
+    },
+    (args) => run('code', args, (r) => formatCodeLookup(r, (args as { mode?: 'symbol' | 'file' | 'callers' | 'callees' }).mode)),
   );
 
   server.registerTool(

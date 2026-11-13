@@ -5,6 +5,7 @@ import {
   BrainRecordViewSchema,
   BrainStatusSchema,
   ChangesViewSchema,
+  CodeLookupResultSchema,
   CommandResultSchema,
   HIVE_IPC,
   IntegrationViewSchema,
@@ -48,6 +49,7 @@ const hive: HiveApi = {
   changes: async (req) => ChangesViewSchema.parse(await invoke(HIVE_IPC.changes, req)),
   brainSearch: async (req) => BrainHitViewSchema.array().parse(await invoke(HIVE_IPC.brainSearch, req)),
   brainRecord: async (id) => BrainRecordViewSchema.nullable().parse(await invoke(HIVE_IPC.brainRecord, id)),
+  codeLookup: async (req) => CodeLookupResultSchema.parse(await invoke(HIVE_IPC.codeLookup, req)),
   pickProject: async () => ProjectViewSchema.nullable().parse(await invoke(HIVE_IPC.pickProject)),
   onEvent: (listener) => {
     const handler = (_e: IpcRendererEvent, raw: unknown): void => {

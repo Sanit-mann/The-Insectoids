@@ -220,6 +220,9 @@ describe('hive runs get scoped Brain tokens (Memory 01-D5)', () => {
     // Briefs mention the Brain, with the right access.
     const calls = engine.fake.calls;
     expect(calls.every((c) => c.system.includes('## The Brain'))).toBe(true);
+    // B4: the Queen and every insect are told to look code up before reading whole files.
+    expect(calls.every((c) => c.system.includes('Look code up with `brain_code` before reading whole files'))).toBe(true);
+    expect(calls.some((c) => c.role === 'queen')).toBe(true);
     expect(calls.find((c) => c.role === 'coder')!.system).toContain('Record what the next agent should know');
     expect(calls.find((c) => c.role === 'inspector')!.system).toContain('read-only');
     expect(calls.find((c) => c.role === 'coder')!.brain).toMatchObject({ endpoint: service.endpoint, write: true, doors });

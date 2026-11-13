@@ -199,6 +199,49 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX lesson_hits_record ON lesson_hits (record_id);
   `,
+  // v8: the code map (Memory 01-E3, D6; Phase 2 B4). Per project shelf: each mapped file with its content
+  // hash (refresh only what changed), its symbols, and its calls. Built from the user's project, read-only.
+  `
+  CREATE TABLE code_files (
+    shelf       TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    language    TEXT NOT NULL,
+    content_hash TEXT NOT NULL,
+    size        INTEGER NOT NULL,
+    imports     TEXT NOT NULL,
+    parsed_at   INTEGER NOT NULL,
+    PRIMARY KEY (shelf, path)
+  );
+  CREATE TABLE code_symbols (
+    shelf       TEXT NOT NULL,
+    path        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    qualified   TEXT NOT NULL,
+    kind        TEXT NOT NULL,
+    line        INTEGER NOT NULL,
+    end_line    INTEGER NOT NULL,
+    signature   TEXT NOT NULL,
+    doc         TEXT,
+    parent      TEXT
+  );
+  CREATE INDEX code_symbols_name ON code_symbols (shelf, name COLLATE NOCASE);
+  CREATE INDEX code_symbols_path ON code_symbols (shelf, path);
+  CREATE TABLE code_edges (
+    shelf       TEXT NOT NULL,
+    from_path   TEXT NOT NULL,
+    from_symbol TEXT NOT NULL,
+    callee      TEXT NOT NULL,
+    to_path     TEXT,
+    line        INTEGER NOT NULL
+  );
+  CREATE INDEX code_edges_callee ON code_edges (shelf, callee COLLATE NOCASE);
+  CREATE INDEX code_edges_from ON code_edges (shelf, from_path, from_symbol);
+  CREATE TABLE code_map_state (
+    shelf         TEXT PRIMARY KEY,
+    last_built_at INTEGER,
+    skipped       INTEGER NOT NULL DEFAULT 0
+  );
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {
