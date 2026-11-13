@@ -1,5 +1,28 @@
-import type { CasteView, LibraryItemDetail, LibraryItemView, LibraryStatus } from '@insectoids/shared';
-import { Bot, BookOpenCheck, CircleCheck, CircleDashed, CircleX, FileText, Globe, Library, LoaderCircle, PencilLine, type LucideIcon, Moon, Power, Wrench, WifiOff } from 'lucide-react';
+import type { CasteView, LibraryItemDetail, LibraryItemView, LibraryScan, LibraryStatus } from '@insectoids/shared';
+import {
+  Archive,
+  Bot,
+  BookOpenCheck,
+  CircleCheck,
+  CircleDashed,
+  CircleX,
+  Download,
+  FileText,
+  Globe,
+  Library,
+  LoaderCircle,
+  type LucideIcon,
+  Moon,
+  Package,
+  PencilLine,
+  Power,
+  ShieldAlert,
+  ShieldCheck,
+  ShieldX,
+  Sparkles,
+  WifiOff,
+  Wrench,
+} from 'lucide-react';
 
 /** Status wording follows the shared contract (LibraryStatusSchema), in the user's words. */
 export const STATUS: Record<LibraryStatus, { label: string; icon: LucideIcon; explain: string; className: string }> = {
@@ -24,12 +47,18 @@ export const STATUS: Record<LibraryStatus, { label: string; icon: LucideIcon; ex
   draft: {
     label: 'Draft',
     icon: PencilLine,
-    explain: 'Proposed by the hive and waiting for you.',
+    explain: 'Proposed by the hive or imported by you, scanned, and waiting for your OK.',
+    className: 'border-dashed border-line text-muted',
+  },
+  retired: {
+    label: 'Retired',
+    icon: Archive,
+    explain: 'Taken out of use with your OK (it kept failing or went unused). Never switched on; you can bring it back.',
     className: 'border-dashed border-line text-muted',
   },
 };
 
-export const STATUS_ORDER: LibraryStatus[] = ['active', 'ready', 'dormant', 'draft'];
+export const STATUS_ORDER: LibraryStatus[] = ['active', 'ready', 'dormant', 'draft', 'retired'];
 
 export const KIND: Record<LibraryItemView['kind'], { label: string; plural: string; icon: LucideIcon }> = {
   agent: { label: 'Agent', plural: 'Agents', icon: Bot },
@@ -61,3 +90,25 @@ export function usageLine(u: LibraryItemView['usage']): string {
   if (u.uses === 0) return 'Not used yet';
   return `Used ${u.uses} ${u.uses === 1 ? 'time' : 'times'} · passed ${u.passed}${u.failed ? ` · failed ${u.failed}` : ''}`;
 }
+
+/** Where an item came from (C3). */
+export const ORIGIN: Record<LibraryItemView['origin'], { label: string; icon: LucideIcon }> = {
+  'built-in': { label: 'Built in', icon: Package },
+  learned: { label: 'Learned by the hive', icon: Sparkles },
+  imported: { label: 'Imported by you', icon: Download },
+};
+
+/** The import safety scan's verdict (03-D5), as words + icon, never colour alone. */
+export const VERDICT: Record<LibraryScan['verdict'], { label: string; explain: string; icon: LucideIcon; className: string }> = {
+  clean: { label: 'Clean', explain: 'The safety scan found nothing to worry about.', icon: ShieldCheck, className: 'text-st-done' },
+  warn: { label: 'Needs a look', explain: 'The safety scan found things you should read before you approve it.', icon: ShieldAlert, className: 'text-st-waiting' },
+  blocked: { label: 'Blocked', explain: 'The safety scan found something dangerous.', icon: ShieldX, className: 'text-st-blocked' },
+};
+
+export const RULE: Record<LibraryScan['findings'][number]['rule'], string> = {
+  'hidden-instructions': 'Hidden instructions',
+  exfiltration: 'Sends data out',
+  'risky-script': 'Risky script',
+  secret: 'Looks like a secret',
+  format: 'Format',
+};

@@ -1,5 +1,5 @@
 import { CasteSchema, type LibraryItemView, type LibrarySearchResult, type LibraryStatus } from '@insectoids/shared';
-import { PencilLine, Search, SearchX } from 'lucide-react';
+import { Download, PencilLine, Search, SearchX } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { EmptyState } from '@/components/kokonutui/empty-state';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { casteLabel } from '@/components/hive/format';
 import { cn } from '@/lib/utils';
 import { StatusBadge } from './StatusBadge';
+import { OriginBadge } from './OriginBadge';
 import { KIND, STATUS, STATUS_ORDER, usageLine } from './vocab';
 
 const SEARCH_DEBOUNCE_MS = 250;
@@ -36,7 +37,7 @@ type Load =
   | { state: 'ready'; items: LibraryItemView[]; total: number; counts: LibrarySearchResult['counts']; more: 'idle' | 'loading' | 'error' };
 
 /** The library catalog (Capabilities 03-D8): search, filter by status, kind and caste, open an item. */
-export function CatalogTab({ selected, onSelect }: { selected: string | null; onSelect: (name: string) => void }) {
+export function CatalogTab({ selected, onSelect, version }: { selected: string | null; onSelect: (name: string) => void; version: number }) {
   const [query, setQuery] = useState('');
   const [debounced, setDebounced] = useState('');
   const [statuses, setStatuses] = useState<LibraryStatus[]>([]);
@@ -44,13 +45,44 @@ export function CatalogTab({ selected, onSelect }: { selected: string | null; on
   const [caste, setCaste] = useState('');
   const [attempt, setAttempt] = useState(0);
   const [result, setResult] = useState<{ key: string; load: Load } | null>(null);
+  // Reload when the hive changes something (an approval decided elsewhere, a new draft), debounced.
+  const [tick, setTick] = useState(0);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const off = window.insectoids.hive.onEvent((e) => {
+      if (e.type !== 'changed') return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setTick((t) => t + 1), 800);
+    });
+    return () => {
+      if (timer) clearTimeout(timer);
+      off();
+    };
+  }, []);
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const importItem = (): void => {
+    setImporting(true);
+    setImportError(null);
+    window.insectoids.hive
+      .libraryImport()
+      .then((r) => {
+        if (r.status === 'error') setImportError(r.message);
+        else if (r.status === 'imported') {
+          setAttempt((a) => a + 1);
+          onSelect(r.name);
+        }
+      })
+      .catch((err: unknown) => setImportError(err instanceof Error ? err.message : String(err)))
+      .finally(() => setImporting(false));
+  };
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(query.trim()), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(t);
   }, [query]);
 
-  const key = JSON.stringify([debounced, statuses, kinds, caste, attempt]);
+  const key = JSON.stringify([debounced, statuses, kinds, caste, attempt, version, tick]);
   const load: Load = result?.key === key ? result.load : { state: 'loading' };
   // Keep the last counts on screen while a new search loads, so the chips don't flicker.
   const [counts, setCounts] = useState<LibrarySearchResult['counts'] | null>(null);
@@ -86,6 +118,14 @@ export function CatalogTab({ selected, onSelect }: { selected: string | null; on
 
   return (
     <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Button data-testid="library-import" disabled={importing} onClick={importItem} variant="outline">
+          <Download aria-hidden="true" />
+          {importing ? 'Importing…' : 'Import a skill or agent'}
+        </Button>
+        <p className="m-0 min-w-[200px] flex-1 text-xs text-muted">Pick a folder with a SKILL.md or AGENT.md. It is scanned for safety and waits for your OK.</p>
+      </div>
+      {importError ? <InlineAlert message={importError} onDismiss={() => setImportError(null)} title="Couldn't import it" tone="error" /> : null}
       <label className="flex min-h-10 items-center gap-2 rounded-[10px] border border-line bg-surface px-3 focus-within:border-honey">
         <Search aria-hidden="true" className="size-4 text-muted" />
         <span className="sr-only">Search the library</span>
@@ -184,7 +224,7 @@ export function CatalogTab({ selected, onSelect }: { selected: string | null; on
       {load.state === 'ready' && load.items.length === 0 ? (
         onlyDrafts ? (
           <EmptyState
-            description="When the hive proposes a new skill (Phase 2 C3), it waits here for you."
+            description="When the hive proposes a skill from repeated work, or you import one, it waits here for your OK."
             icon={PencilLine}
             title="No drafts yet."
           />
@@ -235,6 +275,7 @@ export function CatalogTab({ selected, onSelect }: { selected: string | null; on
                         <span className="truncate font-medium">{it.name}</span>
                         <StatusBadge status={it.status} />
                         <span className="text-xs text-muted">{KIND[it.kind].label}</span>
+                        {it.origin !== 'built-in' ? <OriginBadge origin={it.origin} /> : null}
                       </span>
                       <span className="line-clamp-1 text-xs text-muted">{it.description}</span>
                       <span className="text-xs text-muted">

@@ -1,5 +1,5 @@
 import type { ApprovalKind, ApprovalView } from '@insectoids/shared';
-import { CalendarClock, FileCheck2, GitMerge, Lightbulb, type LucideIcon, Map as MapIcon, ShieldAlert } from 'lucide-react';
+import { Archive, CalendarClock, Download, FileCheck2, GitMerge, Lightbulb, type LucideIcon, Map as MapIcon, ShieldAlert, Sparkles } from 'lucide-react';
 import { runCommand } from '@/lib/hive-store';
 
 /** Plain labels and icons for each approval kind (App 07 approval inbox filter chips). */
@@ -10,9 +10,15 @@ export const KIND_META: Record<ApprovalKind, { label: string; plural: string; ic
   decision: { label: 'Decision', plural: 'Decisions', icon: Lightbulb },
   fact: { label: 'Fact', plural: 'Facts', icon: FileCheck2 },
   schedule: { label: 'Schedule', plural: 'Schedules', icon: CalendarClock },
+  skill_proposal: { label: 'New skill from repeated work', plural: 'New skills', icon: Sparkles },
+  skill_import: { label: 'Imported skill or agent', plural: 'Imports', icon: Download },
+  skill_retirement: { label: 'Retire a skill', plural: 'Retirements', icon: Archive },
 };
 
-export const KIND_ORDER: ApprovalKind[] = ['plan', 'risky_action', 'merge', 'decision', 'fact', 'schedule'];
+/** Approvals about a library item: they get an "Open in the Library" link (C3). */
+export const LIBRARY_KINDS: ReadonlySet<ApprovalKind> = new Set<ApprovalKind>(['skill_proposal', 'skill_import', 'skill_retirement']);
+
+export const KIND_ORDER: ApprovalKind[] = ['plan', 'risky_action', 'merge', 'decision', 'fact', 'schedule', 'skill_proposal', 'skill_import', 'skill_retirement'];
 
 /** Approve or deny; throws with the hive's message so the caller can show it. */
 export async function decide(a: Pick<ApprovalView, 'id'>, approve: boolean): Promise<void> {

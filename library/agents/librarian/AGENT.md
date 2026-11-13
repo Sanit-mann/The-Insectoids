@@ -40,6 +40,13 @@ The memory manager (Hive 02, a manager built as reflexes + brain, 02-D8). It kee
 | Decay (B2) | At start and every 6 hours, while no agent is working: fades unused, unimportant agent notes into the archive, with the reason. Never fades what the user wrote or confirmed, including confirmed lessons. |
 | Health score (01-E12) | After each audit: 100 minus capped penalties for stale records, items waiting for the user, orphans, never-read records, near-duplicates only the user can merge, and old unconfirmed lessons. |
 | Duplicate audit | Finds near-duplicate pairs (same rules as on write) where one record is the user's, which no agent may merge away. |
+| Skill retirement (03-D6) | After each audit: a ready skill switched on for 5+ cards that passed less than 40% of the time, or a learned or imported skill unused for 60 days, is proposed for retiring (at most 3 per audit; never a caste's default skill). Only the user's yes retires it; it can be brought back. |
+| Repeated work (03-D6) | After a card passes: when 3+ passed cards of one caste on the project share the same kind of work, and no skill in the library already covers it, the Librarian is asked to draft a skill (below). Once per cluster of work, ever; at most one proposal a day; never while the hive is paused. |
+| Import scan (03-D5) | A skill or agent the user imports is scanned in plain code (hidden instructions, data exfiltration, risky scripts, secrets, format). A blocked one stays a draft with its reasons and is never used; any other waits for the user's yes. |
+
+## Drafting a skill (when repeated work wakes it)
+
+It reads the repeated cards (titles, briefs, "done means", results) and writes one short SKILL.md in the library format, in one fenced `markdown` block. The draft is safety-scanned like an import, saved in the user's own library as a draft, and waits for the user's yes before any insect can carry it.
 
 ## Review (when its brain wakes)
 

@@ -199,6 +199,9 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
       return hive.librarySearch(params as Parameters<HiveManager['librarySearch']>[0]);
     case 'libraryItem':
       return hive.libraryItem(params as string);
+    case 'libraryImport':
+      // main passes the folder the user picked (or the e2e fixture path).
+      return hive.libraryImport((params as { path: string }).path);
     case 'setLimits':
       // Built in main from the shared PRESETS table; checked again by setLimits.
       hive.setLimits(params as Parameters<HiveManager['setLimits']>[0]);

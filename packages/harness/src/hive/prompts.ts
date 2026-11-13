@@ -23,20 +23,40 @@ export const ROLE_SKILLS: Record<'queen' | 'inspector' | 'librarian' | 'scout' |
 
 const stripFrontmatter = (md: string): string => md.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim();
 
+const SKILL_NAME = /^[a-z0-9][a-z0-9-]{0,79}$/;
+
 export class Library {
-  constructor(private readonly dir: string) {}
+  /**
+   * `dir` is the shipped library; `userDir` (C3) the user's own library in the app's data folder, holding
+   * learned and imported skills. Whether a skill may be switched on is the Brain catalog's status (a draft or
+   * retired one never is); this class only reads the files.
+   */
+  constructor(
+    private readonly dir: string,
+    private readonly userDir?: string,
+  ) {}
 
   agent(name: string): string {
     return stripFrontmatter(readFileSync(join(this.dir, 'agents', name, 'AGENT.md'), 'utf8'));
   }
 
   skill(name: string): string {
-    return stripFrontmatter(readFileSync(join(this.dir, 'skills', name, 'SKILL.md'), 'utf8'));
+    const path = this.#skillPath(name);
+    if (!path) throw new Error(`No skill called ${name}.`);
+    return stripFrontmatter(readFileSync(path, 'utf8'));
   }
 
   /** Whether a skill is on disk (only those can be switched on for an insect). */
   hasSkill(name: string): boolean {
-    return /^[a-z0-9][a-z0-9-]{0,79}$/.test(name) && existsSync(join(this.dir, 'skills', name, 'SKILL.md'));
+    return this.#skillPath(name) !== null;
+  }
+
+  /** The shipped skill first, then a learned one, then an imported one. */
+  #skillPath(name: string): string | null {
+    if (!SKILL_NAME.test(name)) return null;
+    const candidates = [join(this.dir, 'skills', name, 'SKILL.md')];
+    if (this.userDir) candidates.push(join(this.userDir, 'learned', 'skills', name, 'SKILL.md'), join(this.userDir, 'imported', 'skills', name, 'SKILL.md'));
+    return candidates.find((p) => existsSync(p)) ?? null;
   }
 
   /**

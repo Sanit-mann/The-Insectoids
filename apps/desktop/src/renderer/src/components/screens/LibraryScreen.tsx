@@ -15,12 +15,15 @@ const TABS: Array<{ id: TabId; label: string }> = [
 /**
  * Library (Capabilities 03-D3, D7, D8; Phase 2 C1). Castes: the 8 insect castes, their default skills and
  * network policy. Catalog: every agent, skill and tool, active, ready, dormant or draft, with an item
- * panel. Read-only here: the hive switches skills on per card by itself.
+ * panel. The hive switches skills on per card by itself; here the user imports items, approves drafts
+ * (learned or imported, after a safety scan) and retires or restores skills (C3, 03-D5/D6).
  */
 export function LibraryScreen() {
   // An item asked for from elsewhere (a card's skill chip) opens straight on the catalog.
   const [opened, setOpened] = useState<string | null>(peekPendingLibraryItem);
   const [tab, setTab] = useState<TabId>(() => (peekPendingLibraryItem() ? 'catalog' : 'castes'));
+  /** Bumped after an action in the item panel (approve, retire…), so the catalog list reloads. */
+  const [version, setVersion] = useState(0);
 
   useEffect(() => {
     clearPendingLibraryItem();
@@ -81,11 +84,11 @@ export function LibraryScreen() {
         ) : (
           <div className="flex flex-wrap items-start gap-6">
             <div className="min-w-0 flex-[1_1_360px] md:max-w-[560px]">
-              <CatalogTab onSelect={setOpened} selected={opened} />
+              <CatalogTab onSelect={setOpened} selected={opened} version={version} />
             </div>
             <div className="min-w-0 flex-[999_1_380px] md:sticky md:top-4">
               {opened ? (
-                <ItemDetail key={opened} name={opened} onClose={() => setOpened(null)} />
+                <ItemDetail key={opened} name={opened} onChanged={() => setVersion((v) => v + 1)} onClose={() => setOpened(null)} />
               ) : (
                 <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-line p-10 text-center text-muted">
                   <BookOpen aria-hidden="true" className="text-honey" size={40} strokeWidth={1.5} />

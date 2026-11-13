@@ -50,17 +50,21 @@ import {
   ALL_CASTES,
   CASTE_NETWORK,
   ROLE_SKILLS,
+  type DoneCard,
+  UserLibrary,
   firstSentence,
   frontmatterDescription,
   loadCatalog,
   type WatchdogThresholds,
 } from '@insectoids/harness';
+import { LibraryKeeper, scanOf } from './library-keeper';
 import {
   type ActivityView,
   type AgentView,
   type ApprovalView,
   type BrainHealth,
   type CasteView,
+  type LibraryImportResult,
   type LibraryItemDetail,
   type LibraryItemView,
   type LibrarySearchRequest,
@@ -175,6 +179,10 @@ export interface HiveManagerOptions {
   watchdog?: Partial<WatchdogThresholds> | false;
   /** The Foreman's brain on stuck cards (C2). Default on. */
   foremanBrain?: boolean;
+  /** The user's own library: learned and imported skills (C3). Default <userData>/library. */
+  userLibraryDir?: string;
+  /** Skill proposals from repeated successful work (C3, 03-D6). Default on. */
+  skillProposals?: boolean;
   /** e2e only: seed agent records (near-duplicates, a superseded fact, an old note, two lessons) on the project shelf. */
   seedBrainForE2E?: boolean;
   /** e2e only: the demo Inspector fails C-01's first attempt once (a lesson is learned). */
@@ -317,6 +325,10 @@ export class HiveManager {
   #lastAuditAt: number | null = null;
   #review: { lastReviewAt: number | null; since: number; cardsSince: number };
   #codeMap: CodeMapBuilder | null = null;
+  readonly #userLib: UserLibrary;
+  readonly #keeper: LibraryKeeper;
+  /** A skill proposal is being drafted (C3): one at a time. */
+  #proposing = false;
   #codeMapTimer: NodeJS.Timeout | null = null;
   /** The managers' brain side (C2): settings, the review clock, and whether a review runs now. */
   #managers: ManagerSettings;
@@ -332,6 +344,14 @@ export class HiveManager {
     this.#limitHits = settings.limitHits ?? {};
     this.#review = settings.librarian ?? { lastReviewAt: null, since: this.#now(), cardsSince: 0 };
     this.#managers = settings.managers ?? { ...DEFAULT_MANAGERS };
+    this.#userLib = new UserLibrary(o.userLibraryDir ?? join(o.userDataDir, 'library'));
+    this.#keeper = new LibraryKeeper({
+      brain: o.brain,
+      user: this.#userLib,
+      note: (kind, text) => this.#note(kind, text),
+      now: () => this.#now(),
+      keep: new Set(Object.values(ROLE_SKILLS).flat()),
+    });
     // The Treasurer (Phase 2 A5): limits steer the router, outcomes teach it.
     this.#engines.setLimitState((id) => this.#limitState(id));
     this.#engines.setLearning({ stats: (role) => o.brain.outcomes.stats(role), rng: seededRng(o.seed ?? this.#now()) });
@@ -483,6 +503,12 @@ export class HiveManager {
       this.#lastAuditAt = this.#now();
       this.#health = brainHealth(brain.healthCounts(shelf, now), duplicates, this.#lastAuditAt);
       this.#libMessage = `Checked the Brain: ${this.#health.score}/100. ${this.#health.message}`;
+      // C3 (03-D6): skills that keep failing, or learned and imported ones gone unused, are proposed for retiring.
+      try {
+        this.#keeper.proposeRetirements();
+      } catch (err) {
+        this.#o.log?.(`Retirement check failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
       return faded.length;
     } catch (err) {
       this.#libMessage = `The Librarian could not check the Brain: ${err instanceof Error ? err.message : String(err)}`;
@@ -776,6 +802,10 @@ export class HiveManager {
   }
 
   async #command(cmd: HiveCommand): Promise<void> {
+    // The library's own approvals and commands (C3) work with or without an open project.
+    if ((cmd.type === 'approve' || cmd.type === 'deny') && this.#keeper.owns(cmd.approvalId)) return this.#keeper.decide(cmd.approvalId, cmd.type === 'approve');
+    if (cmd.type === 'retireLibraryItem') return this.#keeper.retire(cmd.name);
+    if (cmd.type === 'restoreLibraryItem') return this.#keeper.restore(cmd.name);
     if (cmd.type === 'setProject') return this.#setProject(cmd.path);
     if (cmd.type === 'pause') return this.#pause(cmd.reason ?? 'Paused by you.');
     if (cmd.type === 'resume') return this.#resume();
@@ -973,7 +1003,7 @@ export class HiveManager {
       engine: this.#engines.engine(),
       route: (input) => this.#engines.route(input, routeCard),
       ...(this.#o.meaning ? { embedQuery: (text: string) => this.#o.meaning!.embedQuery(text) } : {}),
-      library: new Library(this.#o.libraryDir),
+      library: new Library(this.#o.libraryDir, this.#userLib.root),
       repoDir: root,
       dataDir: join(data, 'projects', view.shelf),
       shelf: view.shelf,
@@ -1332,8 +1362,9 @@ export class HiveManager {
   }
 
   /** The library file's text without its frontmatter, or null when it isn't on disk. */
-  #libraryText(file: string | null): string | null {
+  #libraryText(file: string | null, origin: 'built-in' | 'learned' | 'imported' = 'built-in'): string | null {
     if (!file) return null;
+    if (origin !== 'built-in') return this.#userLib.read(file)?.replace(/^\uFEFF?---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim() ?? null;
     const path = join(this.#o.libraryDir, file);
     if (!existsSync(path)) return null;
     return readFileSync(path, 'utf8').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim();
@@ -1369,6 +1400,9 @@ export class HiveManager {
       safety: i.safety,
       sources: i.sources,
       usage: { uses: i.uses, passed: i.passed, failed: i.failed, lastUsedAt: i.lastUsedAt },
+      origin: i.origin,
+      scan: scanOf(i),
+      approvalId: i.approvalId,
     };
   }
 
@@ -1386,6 +1420,54 @@ export class HiveManager {
     return { items: items.map((i) => this.#libraryItemView(i)), total, counts: this.#o.brain.library.counts() };
   }
 
+  /**
+   * Import a skill or agent folder the user picked (C3, 03-D5): copied into the user library, scanned, and
+   * (unless the scan blocks it) waiting for the user's OK as an approval. Never throws: problems are results.
+   */
+  libraryImport(path: string): LibraryImportResult {
+    try {
+      if (typeof path !== 'string' || !path) return { status: 'error', message: 'No folder was chosen.' };
+      const r = this.#keeper.importFolder(path);
+      this.#changed('library');
+      return r;
+    } catch (err) {
+      return { status: 'error', message: `The import failed: ${err instanceof Error ? err.message : String(err)}` };
+    }
+  }
+
+  /**
+   * Self-learning skills (C3, 03-D6): after a card passes, look for the same kind of work done three times
+   * on this project's shelf. At most one proposal a day, one at a time, never while paused.
+   */
+  #maybeProposeSkill(): void {
+    const p = this.#project;
+    if (this.#disposed || !p || this.#proposing || this.#paused || this.#o.skillProposals === false) return;
+    try {
+      if (!this.#keeper.proposalDue()) return;
+      const { brain } = this.#o;
+      const cards: DoneCard[] = [];
+      for (const g of brain.goals.list().filter((x) => x.shelf === p.view.shelf)) {
+        for (const c of brain.taskboard.list({ goalId: g.id, status: 'done' })) {
+          cards.push({ id: c.id, caste: c.caste, title: c.title, brief: c.brief, acceptance: c.acceptance, result: c.result ?? null, at: c.updatedAt });
+        }
+      }
+      const work = this.#keeper.repeatedWork(cards);
+      if (!work) return;
+      this.#proposing = true;
+      this.#track(
+        this.#keeper
+          .propose(work, (w) => p.hive.draftSkill(w))
+          .catch((err: unknown) => this.#note('error', `The skill proposal failed: ${err instanceof Error ? err.message : String(err)}`))
+          .finally(() => {
+            this.#proposing = false;
+            this.#changed('library');
+          }),
+      );
+    } catch (err) {
+      this.#o.log?.(`Skill proposal check failed: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   /** One item: its text when it is on disk (never for dormant entries), and the latest cards it was carried on. */
   libraryItem(name: string): LibraryItemDetail | null {
     if (typeof name !== 'string' || !name) return null;
@@ -1393,7 +1475,7 @@ export class HiveManager {
     if (!i) return null;
     return {
       item: this.#libraryItemView(i),
-      body: i.status === 'dormant' ? null : this.#libraryText(i.file),
+      body: i.status === 'dormant' ? null : this.#libraryText(i.file, i.origin),
       recentCards: this.#o.brain.library.recentCards(name, 10),
     };
   }
@@ -1465,6 +1547,7 @@ export class HiveManager {
     if (e.type === 'card-verified' || (e.type === 'card-rejected' && e.cardId && this.#o.brain.taskboard.get(e.cardId)?.status === 'failed')) {
       this.#cardFinished();
       queueMicrotask(() => this.#maybeReview());
+      if (e.type === 'card-verified') queueMicrotask(() => this.#maybeProposeSkill());
       this.#managers = { ...this.#managers, cardsSince: this.#managers.cardsSince + 1 };
       this.#writeSettings({ managers: this.#managers });
       queueMicrotask(() => this.#maybeHiveReview());

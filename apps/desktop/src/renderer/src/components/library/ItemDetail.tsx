@@ -4,16 +4,19 @@ import { useEffect, useState } from 'react';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
+import { ItemActions } from './ItemActions';
 import { MarkdownText } from './MarkdownText';
+import { OriginBadge } from './OriginBadge';
+import { ScanResult } from './ScanResult';
 import { StatusBadge } from './StatusBadge';
-import { KIND, OUTCOME, SAFETY, STATUS, usageLine } from './vocab';
+import { KIND, OUTCOME, SAFETY, STATUS, VERDICT, usageLine } from './vocab';
 
 type Load = { state: 'loading' } | { state: 'missing' } | { state: 'error'; message: string } | { state: 'ready'; detail: LibraryItemDetail };
 
 const when = (ms: number): string => new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
 /** One library item: what it is, whether the hive may switch it on, where it came from, how it has done. */
-export function ItemDetail({ name, onClose }: { name: string; onClose: () => void }) {
+export function ItemDetail({ name, onClose, onChanged }: { name: string; onClose: () => void; onChanged?: () => void }) {
   const [result, setResult] = useState<{ key: string; load: Load } | null>(null);
   const [attempt, setAttempt] = useState(0);
   const [showText, setShowText] = useState(false);
@@ -51,16 +54,37 @@ export function ItemDetail({ name, onClose }: { name: string; onClose: () => voi
       ) : null}
       {load.state === 'missing' ? <p className="m-0 text-sm text-muted">This item is not in the library any more.</p> : null}
 
-      {load.state === 'ready' ? <Ready detail={load.detail} setShowText={setShowText} showText={showText} /> : null}
+      {load.state === 'ready' ? (
+        <Ready
+          detail={load.detail}
+          onChanged={() => {
+            setAttempt((a) => a + 1);
+            onChanged?.();
+          }}
+          setShowText={setShowText}
+          showText={showText}
+        />
+      ) : null}
     </aside>
   );
 }
 
-function Ready({ detail, showText, setShowText }: { detail: LibraryItemDetail; showText: boolean; setShowText: (v: boolean) => void }) {
+function Ready({
+  detail,
+  showText,
+  setShowText,
+  onChanged,
+}: {
+  detail: LibraryItemDetail;
+  showText: boolean;
+  setShowText: (v: boolean) => void;
+  onChanged: () => void;
+}) {
   const { item, body, recentCards } = detail;
   const kind = KIND[item.kind];
   const KindIcon = kind.icon;
   const vetted = item.safety === 'vetted';
+  const ScanIcon = item.scan ? VERDICT[item.scan.verdict].icon : ShieldCheck;
   const SafetyIcon = vetted ? ShieldCheck : ShieldAlert;
   return (
     <>
@@ -69,6 +93,7 @@ function Ready({ detail, showText, setShowText }: { detail: LibraryItemDetail; s
           <KindIcon aria-hidden="true" className="size-3.5 text-honey" /> {kind.label}
         </span>
         <StatusBadge status={item.status} />
+        <OriginBadge origin={item.origin} />
         {item.castes.map((c) => (
           <span className="rounded-full border border-line px-2 leading-5 text-muted" key={c}>
             {c}
@@ -80,12 +105,23 @@ function Ready({ detail, showText, setShowText }: { detail: LibraryItemDetail; s
         {STATUS[item.status].explain}
       </p>
 
+      {item.scan ? <ScanResult scan={item.scan} /> : null}
+      <ItemActions item={item} onChanged={onChanged} />
+
       <dl className="m-0 grid grid-cols-[auto_1fr] gap-x-3 gap-y-1.5 text-sm">
         <dt className="text-muted">Safety</dt>
-        <dd className={cn('m-0 inline-flex items-center gap-1.5', vetted ? 'text-text' : 'text-muted')} data-testid="library-safety">
-          <SafetyIcon aria-hidden="true" className={cn('size-4 shrink-0', vetted ? 'text-st-done' : 'text-st-waiting')} />
-          {SAFETY[item.safety]}
-        </dd>
+        {item.scan ? (
+          // Learned and imported items were scanned (C3): say so, instead of the built-in "not checked yet".
+          <dd className="m-0 inline-flex items-center gap-1.5 text-text" data-testid="library-safety">
+            <ScanIcon aria-hidden="true" className={cn('size-4 shrink-0', VERDICT[item.scan.verdict].className)} />
+            Scanned: {VERDICT[item.scan.verdict].label} (see the scan above)
+          </dd>
+        ) : (
+          <dd className={cn('m-0 inline-flex items-center gap-1.5', vetted ? 'text-text' : 'text-muted')} data-testid="library-safety">
+            <SafetyIcon aria-hidden="true" className={cn('size-4 shrink-0', vetted ? 'text-st-done' : 'text-st-waiting')} />
+            {SAFETY[item.safety]}
+          </dd>
+        )}
         <dt className="text-muted">Use</dt>
         <dd className="m-0">{usageLine(item.usage)}{item.usage.lastUsedAt ? ` · last ${when(item.usage.lastUsedAt)}` : ''}</dd>
       </dl>

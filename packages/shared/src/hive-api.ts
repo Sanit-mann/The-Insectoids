@@ -28,6 +28,8 @@ export const HIVE_IPC = {
   libraryCastes: 'hive:library-castes',
   librarySearch: 'hive:library-search',
   libraryItem: 'hive:library-item',
+  /** Import a skill or agent folder (C3): main opens a folder picker; the item is scanned and waits for approval. */
+  libraryImport: 'hive:library-import',
   /** Opens the folder picker in main; returns the chosen project or null if cancelled. */
   pickProject: 'hive:pick-project',
   /** main -> renderer push. */
@@ -501,6 +503,9 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   }),
   /** Run the periodic review now (C2; uses a little of the AI subscription). */
   z.object({ type: z.literal('runReview') }),
+  /** The user retires a ready skill, or brings a retired one back (C3). Built-in caste defaults can't be retired. */
+  z.object({ type: z.literal('retireLibraryItem'), name: z.string().min(1).max(120) }),
+  z.object({ type: z.literal('restoreLibraryItem'), name: z.string().min(1).max(120) }),
   /** Run the Librarian now: its free audit always; its LLM review only when an engine is ready (spends tokens). */
   z.object({ type: z.literal('runLibrarian'), review: z.boolean() }),
   /** Rebuild the code map now (otherwise it refreshes changed files by itself). */
@@ -689,11 +694,31 @@ export type BrainEditResult = z.infer<typeof BrainEditResultSchema>;
  * active = always on for its castes (the warm set: a caste's default skills, and the caste agents themselves);
  * ready = rewritten and safety-checked, on disk, switched on for a card only when that card needs it;
  * dormant = listed in the catalog only (not rewritten or safety-scanned yet): never switched on;
- * draft = proposed by the hive and waiting for the user (skill proposals arrive in C3).
+ * draft = proposed by the hive or imported by the user, scanned, and waiting for the user's OK (C3);
+ * retired = taken out of use with the user's OK (it kept failing or went unused); never switched on, can be restored.
  */
-export const LibraryStatusSchema = z.enum(['active', 'ready', 'dormant', 'draft']);
+export const LibraryStatusSchema = z.enum(['active', 'ready', 'dormant', 'draft', 'retired']);
 export type LibraryStatus = z.infer<typeof LibraryStatusSchema>;
 export const LibraryKindSchema = z.enum(['agent', 'skill', 'tool']);
+
+/**
+ * The import safety scan (03-D5), plain code: hidden instructions, data exfiltration, risky scripts, secrets,
+ * and format. A 'block' finding means it can never be approved; 'warn' findings are shown to the user first.
+ */
+export const LibraryScanFindingSchema = z.object({
+  severity: z.enum(['block', 'warn']),
+  rule: z.enum(['hidden-instructions', 'exfiltration', 'risky-script', 'secret', 'format']),
+  message: z.string(),
+  /** File inside the item (e.g. "SKILL.md", "scripts/setup.sh"). */
+  file: z.string(),
+  line: z.number().int().nullable(),
+});
+export const LibraryScanSchema = z.object({
+  verdict: z.enum(['clean', 'warn', 'blocked']),
+  findings: z.array(LibraryScanFindingSchema),
+  scannedAt: z.number(),
+});
+export type LibraryScan = z.infer<typeof LibraryScanSchema>;
 
 export const LibraryItemViewSchema = z.object({
   name: z.string(),
@@ -706,6 +731,12 @@ export const LibraryItemViewSchema = z.object({
   safety: z.enum(['vetted', 'unscanned']),
   sources: z.array(z.object({ repo: z.string(), path: z.string(), license: z.string().nullable() })),
   usage: z.object({ uses: z.number().int(), passed: z.number().int(), failed: z.number().int(), lastUsedAt: z.number().nullable() }),
+  /** built-in = shipped with the app; learned = drafted by the hive from repeated work; imported = brought in by the user (C3). */
+  origin: z.enum(['built-in', 'learned', 'imported']).default('built-in'),
+  /** Safety scan of learned and imported items (D5); null for built-in ones (vetted before shipping). */
+  scan: LibraryScanSchema.nullable().default(null),
+  /** The waiting approval for a draft (or a retirement proposal), if any. */
+  approvalId: z.string().nullable().default(null),
 });
 export type LibraryItemView = z.infer<typeof LibraryItemViewSchema>;
 
@@ -724,7 +755,13 @@ export const LibrarySearchResultSchema = z.object({
   /** Items matching the filters (before limit/offset). */
   total: z.number().int(),
   /** Whole catalog, by status (ignores filters), for the filter chips. */
-  counts: z.object({ active: z.number().int(), ready: z.number().int(), dormant: z.number().int(), draft: z.number().int() }),
+  counts: z.object({
+    active: z.number().int(),
+    ready: z.number().int(),
+    dormant: z.number().int(),
+    draft: z.number().int(),
+    retired: z.number().int().default(0),
+  }),
 });
 export type LibrarySearchRequest = z.input<typeof LibrarySearchRequestSchema>;
 export type LibrarySearchResult = z.infer<typeof LibrarySearchResultSchema>;
@@ -737,6 +774,14 @@ export const LibraryItemDetailSchema = z.object({
   recentCards: z.array(z.object({ cardId: z.string(), title: z.string(), outcome: z.enum(['passed', 'failed', 'running']), at: z.number() })),
 });
 export type LibraryItemDetail = z.infer<typeof LibraryItemDetailSchema>;
+
+export const LibraryImportResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('cancelled') }),
+  /** Scanned and saved as a draft; `scan.verdict` 'blocked' means it can't be approved (it stays visible with the reasons). */
+  z.object({ status: z.literal('imported'), name: z.string(), scan: LibraryScanSchema }),
+  z.object({ status: z.literal('error'), message: z.string() }),
+]);
+export type LibraryImportResult = z.infer<typeof LibraryImportResultSchema>;
 
 /** One insect caste: what it is for, what it always carries, and what it may reach on the network. */
 export const CasteViewSchema = z.object({
@@ -777,6 +822,8 @@ export interface HiveApi {
   librarySearch(req: LibrarySearchRequest): Promise<LibrarySearchResult>;
   /** null when no item has that name. */
   libraryItem(name: string): Promise<LibraryItemDetail | null>;
+  /** Opens a folder picker for a skill (SKILL.md) or agent (AGENT.md) folder; scans it; it waits as a draft for approval. */
+  libraryImport(): Promise<LibraryImportResult>;
   pickProject(): Promise<ProjectView | null>;
   /** Returns an unsubscribe function. */
   onEvent(listener: (e: HivePush) => void): () => void;

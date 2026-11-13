@@ -1,7 +1,9 @@
 import { useRef, useState } from 'react';
 import type { ApprovalKind, ApprovalView } from '@insectoids/shared';
-import { Inbox } from 'lucide-react';
-import { KIND_META, KIND_ORDER, ago, decide } from '@/components/approvals/kinds';
+import { BookOpen, Inbox } from 'lucide-react';
+import { KIND_META, KIND_ORDER, LIBRARY_KINDS, ago, decide } from '@/components/approvals/kinds';
+import { Button } from '@/components/ui/button';
+import { findLibraryItemForApproval, openLibraryItem } from '@/lib/library-nav';
 import { ApprovalCard } from '@/components/kokonutui/ai-tool-approval';
 import { EmptyState } from '@/components/kokonutui/empty-state';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
@@ -27,7 +29,34 @@ function Chip({ active, label, count, onClick }: { active: boolean; label: strin
   );
 }
 
+/** "Open in the Library" for approvals about a library item (C3). */
+function OpenInLibrary({ item, onError }: { item: ApprovalView; onError: (m: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  if (!LIBRARY_KINDS.has(item.kind)) return null;
+  const open = (): void => {
+    setBusy(true);
+    findLibraryItemForApproval(item)
+      .then((name) => (name ? openLibraryItem(name) : onError("Couldn't find that item in the Library.")))
+      .catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <Button className="mt-2 self-start" data-testid="approval-open-library" disabled={busy} onClick={open} size="sm" variant="outline">
+      <BookOpen aria-hidden="true" /> Open in the Library
+    </Button>
+  );
+}
+
 function Detail({ item, onError }: { item: ApprovalView; onError: (m: string) => void }) {
+  return (
+    <div className="flex flex-col">
+      <DetailCard item={item} onError={onError} />
+      <OpenInLibrary item={item} onError={onError} />
+    </div>
+  );
+}
+
+function DetailCard({ item, onError }: { item: ApprovalView; onError: (m: string) => void }) {
   const meta = KIND_META[item.kind];
   const run = (approve: boolean) => decide(item, approve).catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)));
   if (item.status === 'waiting') {

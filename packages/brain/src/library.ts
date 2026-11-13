@@ -9,7 +9,8 @@ import { STOP_WORDS } from './vectors';
  * how that attempt ended. Search is keyword (FTS5) for now; meaning search over the catalog can come later
  * on the same vectors as records.
  */
-export type LibraryItemStatus = 'active' | 'ready' | 'dormant' | 'draft';
+export type LibraryItemStatus = 'active' | 'ready' | 'dormant' | 'draft' | 'retired';
+export type LibraryOrigin = 'built-in' | 'learned' | 'imported';
 export type LibraryItemKind = 'agent' | 'skill' | 'tool';
 
 export interface LibraryItemInput {
@@ -23,9 +24,19 @@ export interface LibraryItemInput {
   /** Path inside the library folder (e.g. "skills/accessibility/SKILL.md"); null when it isn't on disk. */
   file: string | null;
   sources: Array<{ repo: string; path: string; license: string | null }>;
+  /** built-in = from the library folder; learned / imported = from the user library (C3). Default built-in. */
+  origin?: LibraryOrigin;
 }
 
-export interface LibraryItem extends LibraryItemInput {
+export interface LibraryItem extends Omit<LibraryItemInput, 'origin'> {
+  origin: LibraryOrigin;
+  /** The safety scan of a learned or imported item (stored as given), or null. */
+  scan: unknown;
+  /** The approval waiting on it (a draft, or a retirement proposal), or null. */
+  approvalId: string | null;
+  /** When the user approved a learned or imported item; null until then (and for built-in ones). */
+  approvedAt: number | null;
+  retiredReason: string | null;
   uses: number;
   passed: number;
   failed: number;
@@ -61,6 +72,11 @@ interface ItemRow {
   failed: number;
   tokens: number;
   last_used_at: number | null;
+  origin: LibraryOrigin;
+  scan: string | null;
+  approval_id: string | null;
+  approved_at: number | null;
+  retired_reason: string | null;
 }
 
 /**
@@ -75,7 +91,7 @@ const GENERIC_TASK_WORDS: ReadonlySet<string> = new Set(
   ).split(' '),
 );
 
-const STATUS_ORDER = "CASE i.status WHEN 'active' THEN 0 WHEN 'ready' THEN 1 WHEN 'draft' THEN 2 ELSE 3 END";
+const STATUS_ORDER = "CASE i.status WHEN 'active' THEN 0 WHEN 'ready' THEN 1 WHEN 'draft' THEN 2 WHEN 'dormant' THEN 3 ELSE 4 END";
 const ACTIVATABLE = "i.kind = 'skill' AND i.status IN ('active', 'ready') AND i.file IS NOT NULL";
 
 /** Lower-case words of a query, for FTS and for counting matches. */
@@ -100,6 +116,11 @@ const toItem = (r: ItemRow): LibraryItem => ({
   failed: r.failed,
   tokens: r.tokens,
   lastUsedAt: r.last_used_at,
+  origin: r.origin ?? 'built-in',
+  scan: r.scan ? (JSON.parse(r.scan) as unknown) : null,
+  approvalId: r.approval_id ?? null,
+  approvedAt: r.approved_at ?? null,
+  retiredReason: r.retired_reason ?? null,
 });
 
 export class LibraryStore {
@@ -109,33 +130,140 @@ export class LibraryStore {
   ) {}
 
   /**
-   * Bring the catalog in line with the library folder: insert or update every item (usage is kept), and drop
-   * rows that are no longer in the library (drafts stay: they come from the hive, not the folder).
+   * Bring the catalog in line with the library folders: insert or update every item (usage is kept), and drop
+   * rows that are no longer in them (drafts stay). The user's decisions survive a sync: a retired item stays
+   * retired, and a learned or imported item keeps the status the user's approval gave it (a new one starts
+   * as the given status, normally draft).
    */
   sync(items: readonly LibraryItemInput[]): { added: number; updated: number; removed: number } {
     return transaction(this.db, () => {
       const at = this.now();
       const existing = new Set((this.db.prepare('SELECT name FROM library_items').all() as Array<{ name: string }>).map((r) => r.name));
       const upsert = this.db.prepare(`
-        INSERT INTO library_items (name, kind, status, castes, description, safety, file, sources, synced_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET kind = excluded.kind, status = excluded.status, castes = excluded.castes,
-          description = excluded.description, safety = excluded.safety, file = excluded.file, sources = excluded.sources,
-          synced_at = excluded.synced_at`);
+        INSERT INTO library_items (name, kind, status, castes, description, safety, file, sources, origin, synced_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(name) DO UPDATE SET kind = excluded.kind,
+          status = CASE WHEN library_items.status = 'retired' OR excluded.origin != 'built-in' THEN library_items.status ELSE excluded.status END,
+          castes = excluded.castes, description = excluded.description, safety = excluded.safety, file = excluded.file,
+          sources = excluded.sources, origin = excluded.origin, synced_at = excluded.synced_at`);
       let added = 0;
       const seen = new Set<string>();
       for (const it of items) {
         if (seen.has(it.name)) continue;
         seen.add(it.name);
-        upsert.run(it.name, it.kind, it.status, JSON.stringify(it.castes), it.description, it.safety, it.file, JSON.stringify(it.sources), at);
+        upsert.run(it.name, it.kind, it.status, JSON.stringify(it.castes), it.description, it.safety, it.file, JSON.stringify(it.sources), it.origin ?? 'built-in', at);
         if (!existing.has(it.name)) added++;
       }
       const stale = [...existing].filter((n) => !seen.has(n));
-      const drop = this.db.prepare("DELETE FROM library_items WHERE name = ? AND status != 'draft'");
+      // Only built-in rows follow the folder; learned and imported items live in the user library (C3).
+      const drop = this.db.prepare("DELETE FROM library_items WHERE name = ? AND status != 'draft' AND origin = 'built-in'");
       let removed = 0;
       for (const n of stale) removed += Number(drop.run(n).changes);
       return { added, updated: seen.size - added, removed };
     });
+  }
+
+  // ---- C3: learned and imported items, retirement, proposals --------------------------------------
+
+  /** Add a learned or imported item as a draft, with its scan. Throws when the name is already taken. */
+  addDraft(input: LibraryItemInput & { origin: 'learned' | 'imported'; scan: unknown }): LibraryItem {
+    if (this.get(input.name)) throw new Error(`The library already has an item called "${input.name}".`);
+    this.db
+      .prepare(
+        `INSERT INTO library_items (name, kind, status, castes, description, safety, file, sources, origin, scan, synced_at)
+         VALUES (?, ?, 'draft', ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(input.name, input.kind, JSON.stringify(input.castes), input.description, input.safety, input.file, JSON.stringify(input.sources), input.origin, JSON.stringify(input.scan ?? null), this.now());
+    return this.get(input.name)!;
+  }
+
+  /** Link (or unlink) the approval waiting on an item. */
+  setApproval(name: string, approvalId: string | null): void {
+    this.db.prepare('UPDATE library_items SET approval_id = ? WHERE name = ?').run(approvalId, name);
+  }
+
+  setScan(name: string, scan: unknown): void {
+    this.db.prepare('UPDATE library_items SET scan = ? WHERE name = ?').run(JSON.stringify(scan ?? null), name);
+  }
+
+  /** The user approved a learned or imported draft: it becomes ready (03-D5). */
+  approve(name: string): void {
+    this.db.prepare("UPDATE library_items SET status = 'ready', safety = 'vetted', approved_at = ?, approval_id = NULL, retired_reason = NULL WHERE name = ?").run(this.now(), name);
+  }
+
+  /** Take an item out of use. It stays listed with the reason and is never switched on. */
+  retire(name: string, reason: string): void {
+    this.db.prepare("UPDATE library_items SET status = 'retired', retired_reason = ?, approval_id = NULL WHERE name = ?").run(reason, name);
+  }
+
+  /**
+   * Bring a retired item back. Built-in ones and ones the user approved before go back to ready; a learned or
+   * imported item that was never approved goes back to draft (it still needs the user's yes).
+   */
+  restore(name: string): LibraryItemStatus {
+    const it = this.get(name);
+    if (!it || it.status !== 'retired') throw new Error(`"${name}" is not retired.`);
+    const status: LibraryItemStatus = it.origin === 'built-in' || it.approvedAt !== null ? 'ready' : 'draft';
+    this.db.prepare('UPDATE library_items SET status = ?, retired_reason = NULL WHERE name = ?').run(status, name);
+    return status;
+  }
+
+  remove(name: string): void {
+    this.db.prepare('DELETE FROM library_items WHERE name = ?').run(name);
+  }
+
+  /** Every item from one origin (the user library's items, for syncs and checks). */
+  byOrigin(origin: LibraryOrigin): LibraryItem[] {
+    return (this.db.prepare('SELECT * FROM library_items WHERE origin = ? ORDER BY name').all(origin) as unknown as ItemRow[]).map(toItem);
+  }
+
+  /**
+   * Skills to propose retiring (03-D6): ready skills that keep failing (at least `minUses` uses and a pass
+   * rate under `maxPassRate`), and learned or imported ones unused for `unusedDays`. Built-in ready skills are
+   * not retired for going unused (they wait to be needed); `keep` (the castes' defaults) never are, and
+   * neither is an item that already has an approval waiting.
+   */
+  retirementCandidates(o: { now?: number; minUses?: number; maxPassRate?: number; unusedDays?: number; keep?: ReadonlySet<string> } = {}): Array<LibraryItem & { why: 'failing' | 'unused' }> {
+    const now = o.now ?? this.now();
+    const minUses = o.minUses ?? 5;
+    const maxPassRate = o.maxPassRate ?? 0.4;
+    const unusedMs = (o.unusedDays ?? 60) * 86_400_000;
+    const rows = (this.db.prepare("SELECT * FROM library_items WHERE kind = 'skill' AND status = 'ready' AND approval_id IS NULL ORDER BY name").all() as unknown as ItemRow[]).map(toItem);
+    const out: Array<LibraryItem & { why: 'failing' | 'unused' }> = [];
+    for (const it of rows) {
+      if (o.keep?.has(it.name)) continue;
+      const settled = it.passed + it.failed;
+      if (it.uses >= minUses && settled > 0 && it.passed / settled < maxPassRate) out.push({ ...it, why: 'failing' });
+      else if (it.origin !== 'built-in' && now - (it.lastUsedAt ?? it.approvedAt ?? now) >= unusedMs) out.push({ ...it, why: 'unused' });
+    }
+    return out;
+  }
+
+  /** Whether this cluster of repeated work was already proposed (or turned down): once per cluster, ever. */
+  proposed(cluster: string): boolean {
+    return Boolean(this.db.prepare('SELECT 1 FROM library_proposals WHERE cluster = ?').get(cluster));
+  }
+
+  /** Cards already part of an earlier proposal: they never count toward a new one. */
+  proposedCardIds(): Set<string> {
+    const out = new Set<string>();
+    for (const r of this.db.prepare('SELECT cards FROM library_proposals').all() as Array<{ cards: string }>) {
+      for (const id of JSON.parse(r.cards) as string[]) out.add(id);
+    }
+    return out;
+  }
+
+  /** When the last proposal was made (for the one-a-day limit), or null. */
+  lastProposalAt(): number | null {
+    const r = this.db.prepare('SELECT MAX(at) AS at FROM library_proposals').get() as { at: number | null };
+    return r.at ?? null;
+  }
+
+  /** Remember a cluster of repeated work and what came of it (drafted, dropped, covered by an existing skill). */
+  recordProposal(p: { cluster: string; caste: string; cards: readonly string[]; item: string | null; outcome: string }): void {
+    this.db
+      .prepare('INSERT INTO library_proposals (cluster, at, caste, cards, item, outcome) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(cluster) DO UPDATE SET item = excluded.item, outcome = excluded.outcome')
+      .run(p.cluster, this.now(), p.caste, JSON.stringify(p.cards), p.item, p.outcome);
   }
 
   get(name: string): LibraryItem | undefined {
@@ -197,7 +325,7 @@ export class LibraryStore {
       const parts = queryWords(n);
       return n.startsWith(phrase) || words.every((w) => parts.some((p) => p.startsWith(w))) ? 1 : 2;
     };
-    const statusRank: Record<LibraryItemStatus, number> = { active: 0, ready: 1, draft: 2, dormant: 3 };
+    const statusRank: Record<LibraryItemStatus, number> = { active: 0, ready: 1, draft: 2, dormant: 3, retired: 4 };
     const ranked = rows
       .map((r, textRank) => ({ r, tier: nameTier(r.name), status: statusRank[r.status] ?? 4, textRank }))
       .sort((a, b) => a.tier - b.tier || a.status - b.status || a.textRank - b.textRank);
@@ -206,7 +334,7 @@ export class LibraryStore {
 
   /** The whole catalog by status (for filter chips). */
   counts(): Record<LibraryItemStatus, number> {
-    const out: Record<LibraryItemStatus, number> = { active: 0, ready: 0, dormant: 0, draft: 0 };
+    const out: Record<LibraryItemStatus, number> = { active: 0, ready: 0, dormant: 0, draft: 0, retired: 0 };
     for (const r of this.db.prepare('SELECT status, COUNT(*) AS n FROM library_items GROUP BY status').all() as Array<{ status: LibraryItemStatus; n: number }>) {
       if (r.status in out) out[r.status] = r.n;
     }

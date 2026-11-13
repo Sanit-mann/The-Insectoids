@@ -16,6 +16,7 @@ import { type AuditSummary, type LibrarianProposal, LibrarianProposalSchema, app
 import { type ModelTiers, type Route, type RouteInput, type Tier, TIERS, budgetState, isInsectRole, routeCard, runTokens } from './router';
 import type { ForemanWake, Incident } from '@insectoids/brain';
 import { type RunWatch, type Trip, Watchdog, type WatchdogThresholds } from './watchdog';
+import { type RepeatedWork, type SkillDraft, parseSkillDraft, skillDraftPrompt } from '../library/proposals';
 import {
   type ForemanChoice,
   foremanDecisionPrompt,
@@ -327,6 +328,35 @@ export class Hive {
     if (!result.ok) return { ok: false, proposals: [], dropped: 0, error: `The review run failed (${result.error ?? 'error'}).` };
     const parsed = parseLibrarianReply(result.text, summary);
     return { ok: parsed.error === null, ...parsed };
+  }
+
+  /**
+   * The Librarian drafts a skill from repeated successful work (03-D6, C3): one short read-only run that only
+   * writes its reply. The draft is checked here for a name and a description; the caller scans it and asks
+   * the user. Its cost is recorded like any run (no goal: it belongs to the library).
+   */
+  async draftSkill(work: RepeatedWork): Promise<SkillDraft> {
+    const scratch = join(this.#o.dataDir, 'librarian');
+    mkdirSync(scratch, { recursive: true });
+    const prompt = skillDraftPrompt(this.#o.library, work);
+    let stopRun: (() => void) | undefined;
+    const jobKey = 'Librarian:skill-draft';
+    const done = (async () => {
+      return this.#runWith(null, undefined, {
+        role: 'librarian',
+        agentId: 'Librarian',
+        title: `Draft a skill: ${work.words.slice(0, 4).join(' ')}`,
+        cwd: scratch,
+        system: prompt.system,
+        task: prompt.task,
+        route: this.#route({ role: 'librarian', priority: 'low', attempts: 0 }),
+        guard: { workspace: scratch, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
+      }, (stop) => (stopRun = stop));
+    })().finally(() => this.#jobs.delete(jobKey));
+    this.#jobs.set(jobKey, { kind: 'librarian', cardId: '', done: done.then(() => undefined, () => undefined), stop: () => stopRun?.() });
+    const result = await done;
+    if (!result.ok) return { ok: false, error: `The drafting run failed (${result.error ?? 'error'}).` };
+    return parseSkillDraft(result.text);
   }
 
   /** A lesson from a failed inspection, retried or escalated (01-E10, B3): free, no LLM. Never blocks the hive. */

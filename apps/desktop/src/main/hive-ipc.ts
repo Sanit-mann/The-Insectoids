@@ -9,6 +9,7 @@ import {
   BrainRecordViewSchema,
   BrainSearchRequestSchema,
   CasteViewSchema,
+  LibraryImportResultSchema,
   LibraryItemDetailSchema,
   LibrarySearchRequestSchema,
   LibrarySearchResultSchema,
@@ -139,6 +140,19 @@ export function registerHiveIpc(d: Deps): void {
       mergedFrom: live.filter((l) => l.rel === 'merged_into' && l.direction === 'in').map(({ id, title }) => ({ id, title })),
     });
   }
+
+  // C3: import a skill or agent folder. Under e2e a fixture path replaces the dialog (tests can't click it).
+  handle(HIVE_IPC.libraryImport, async () => {
+    let path = process.env['INSECTOIDS_E2E'] === '1' ? process.env['INSECTOIDS_E2E_IMPORT_PATH'] : undefined;
+    if (!path) {
+      const win = d.window();
+      const options = { title: 'Choose a skill or agent folder (it holds a SKILL.md or an AGENT.md)', properties: ['openDirectory' as const] };
+      const res = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options);
+      if (res.canceled || !res.filePaths[0]) return LibraryImportResultSchema.parse({ status: 'cancelled' });
+      path = res.filePaths[0];
+    }
+    return LibraryImportResultSchema.parse(await host().call('libraryImport', { path }));
+  });
 
   handle(HIVE_IPC.pickProject, async () => {
     const win = d.window();

@@ -553,3 +553,41 @@ Three milestones, each ending in something the user can try.
     - lease-loop detection only wakes the Foreman after a second expiry;
     - managers' reports go to the activity feed, not the Queen's own chat;
     - Watchdog thresholds aren't adjustable in the UI.
+- **C3 Skill proposals and imports: done (2026-11-14).** Built by two parallel workers (backend; Library and Approvals UI and e2e) on the contract additions (approval kinds `skill_proposal`, `skill_import`, `skill_retirement`; library status `retired`; item `origin`, `scan` and `approvalId`; the `libraryImport` IPC; the commands `retireLibraryItem` and `restoreLibraryItem`). Unit tests: 860 pass, 42 of them new, with no unhandled errors. Lint and typecheck are clean. No real engine runs.
+  - **Safety scan (03-D5)**, plain code: it finds hidden instructions, data being sent out, risky scripts, secrets and format problems. Each finding has a file and a line.
+    - **What blocks:**
+      - zero-width or text-direction characters, instructions in HTML comments, "ignore previous instructions" or "don't tell the user", turning off the guard;
+      - known drop sites, or sending credentials or files out;
+      - curl or wget piped into a shell, `iwr | iex`, `powershell -enc`, `rm -rf` on broad paths, persistence, turning off Defender or the firewall, program files;
+      - real-looking keys, via the Brain's secrets detector (the value is never shown).
+    - **Warnings:** shown to the user before approving.
+    - **Limits:** 50 files, 256 KB per file and 1 MB in total; links are never followed.
+    - **The built-in library:** nothing in it is blocked (tested). Two rules were narrowed after false positives on code such as `password = serializers.CharField(...)`.
+  - **Imports:**
+    - **How:** a folder picker; under e2e, `INSECTOIDS_E2E_IMPORT_PATH`.
+    - **Where they go:** each import is scanned, then copied into `<userData>/library/imported/...`, never into the shipped `library/`. It waits as a draft with an approval.
+    - **Blocked imports:** they stay visible with their findings and can never be approved.
+    - **Approval:** "yes" makes it Ready; "no" retires it ("You said no.").
+  - **Proposals (03-D6):**
+    - **The trigger:** after a card passes, 3+ passed cards of one caste whose title and brief overlap (Jaccard ≥ 0.5), and no existing skill covers them.
+    - **The draft:** the Librarian writes a SKILL.md in one short read-only run. It is scanned, stored under `<userData>/library/learned/...`, and waits for approval.
+    - **Limits:** once per cluster, ever, and at most one a day.
+  - **Retirement:**
+    - **The Librarian's audit:** it proposes retiring skills with ≥ 5 uses and a pass rate under 40%, and learned or imported skills unused for 60 days. Caste defaults are never proposed, and at most 3 per audit.
+    - **The user:** can also retire or bring back ready skills directly.
+  - **Storage:** Brain migration v11 adds `origin`, `scan`, `approval_id`, `approved_at` and `retired_reason` to `library_items`, plus a `library_proposals` table. Drafts and retired items are never switched on (tested).
+  - **UI:**
+    - **Library:** "Import a skill or agent", a Retired chip, origin badges, and a scan result panel (verdict and findings as words plus icons).
+    - **Approving:** a click when the scan is clean, a hold when it needs a look; a blocked draft can only be turned down.
+    - **Other actions:** "Hold to retire" and "Bring it back".
+    - **Approvals:** the three new kinds, with "Open in the Library".
+    - **Pieces:** Kokonut UI `hold-button`, `inline-alert` and `empty-state`; shadcn `button`.
+    - **Fix after review:** the "Safety" line said "Not checked yet" for scanned imports; it now shows the scan verdict.
+  - **e2e:**
+    - **Fixtures:** `e2e/fixtures/library/` holds a clean skill and a malicious one. The malicious one has a `curl … | sh` to a `.invalid` host and a zero-width hidden line; it is never run.
+    - **Scenario:** "Add three greeting pages".
+  - **Test stability:** Playwright now runs 4 app copies at a time locally (2 on CI) instead of half the CPU threads. Each test file runs a whole app plus its Brain process, and 8 at once caused timing flakes. With 4 workers, 2 of 3 full runs were clean (124 passed, 3 skipped), at about 50 s each.
+  - **Open issue:** the run that failed came from a **native crash of a Node test-runner process** (exit 0xC0000409) in `providers-ui`. It is the same code as the one Vitest crash in `llm-providers.test.ts` (C1). Both happened inside Node 24.15's own test runners, not in the app, on a Windows Insider build (10.0.26300). Windows logged no crash report. It wasn't hidden with retries.
+  - **Not built yet:**
+    - meaning-based similarity for repeated work (word overlap only);
+    - re-reading learned or imported files after a Brain reset.

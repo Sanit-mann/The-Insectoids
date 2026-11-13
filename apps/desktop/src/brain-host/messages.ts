@@ -47,6 +47,8 @@ export type HostMethod =
   | 'brainRecent'
   | 'setLimits'
   | 'codeLookup'
+  // Library imports (Phase 2 C3): the folder was chosen in main.
+  | 'libraryImport'
   // Brain screens (Phase 2 B5). 'e2eAgentEdit' works only when the host runs under INSECTOIDS_E2E=1.
   | 'brainGraph'
   | 'brainDashboard'

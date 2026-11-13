@@ -58,7 +58,7 @@ describe('search (Library screen)', () => {
     expect(total).toBe(CATALOG.length);
     expect(items[0]!.status).toBe('active');
     expect(items.at(-1)!.status).toBe('dormant');
-    expect(brain.library.counts()).toEqual({ active: 2, ready: 5, dormant: 1, draft: 0 });
+    expect(brain.library.counts()).toEqual({ active: 2, ready: 5, dormant: 1, draft: 0, retired: 0 });
   });
 
   it('matches every word as a prefix in name or description, best first', () => {
@@ -160,5 +160,74 @@ describe('activation (03-D8 Find / Activate / Deactivate)', () => {
       { cardId: 'g.C-01', title: 'g.C-01', outcome: 'passed', at: clock },
       { cardId: 'g.C-02', title: 'g.C-02', outcome: 'running', at: clock - 10 },
     ]);
+  });
+});
+
+describe('learned and imported items, retirement and proposals (03-D5, D6; C3)', () => {
+  const draft = (name: string, origin: 'learned' | 'imported' = 'imported') =>
+    brain.library.addDraft({ ...item(name, { status: 'draft', safety: 'unscanned', file: `${origin}/skills/${name}/SKILL.md` }), origin, scan: { verdict: 'clean', findings: [], scannedAt: clock } });
+
+  it('adds a draft with its origin and scan; a taken name is refused', () => {
+    expect(draft('greeting-pages', 'learned')).toMatchObject({ status: 'draft', origin: 'learned', scan: { verdict: 'clean' }, approvalId: null, approvedAt: null });
+    expect(() => draft('accessibility')).toThrow(/already has an item/);
+  });
+
+  it('never switches on a draft or a retired item; an approved one is ready and can be', () => {
+    draft('greeting-pages');
+    expect(brain.library.isActivatable('greeting-pages')).toBe(false);
+    brain.library.approve('greeting-pages');
+    expect(brain.library.get('greeting-pages')).toMatchObject({ status: 'ready', safety: 'vetted', approvedAt: clock });
+    expect(brain.library.isActivatable('greeting-pages')).toBe(true);
+    brain.library.retire('greeting-pages', 'by you');
+    expect(brain.library.isActivatable('greeting-pages')).toBe(false);
+    expect(brain.library.counts()).toMatchObject({ retired: 1 });
+  });
+
+  it('keeps the user\'s decisions across syncs: retired stays retired, a user item keeps its status', () => {
+    brain.library.retire('accessibility', 'kept failing');
+    draft('greeting-pages');
+    brain.library.approve('greeting-pages');
+    brain.library.sync([...CATALOG, item('greeting-pages', { status: 'draft', origin: 'imported', file: 'imported/skills/greeting-pages/SKILL.md' })]);
+    expect(brain.library.get('accessibility')).toMatchObject({ status: 'retired', retiredReason: 'kept failing' });
+    expect(brain.library.get('greeting-pages')).toMatchObject({ status: 'ready', origin: 'imported' });
+  });
+
+  it('restores a retired item to ready, or to draft when the user never approved it', () => {
+    brain.library.retire('accessibility', 'by you');
+    expect(brain.library.restore('accessibility')).toBe('ready');
+    draft('never-approved');
+    brain.library.retire('never-approved', 'You said no.');
+    expect(brain.library.restore('never-approved')).toBe('draft');
+    expect(() => brain.library.restore('accessibility')).toThrow(/not retired/);
+  });
+
+  it('proposes retiring ready skills that keep failing, and user items unused for 60 days; never kept ones', () => {
+    for (let i = 0; i < 5; i++) {
+      brain.library.activate(`g.C-${i}`, 0, [{ name: 'react-testing', tokens: 10 }, { name: 'accessibility', tokens: 10 }]);
+      brain.library.settle(`g.C-${i}`, 0, i === 0 ? 'passed' : 'failed');
+    }
+    draft('old-import');
+    brain.library.approve('old-import');
+    clock += 61 * 86_400_000;
+    const names = brain.library.retirementCandidates({ keep: new Set(['accessibility']) }).map((c) => `${c.name}:${c.why}`);
+    expect(names).toEqual(['old-import:unused', 'react-testing:failing']);
+    // Built-in ready skills don't go for being unused.
+    expect(names.some((n) => n.startsWith('technical-writing'))).toBe(false);
+  });
+
+  it('remembers each proposed cluster once, and when the last proposal was', () => {
+    expect(brain.library.proposed('coder|greeting page')).toBe(false);
+    expect(brain.library.lastProposalAt()).toBeNull();
+    brain.library.recordProposal({ cluster: 'coder|greeting page', caste: 'coder', cards: ['a', 'b', 'c'], item: 'greeting-pages', outcome: 'drafted' });
+    expect(brain.library.proposed('coder|greeting page')).toBe(true);
+    expect(brain.library.lastProposalAt()).toBe(clock);
+  });
+
+  it('search ranks retired items last and lists them by origin', () => {
+    brain.library.retire('technical-writing', 'by you');
+    const all = brain.library.search({ limit: 100 }).items.map((i) => i.name);
+    expect(all.at(-1)).toBe('technical-writing');
+    draft('greeting-pages', 'learned');
+    expect(brain.library.byOrigin('learned').map((i) => i.name)).toEqual(['greeting-pages']);
   });
 });

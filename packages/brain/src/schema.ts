@@ -323,6 +323,26 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX foreman_decisions_card ON foreman_decisions (card_id);
   `,
+  // v11: skill proposals and imports (Capabilities 03-D5, D6; Phase 2 C3). Items now have an origin
+  // (built-in, learned from repeated work, or imported by the user), the safety scan of learned and imported
+  // ones, the approval waiting on them, and when the user approved them. A retired status persists across
+  // syncs. Proposals remember each cluster of repeated work, so the same work is proposed once, ever.
+  `
+  ALTER TABLE library_items ADD COLUMN origin TEXT NOT NULL DEFAULT 'built-in';
+  ALTER TABLE library_items ADD COLUMN scan TEXT;
+  ALTER TABLE library_items ADD COLUMN approval_id TEXT;
+  ALTER TABLE library_items ADD COLUMN approved_at INTEGER;
+  ALTER TABLE library_items ADD COLUMN retired_reason TEXT;
+  CREATE TABLE library_proposals (
+    cluster   TEXT PRIMARY KEY,
+    at        INTEGER NOT NULL,
+    caste     TEXT NOT NULL,
+    cards     TEXT NOT NULL,
+    item      TEXT,
+    outcome   TEXT NOT NULL
+  );
+  CREATE INDEX library_proposals_at ON library_proposals (at);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {
