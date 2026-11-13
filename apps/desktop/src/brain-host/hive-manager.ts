@@ -11,8 +11,12 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
-import type { Brain, BoardCard, Goal } from '@insectoids/brain';
+import { type Brain, type BoardCard, type Goal, brainHealth } from '@insectoids/brain';
 import {
+  approvalFor,
+  auditSummary,
+  isInsectRole,
+  summaryIsEmpty,
   type ClaudeEvent,
   type ClaudeInstall,
   type BrainAccess,
@@ -21,7 +25,6 @@ import {
   type GeminiAuth,
   type GeminiInstall,
   EngineRegistry,
-  type EngineRequest,
   Hive,
   type HiveEvent,
   Library,
@@ -49,6 +52,9 @@ import {
   type ActivityView,
   type AgentView,
   type ApprovalView,
+  type BrainHealth,
+  type LessonView,
+  type LibrarianView,
   type CardView,
   type ChangesView,
   type CommandResult,
@@ -130,8 +136,15 @@ export interface HiveManagerOptions {
    * `clockShiftDays` moves the decay clock forward (e2e only, to test fading without waiting).
    */
   tidy?: { intervalMs?: number; clockShiftDays?: number };
-  /** e2e only: seed agent records (near-duplicates, a superseded fact, an old note) on the project shelf. */
+  /**
+   * The Librarian's LLM review (B3): after `reviewEveryCards` finished cards (default 20) or every
+   * `reviewEveryMs` (default a week), only while an engine is ready and the hive is idle and not paused.
+   */
+  librarian?: { reviewEveryCards?: number; reviewEveryMs?: number };
+  /** e2e only: seed agent records (near-duplicates, a superseded fact, an old note, two lessons) on the project shelf. */
   seedBrainForE2E?: boolean;
+  /** e2e only: the demo Inspector fails C-01's first attempt once (a lesson is learned). */
+  demoInspectorFailsFirst?: boolean;
   /** Foreman tick interval. Default 1000 ms (500 ms with the demo engine). */
   tickMs?: number;
   /** Tests: replace Claude detection (and the sign-in check, with `auth`). */
@@ -168,7 +181,12 @@ interface HostSettings {
   limits?: Partial<Record<EngineId, EngineLimits>>;
   /** Vendor limits hit: engine -> when the hive may use it again (epoch ms). */
   limitHits?: Partial<Record<EngineId, number>>;
+  /** The Librarian's review clock (B3): last review, the start of the weekly wait, cards finished since. */
+  librarian?: { lastReviewAt: number | null; since: number; cardsSince: number };
 }
+
+const DAY = 86_400_000;
+const LIBRARIAN = 'Librarian';
 
 interface ProjectState {
   view: ProjectView;
@@ -199,7 +217,6 @@ const short = (s: string, n = LINE_MAX): string => {
 };
 const local = (cardId: string): string => cardId.slice(cardId.indexOf('.') + 1);
 const wsId = (card: BoardCard): string => `${local(card.id)}.a${card.attempts}`;
-const isInsectRole = (r: EngineRequest['role']): boolean => r !== 'queen' && r !== 'inspector';
 
 /** Engine output as display lines: text, tool calls and short results. */
 export function engineLines(e: ClaudeEvent): string[] {
@@ -245,6 +262,12 @@ export class HiveManager {
   /** User caps per engine and vendor limit hits (persisted in the host settings). */
   #engineLimits: Partial<Record<EngineId, EngineLimits>>;
   #limitHits: Partial<Record<EngineId, number>>;
+  /** The Librarian (B3): its state, the last audit's health, and the review clock. */
+  #libState: LibrarianView['state'] = 'idle';
+  #libMessage = 'The Librarian checks the Brain at start and every 6 hours.';
+  #health: BrainHealth | null = null;
+  #lastAuditAt: number | null = null;
+  #review: { lastReviewAt: number | null; since: number; cardsSince: number };
 
   constructor(o: HiveManagerOptions) {
     this.#o = o;
@@ -254,6 +277,7 @@ export class HiveManager {
     this.#engines = new EngineRegistry(this.#adapters(), settings.engines ?? {});
     this.#engineLimits = settings.limits ?? {};
     this.#limitHits = settings.limitHits ?? {};
+    this.#review = settings.librarian ?? { lastReviewAt: null, since: this.#now(), cardsSince: 0 };
     // The Treasurer (Phase 2 A5): limits steer the router, outcomes teach it.
     this.#engines.setLimitState((id) => this.#limitState(id));
     this.#engines.setLearning({ stats: (role) => o.brain.outcomes.stats(role), rng: seededRng(o.seed ?? this.#now()) });
@@ -267,7 +291,7 @@ export class HiveManager {
     const scripted = this.#o.engineOverride
       ? fakeAdapter(this.#o.engineOverride, { name: 'Test engine', message: 'A scripted test engine.' })
       : this.#o.engine === 'fake'
-        ? fakeAdapter(demoEngine())
+        ? fakeAdapter(demoEngine(this.#o.demoInspectorFailsFirst ? { inspectorFailsFirst: true } : {}))
         : null;
     const doors = this.#o.doors;
     const claude = claudeAdapter({
@@ -319,41 +343,169 @@ export class HiveManager {
   /** Restore the project and start checking the engine. Never throws: problems become activity lines. */
   async init(): Promise<void> {
     void this.#checkEngines();
-    this.#startTidy();
     const path = this.#o.project ?? this.#readSettings().projectPath;
-    if (!path) return;
-    try {
-      await this.#openProject(path);
-      if (this.#o.seedBrainForE2E) this.#seedBrain();
-    } catch (err) {
-      this.#note('error', `Could not open the project ${path}: ${err instanceof Error ? err.message : String(err)}`);
+    let opened = false;
+    if (path) {
+      try {
+        await this.#openProject(path);
+        opened = true;
+      } catch (err) {
+        this.#note('error', `Could not open the project ${path}: ${err instanceof Error ? err.message : String(err)}`);
+      }
     }
+    // The start audit runs on the project's shelf, and before the e2e seed: with the e2e decay clock moved
+    // ahead, auditing after it would fade the records the seed just wrote.
+    this.#startLibrarian();
+    if (opened && this.#o.seedBrainForE2E) this.#seedBrain();
   }
 
-  // ---- Brain upkeep (B2) ------------------------------------------------------------------------
+  // ---- the Librarian (B2 upkeep moved under it in B3) ---------------------------------------------
 
-  #startTidy(): void {
-    // At start, then every 6 h. Only while idle: a busy hive is reading the Brain right now.
-    this.#tidy(false);
+  #startLibrarian(): void {
+    // Its reflexes: an audit at start, then every 6 h (fading only while idle: a busy hive is reading the Brain).
+    this.#audit(false);
     const every = this.#o.tidy?.intervalMs ?? 6 * 60 * 60_000;
-    this.#tidyTimer = setInterval(() => this.#tidy(false), every);
+    this.#tidyTimer = setInterval(() => {
+      this.#audit(false);
+      this.#maybeReview();
+    }, every);
     this.#tidyTimer.unref?.();
   }
 
-  /** Fade unused, unimportant agent notes into the archive; each one becomes an activity line. */
-  #tidy(force: boolean): number {
-    if (!force && (this.#working() > 0 || this.#o.brain.goals.list('running').length > 0)) return 0;
-    const shift = (this.#o.tidy?.clockShiftDays ?? 0) * 86_400_000;
-    const faded = this.#o.brain.fade({ now: this.#now() + shift });
-    for (const f of faded.slice(0, 10)) {
-      this.#record('brain-tidy', `Faded into the archive: "${f.title}" (unused for ${f.days} days). You can bring it back from the Brain screen.`, {});
-    }
-    if (faded.length > 10) this.#record('brain-tidy', `…and ${faded.length - 10} more faded into the archive.`, {});
-    if (faded.length) this.#changed('brain-tidy');
-    return faded.length;
+  #idle(): boolean {
+    return this.#working() === 0 && this.#o.brain.goals.list('running').length === 0;
   }
 
-  /** e2e: agent records that exercise B2 (two near-duplicates, a superseded fact, an old note). */
+  /**
+   * The Librarian's free audit (code only): fade unused agent notes (B2 decay), then score the Brain's
+   * health and count the near-duplicates only the user can merge. Returns how many notes faded.
+   */
+  #audit(force: boolean): number {
+    if (this.#libState === 'idle') this.#libState = 'auditing';
+    try {
+      const shift = (this.#o.tidy?.clockShiftDays ?? 0) * DAY;
+      const now = this.#now() + shift;
+      const { brain } = this.#o;
+      const faded = force || this.#idle() ? brain.fade({ now }) : [];
+      for (const f of faded.slice(0, 10)) {
+        this.#record('brain-tidy', `Faded into the archive: "${f.title}" (unused for ${f.days} days). You can bring it back from the Brain screen.`, {});
+      }
+      if (faded.length > 10) this.#record('brain-tidy', `…and ${faded.length - 10} more faded into the archive.`, {});
+      const shelf = this.#project?.view.shelf ?? 'global';
+      const duplicates = brain.duplicatePairs(shelf).filter((p) => p.userInvolved).length;
+      this.#lastAuditAt = this.#now();
+      this.#health = brainHealth(brain.healthCounts(shelf, now), duplicates, this.#lastAuditAt);
+      this.#libMessage = `Checked the Brain: ${this.#health.score}/100. ${this.#health.message}`;
+      return faded.length;
+    } catch (err) {
+      this.#libMessage = `The Librarian could not check the Brain: ${err instanceof Error ? err.message : String(err)}`;
+      return 0;
+    } finally {
+      this.#libState = this.#libState === 'auditing' ? 'idle' : this.#libState;
+      this.#changed('librarian');
+    }
+  }
+
+  /** Why the LLM review can't run now, or null when it can. */
+  #reviewBlocked(): string | null {
+    if (!this.#project) return 'Open a project first.';
+    if (this.#libState === 'reviewing') return 'The Librarian is already reviewing.';
+    if (!this.#engines.defaultEngine()) return 'No AI engine is ready.';
+    if (this.#paused) return 'The hive is paused.';
+    if (this.#working() > 0) return 'Agents are working; the Librarian reviews when the hive is idle.';
+    return null;
+  }
+
+  #reviewDue(): boolean {
+    const everyCards = this.#o.librarian?.reviewEveryCards ?? 20;
+    const everyMs = this.#o.librarian?.reviewEveryMs ?? 7 * DAY;
+    return this.#review.cardsSince >= everyCards || this.#now() - this.#review.since >= everyMs;
+  }
+
+  /** Wake the Librarian's brain when it is due and allowed (never while busy, paused or engine-less). */
+  #maybeReview(): void {
+    if (this.#disposed || !this.#reviewDue() || this.#reviewBlocked()) return;
+    this.#track(this.#runReview());
+  }
+
+  /**
+   * The Librarian's LLM review: a read-only run over a compact audit summary. Each valid proposal becomes
+   * an approval; nothing changes until the user says yes. The Queen relays one line to the user.
+   */
+  async #runReview(): Promise<void> {
+    const p = this.#project;
+    if (!p) return;
+    const { brain } = this.#o;
+    const now = this.#now();
+    this.#review = { lastReviewAt: now, since: now, cardsSince: 0 };
+    this.#writeSettings({ librarian: this.#review });
+    const summary = auditSummary(brain, p.view.shelf, now + (this.#o.tidy?.clockShiftDays ?? 0) * DAY);
+    if (summaryIsEmpty(summary)) {
+      this.#libMessage = 'Reviewed the Brain: nothing needs you.';
+      this.#note('librarian', 'The Librarian looked over the Brain: nothing needs you.');
+      return;
+    }
+    this.#libState = 'reviewing';
+    this.#libMessage = 'Reviewing the Brain with AI.';
+    this.#changed('librarian');
+    try {
+      const r = await p.hive.librarianReview(summary);
+      if (this.#disposed) return;
+      for (const proposal of r.proposals) brain.approvals.create(approvalFor(proposal, brain));
+      const n = r.proposals.length;
+      this.#libMessage = r.error ? `The review gave nothing usable: ${r.error}` : n ? `Proposed ${n} change${n === 1 ? '' : 's'} for you to check.` : 'Reviewed the Brain: nothing to propose.';
+      if (r.error) this.#note('librarian', `The Librarian's review gave nothing usable (${r.error}). Nothing changed.`);
+      else if (n) this.#note('librarian', `The Librarian found ${n} thing${n === 1 ? '' : 's'} for you to check.`);
+      else this.#note('librarian', 'The Librarian reviewed the Brain: nothing to propose.');
+    } catch (err) {
+      this.#libMessage = 'The review failed. Nothing changed.';
+      this.#note('error', `The Librarian's review failed: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      this.#libState = 'idle';
+      this.#changed('librarian');
+    }
+  }
+
+  /** A card finished (verified, or failed for good): counts toward the next review. */
+  #cardFinished(): void {
+    this.#review = { ...this.#review, cardsSince: this.#review.cardsSince + 1 };
+    this.#writeSettings({ librarian: this.#review });
+  }
+
+  #nextReview(): string {
+    const everyCards = this.#o.librarian?.reviewEveryCards ?? 20;
+    const everyMs = this.#o.librarian?.reviewEveryMs ?? 7 * DAY;
+    if (this.#libState === 'reviewing') return 'Reviewing now.';
+    const left = Math.max(0, everyCards - this.#review.cardsSince);
+    const days = Math.max(0, Math.ceil((this.#review.since + everyMs - this.#now()) / DAY));
+    if (!left || !days) return 'Due now; it waits for an idle hive with an engine ready.';
+    const when = days === 1 ? 'tomorrow' : `in ${days} days`;
+    return `After ${left} more finished card${left === 1 ? '' : 's'} or ${when}, whichever comes first.`;
+  }
+
+  #librarianView(): LibrarianView {
+    const proposalsWaiting = this.#o.brain.approvals.list().filter((a) => a.status === 'waiting' && a.from === LIBRARIAN).length;
+    return {
+      state: this.#libState,
+      lastAuditAt: this.#lastAuditAt,
+      lastReviewAt: this.#review.lastReviewAt,
+      nextReview: this.#nextReview(),
+      proposalsWaiting,
+      message: this.#libMessage,
+    };
+  }
+
+  #lessonViews(): LessonView[] {
+    const shelf = this.#project?.view.shelf;
+    if (!shelf) return [];
+    const { brain } = this.#o;
+    return brain.lessons(shelf, 50).map((l) => {
+      const card = l.source ? brain.taskboard.get(l.source) : undefined;
+      return { id: l.id, title: l.title, body: l.body, trust: l.trust, source: card?.title ?? l.source ?? null, seen: l.seen, createdAt: l.createdAt };
+    });
+  }
+
+  /** e2e: agent records that exercise B2 (two near-duplicates, a superseded fact, an old note) and B3 (two lessons). */
   #seedBrain(): void {
     const shelf = this.#project?.view.shelf;
     if (!shelf) return;
@@ -364,6 +516,9 @@ export class HiveManager {
     const old = b.write({ kind: 'fact', shelf, title: 'Hosting provider', body: 'The site is hosted on Netlify.' }, ant).id;
     b.write({ kind: 'fact', shelf, title: 'Hosting provider', body: 'The site moved to Vercel hosting.', supersedes: old }, ant);
     b.write({ kind: 'agent_memory', shelf, title: 'Scratch idea', body: 'Maybe try a carousel on the landing page someday.' }, ant);
+    const lib = { type: 'agent' as const, id: LIBRARIAN };
+    b.learn({ shelf, title: 'Don\'t hand in "Add the pricing table" as done because the prices were placeholders', body: 'Card: Add the pricing table\nWhat the Inspector found: the prices were placeholders.' }, lib);
+    b.learn({ shelf, title: 'Don\'t hand in "Fix the login test" as done because the test was skipped, not fixed', body: 'Card: Fix the login test\nWhat the Inspector found: the test was skipped, not fixed.' }, lib);
   }
 
   /** Apply a safety preset now: the current hive and every project opened later. */
@@ -409,7 +564,29 @@ export class HiveManager {
     if (cmd.type === 'resume') return this.#resume();
     if (cmd.type === 'checkEngine') return this.#recheckEngines();
     if (cmd.type === 'tidyBrain') {
-      if (!this.#tidy(true)) this.#note('brain-tidy', 'The Brain is tidy: nothing to fade.');
+      if (!this.#audit(true)) this.#note('brain-tidy', 'The Brain is tidy: nothing to fade.');
+      return;
+    }
+    if (cmd.type === 'runLibrarian') {
+      // The free audit always runs (fading too: the user asked); the LLM review only when it may.
+      this.#audit(true);
+      if (!cmd.review) return;
+      const blocked = this.#reviewBlocked();
+      if (blocked) throw new Error(`The Librarian can't review now: ${blocked}`);
+      this.#track(this.#runReview());
+      await Promise.resolve();
+      return;
+    }
+    if (cmd.type === 'confirmLesson' || cmd.type === 'retireLesson') {
+      const rec = this.#o.brain.get(cmd.id);
+      if (!rec || rec.kind !== 'lesson') throw new Error('No such lesson.');
+      if (cmd.type === 'confirmLesson') {
+        this.#o.brain.update(cmd.id, { trust: 'confirmed' }, { type: 'user' });
+        this.#note('lesson', `Confirmed the lesson: ${short(rec.title, 120)}`);
+      } else {
+        this.#o.brain.archive(cmd.id, { type: 'user' }, 'retired by you');
+        this.#note('lesson', `Retired the lesson (you can bring it back): ${short(rec.title, 120)}`);
+      }
       return;
     }
     if (cmd.type === 'restoreRecord') {
@@ -511,6 +688,8 @@ export class HiveManager {
     if (this.#project && this.#working() > 0) throw new Error('Agents are working. Pause the hive and wait for them to stop before switching projects.');
     await this.#openProject(path);
     if (!this.#o.project) this.#writeSettings({ projectPath: this.#project!.view.path });
+    // A new shelf: score its health at once (read-only apart from the usual fading of idle agent notes).
+    this.#audit(false);
   }
 
   async #openProject(path: string): Promise<void> {
@@ -714,6 +893,9 @@ export class HiveManager {
       engine: this.#engineView(),
       engines: this.#engines.cards().map((c): EngineCard => ({ ...c, usage: this.#usage(c.id) })),
       meaningSearch: this.#o.meaning?.view() ?? meaningSearchOffView(),
+      brainHealth: this.#health ?? brainHealth({ total: 0, stale: 0, waiting: 0, orphans: 0, unused: 0, lessons: 0 }, 0, null),
+      librarian: this.#librarianView(),
+      lessons: this.#lessonViews(),
       hive: { paused: this.#paused, pausedReason: this.#pausedReason, insectCap: this.#limits.insectCap, working: this.#working() },
       goals: goals.map((g) => this.#goalView(g)),
       cards,
@@ -817,7 +999,7 @@ export class HiveManager {
       const lane: AgentView = {
         runId: r.runId,
         agentId: e.agentId ?? r.runId,
-        role: r.role === 'queen' ? 'queen' : r.role === 'inspector' ? 'inspector' : 'insect',
+        role: r.role === 'queen' || r.role === 'inspector' || r.role === 'librarian' ? r.role : 'insect',
         caste: isInsectRole(r.role) ? (r.role as AgentView['caste']) : null,
         goalId: e.goalId ?? null,
         cardId: e.cardId ?? null,
@@ -849,7 +1031,13 @@ export class HiveManager {
         lane.endedAt = this.#now();
       }
       this.#changed('run-ended');
+      // The hive may just have gone idle: a review that came due while it was busy can run now.
+      if (this.#working() === 0) queueMicrotask(() => this.#maybeReview());
       return;
+    }
+    if (e.type === 'card-verified' || (e.type === 'card-rejected' && e.cardId && this.#o.brain.taskboard.get(e.cardId)?.status === 'failed')) {
+      this.#cardFinished();
+      queueMicrotask(() => this.#maybeReview());
     }
     if (e.type === 'card-blocked' && e.agentId && e.cardId) {
       const runId = this.#laneByAgentCard.get(`${e.agentId}|${e.cardId}`);
@@ -1002,6 +1190,7 @@ export class HiveManager {
         engines?: { order?: unknown; disabled?: unknown };
         limits?: unknown;
         limitHits?: unknown;
+        librarian?: unknown;
       };
       const ids = (v: unknown): EngineId[] =>
         Array.isArray(v) ? v.flatMap((x) => (EngineIdSchema.safeParse(x).success ? [x as EngineId] : [])) : [];
@@ -1010,6 +1199,7 @@ export class HiveManager {
         ...(raw.engines && typeof raw.engines === 'object' ? { engines: { order: ids(raw.engines.order), disabled: ids(raw.engines.disabled) } } : {}),
         limits: readLimits(raw.limits),
         limitHits: readHits(raw.limitHits),
+        ...readReviewClock(raw.librarian),
       };
     } catch {
       return {};
@@ -1023,6 +1213,16 @@ export class HiveManager {
 }
 
 /** Engine caps from the settings file; anything malformed is dropped. */
+/** The Librarian's review clock from the settings file; malformed means "start counting now". */
+function readReviewClock(v: unknown): Pick<HostSettings, 'librarian'> {
+  if (!v || typeof v !== 'object') return {};
+  const r = v as Record<string, unknown>;
+  const num = (x: unknown): number | null => (typeof x === 'number' && Number.isFinite(x) && x >= 0 ? x : null);
+  const since = num(r['since']);
+  if (since === null) return {};
+  return { librarian: { lastReviewAt: num(r['lastReviewAt']), since, cardsSince: Math.floor(num(r['cardsSince']) ?? 0) } };
+}
+
 function readLimits(v: unknown): Partial<Record<EngineId, EngineLimits>> {
   const out: Partial<Record<EngineId, EngineLimits>> = {};
   if (!v || typeof v !== 'object') return out;

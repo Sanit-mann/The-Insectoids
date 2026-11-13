@@ -133,6 +133,16 @@ export interface LinkView {
   direction: 'in' | 'out';
 }
 
+/** Raw counts behind the Brain health score (B3). */
+export interface HealthCounts {
+  total: number;
+  stale: number;
+  waiting: number;
+  orphans: number;
+  unused: number;
+  lessons: number;
+}
+
 export interface FadedRecord {
   id: string;
   title: string;
@@ -147,7 +157,8 @@ export interface BrainOptions {
 /** Default answer size (Memory 01-D7). */
 export const DEFAULT_TOKEN_BUDGET = 800;
 const GLOBAL_SHELF = 'global';
-const NEEDS_CONFIRMATION: ReadonlySet<RecordKind> = new Set(['fact', 'decision']);
+/** Kinds an agent can only write as unconfirmed/proposed; only the user confirms them (01-D3). Lessons too (B3). */
+const NEEDS_CONFIRMATION: ReadonlySet<RecordKind> = new Set(['fact', 'decision', 'lesson']);
 const DAY = 86_400_000;
 
 /**
@@ -163,11 +174,11 @@ export const NEAR_DUPLICATE = { cosine: 0.95, jaccard: 0.9, candidates: 500, tex
 export const DECAY = {
   /** update, agent_memory, outcome: unused this long. */
   notesDays: 60,
-  /** facts an agent wrote that are still unconfirmed this long after creation, and unused as long. */
+  /** facts and lessons an agent wrote that are still unconfirmed this long after creation, and unused as long. */
   factsDays: 90,
   /** Fade only below this importance. */
   minImportance: 0.15,
-  kinds: ['update', 'agent_memory', 'outcome', 'fact'] as const,
+  kinds: ['update', 'agent_memory', 'outcome', 'fact', 'lesson'] as const,
 };
 
 /** The read key for one card attempt's runs: what they read, so a pass can credit what helped (B2). */
@@ -563,7 +574,7 @@ export class Brain {
         const rec = toRecord(row, now);
         if (this.#userConfirmed(rec)) continue;
         const days = Math.floor((now - Math.max(rec.lastUsedAt ?? 0, rec.updatedAt)) / DAY);
-        if (rec.kind === 'fact') {
+        if (rec.kind === 'fact' || rec.kind === 'lesson') {
           if (rec.trust === 'confirmed' || now - rec.createdAt < DECAY.factsDays * DAY || days < DECAY.factsDays) continue;
         } else if (days < DECAY.notesDays) {
           continue;
@@ -777,19 +788,121 @@ export class Brain {
     const decisions = pick('decision', 'confirmed', 5);
     const facts = pick('fact', 'confirmed', 5);
     const outcomes = pick('outcome', null, 3);
+    // Lessons (01-E10, B3): the ones the user confirmed first, then a few recent unconfirmed ones.
+    const confirmedLessons = pick('lesson', 'confirmed', 5);
+    const newLessons = pick('lesson', 'unconfirmed', 3);
     const section = (title: string, recs: BrainRecord[]): string =>
       recs.length ? `${title}:\n${recs.map((r) => `- ${clip(r.title, 80)}`).join('\n')}` : '';
     const card = [
       `Shelf: ${shelf}`,
       section('Decisions', decisions),
       section('Facts', facts),
+      section('Lessons (avoid these)', [...confirmedLessons, ...newLessons]),
       section('Recent outcomes', outcomes),
       waiting.n ? `Waiting for the user: ${waiting.n} proposal(s) or unconfirmed fact(s).` : '',
     ]
       .filter(Boolean)
       .join('\n');
-    this.noteRead([...decisions, ...facts, ...outcomes].map((r) => r.id), readKey);
+    this.noteRead([...decisions, ...facts, ...confirmedLessons, ...newLessons, ...outcomes].map((r) => r.id), readKey);
     return clip(card, 1200);
+  }
+
+  // ---- lessons, merges and audits (B3) ---------------------------------------------------------
+
+  /**
+   * Learn a lesson (01-E10): an agent-written "Don't … because …" record (unconfirmed until the user
+   * confirms it). A near-duplicate folds into the existing lesson (B2 dedupe); every call counts as one
+   * more time the hive saw it.
+   */
+  learn(input: { shelf: string; title: string; body: string; source?: string }, actor: Actor): { id: string; created: boolean; seen: number } {
+    const r = this.write({ kind: 'lesson', shelf: input.shelf, title: input.title, body: input.body, ...(input.source ? { source: input.source } : {}) }, actor);
+    this.#db.prepare('INSERT INTO lesson_hits (record_id, at) VALUES (?, ?)').run(r.id, this.#now());
+    return { id: r.id, created: r.created, seen: this.lessonSeen(r.id) };
+  }
+
+  /** How many times the hive ran into this lesson (at least 1). */
+  lessonSeen(id: string): number {
+    const row = this.#db.prepare('SELECT COUNT(*) AS n FROM lesson_hits WHERE record_id = ?').get(id) as { n: number };
+    return Math.max(1, row.n);
+  }
+
+  /** Current lessons on a project shelf and the global shelf, newest first. */
+  lessons(shelf: string, limit = 50): Array<BrainRecord & { seen: number }> {
+    const rows = this.#db
+      .prepare(
+        `SELECT * FROM records WHERE kind = 'lesson' AND shelf IN (?, ?) AND archived = 0 AND valid_to IS NULL
+         ORDER BY created_at DESC, id LIMIT ?`,
+      )
+      .all(shelf, GLOBAL_SHELF, limit) as unknown as RecordRow[];
+    return rows.map((r) => ({ ...toRecord(r, this.#now()), seen: this.lessonSeen(r.id) }));
+  }
+
+  /**
+   * Fold one record into another, as the user (a Librarian proposal the user approved): `foldId` is
+   * archived "merged into …" and linked to `keepId`; nothing is deleted. Only the user can.
+   */
+  mergeRecords(keepId: string, foldId: string, actor: Actor): void {
+    if (actor.type !== 'user') throw new TrustError('Only the user can merge records this way.');
+    this.#tx(() => {
+      const keep = this.#mustGet(keepId);
+      const fold = this.#mustGet(foldId);
+      if (keep.id === fold.id) throw new ConflictError('A record cannot be merged into itself.');
+      if (keep.shelf !== fold.shelf || keep.kind !== fold.kind) throw new ConflictError('Only records of the same kind on the same shelf can be merged.');
+      if (keep.archived || fold.archived) throw new ConflictError('Archived records cannot be merged.');
+      this.#archiveRow(fold, actor, `merged into ${keep.id}`);
+      this.#db.prepare('INSERT OR IGNORE INTO links (from_id, to_id, rel, created_at) VALUES (?, ?, ?, ?)').run(fold.id, keep.id, 'merged_into', this.#now());
+    });
+  }
+
+  /**
+   * Near-duplicate pairs among a shelf's current records (the Librarian's audit, B3). B2 already folds an
+   * agent's near-duplicate of an agent record on write; what remains here involves a record the user wrote
+   * or confirmed (`userInvolved`), which only the user may merge. Same rules as on write: same kind, same
+   * numbers, cosine >= 0.95 with vectors, else trigram Jaccard >= 0.9. Checks the newest `limit` records.
+   */
+  duplicatePairs(shelf: string, limit = 300): Array<{ a: BrainRecord; b: BrainRecord; similarity: number; userInvolved: boolean }> {
+    const now = this.#now();
+    const rows = this.#db
+      .prepare('SELECT * FROM records WHERE shelf = ? AND archived = 0 AND valid_to IS NULL ORDER BY updated_at DESC, id LIMIT ?')
+      .all(shelf, limit) as unknown as RecordRow[];
+    const vecs = new Map<string, Float32Array>();
+    for (const v of this.#db
+      .prepare('SELECT v.record_id, v.vec FROM record_vectors v JOIN records r ON r.id = v.record_id WHERE r.shelf = ? AND v.content_hash = r.content_hash')
+      .all(shelf) as Array<{ record_id: string; vec: Uint8Array }>) {
+      vecs.set(v.record_id, unpackI8(v.vec));
+    }
+    const prepared = rows.map((r) => ({ row: r, text: clip(`${r.title}\n${r.body}`, NEAR_DUPLICATE.textChars), numbers: numbersIn(`${r.title} ${r.body}`) }));
+    const pairs: Array<{ a: BrainRecord; b: BrainRecord; similarity: number; userInvolved: boolean }> = [];
+    for (let i = 0; i < prepared.length; i++) {
+      for (let j = i + 1; j < prepared.length; j++) {
+        const x = prepared[i]!;
+        const y = prepared[j]!;
+        if (x.row.kind !== y.row.kind || x.numbers !== y.numbers) continue;
+        const vx = vecs.get(x.row.id);
+        const vy = vecs.get(y.row.id);
+        const sim = vx && vy ? cosine(vx, vy) : trigramJaccard(x.text, y.text);
+        if (sim < (vx && vy ? NEAR_DUPLICATE.cosine : NEAR_DUPLICATE.jaccard)) continue;
+        const a = toRecord(x.row, now);
+        const b = toRecord(y.row, now);
+        pairs.push({ a, b, similarity: sim, userInvolved: this.#userConfirmed(a) || this.#userConfirmed(b) });
+      }
+    }
+    return pairs;
+  }
+
+  /** Counts for the health score (01-E12, B3): current records on a project shelf and global. */
+  healthCounts(shelf: string, now = this.#now()): HealthCounts {
+    const current = 'r.archived = 0 AND r.valid_to IS NULL AND r.shelf IN (?, ?)';
+    const count = (where: string, ...params: Array<string | number>): number =>
+      (this.#db.prepare(`SELECT COUNT(*) AS n FROM records r WHERE ${current} AND ${where}`).get(shelf, GLOBAL_SHELF, ...params) as { n: number }).n;
+    return {
+      total: count('1 = 1'),
+      stale: count('COALESCE(r.last_used_at, r.created_at) < ?', now - 90 * DAY),
+      waiting: count("r.kind IN ('fact', 'decision') AND r.trust IN ('proposed', 'unconfirmed')"),
+      orphans: count('r.reads = 0 AND r.created_at < ? AND NOT EXISTS (SELECT 1 FROM links l WHERE l.from_id = r.id OR l.to_id = r.id)', now - 30 * DAY),
+      unused: count('r.reads = 0 AND r.created_at < ?', now - 30 * DAY),
+      lessons: count("r.kind = 'lesson' AND r.trust != 'confirmed' AND r.created_at < ?", now - 14 * DAY),
+    };
   }
 
   // ---- internals -------------------------------------------------------------------------------

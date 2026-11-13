@@ -17,7 +17,15 @@ const cap = (s: string): string => s.charAt(0).toUpperCase() + s.slice(1);
 export const casteLabel = cap;
 
 export const roleLabel = (a: Pick<AgentView, 'role' | 'caste'>): string =>
-  a.role === 'queen' ? 'Queen' : a.role === 'inspector' ? 'Inspector' : a.caste ? cap(a.caste) : 'Insect';
+  a.role === 'queen'
+    ? 'Queen'
+    : a.role === 'inspector'
+      ? 'Inspector'
+      : a.role === 'librarian'
+        ? 'Librarian'
+        : a.caste
+          ? cap(a.caste)
+          : 'Insect';
 
 /** "Coder · Ant-07", "Queen", "Inspector · Ant-03". */
 export function agentName(a: Pick<AgentView, 'role' | 'caste' | 'agentId'>): string {

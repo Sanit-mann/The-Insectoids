@@ -24,3 +24,4 @@ export * from './opencode/config';
 export * from './opencode/stream';
 export * from './opencode/run';
 export * from './opencode/engine';
+export * from './hive/librarian';

@@ -1,6 +1,7 @@
 import { Brain, Network, Search } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { BrainHitView, RecordKind } from '@insectoids/shared';
+import { BrainCareRow } from '@/components/brain/BrainCare';
 import { BrainReader } from '@/components/brain/BrainReader';
 import { KINDS, kindInfo } from '@/components/brain/kinds';
 import { HitStatusBadge } from '@/components/brain/HitStatus';
@@ -16,7 +17,8 @@ type Results = { state: 'idle' } | { state: 'loading' } | { state: 'error'; mess
 
 /**
  * Brain (App 07, Memory 01-D10): search by words and, once switched on, by meaning (01-E11, Phase 2 B1);
- * filter by kind; read a record with its trust, versions and links. The graph arrives later in Phase 2.
+ * filter by kind; read a record with its trust, versions and links. Above them (B3): Brain health, the
+ * Librarian and the lessons the hive learned. The graph arrives later in Phase 2.
  */
 export function BrainScreen() {
   const { snapshot } = useHive();
@@ -56,6 +58,7 @@ export function BrainScreen() {
 
   return (
     <div className="flex flex-1 flex-wrap items-start gap-6 p-6">
+      <BrainCareRow onOpen={setOpenId} />
       <section aria-label="Search the Brain" className="flex w-full flex-[1_1_300px] flex-col gap-3 md:max-w-[400px]">
         <p className="m-0 text-xs text-muted" data-testid="brain-tidy-intro">
           The Brain keeps itself tidy: notes that get used rise in results, unused agent notes fade into the archive, and nothing is

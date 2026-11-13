@@ -104,7 +104,7 @@ export function learnRoute(o: LearnOptions): Route {
   const { input, rule } = o;
   const minSamples = o.minSamples ?? MIN_SAMPLES;
   const threshold = o.threshold ?? GOOD_ENOUGH;
-  if (input.role === 'queen' || input.role === 'inspector' || input.attempts > 0 || !o.engines.length) return rule;
+  if (input.role === 'queen' || input.role === 'inspector' || input.role === 'librarian' || input.attempts > 0 || !o.engines.length) return rule;
 
   const ti = TIERS.indexOf(rule.tier);
   const ei = EFFORTS.indexOf(rule.effort);

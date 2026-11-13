@@ -190,6 +190,15 @@ const MIGRATIONS: readonly string[] = [
     PRIMARY KEY (read_key, record_id)
   );
   `,
+  // v7: lessons (Memory 01-E10; Phase 2 B3). One row per time the hive ran into a lesson, so a lesson
+  // seen again (folded by dedupe) counts up instead of being copied.
+  `
+  CREATE TABLE lesson_hits (
+    record_id  TEXT NOT NULL REFERENCES records(id),
+    at         INTEGER NOT NULL
+  );
+  CREATE INDEX lesson_hits_record ON lesson_hits (record_id);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

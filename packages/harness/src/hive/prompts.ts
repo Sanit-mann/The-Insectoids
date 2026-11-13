@@ -4,9 +4,10 @@ import type { Caste } from '@insectoids/shared';
 import { MAX_CARDS_PER_WAVE, MAX_WAVES } from './protocol';
 
 /** Skills each role carries by default in Phase 1 (Capabilities 03-D8: at most ~5 active). */
-export const ROLE_SKILLS: Record<'queen' | 'inspector' | Caste, string[]> = {
+export const ROLE_SKILLS: Record<'queen' | 'inspector' | 'librarian' | Caste, string[]> = {
   queen: ['writing-plans'],
   inspector: ['verification-before-completion'],
+  librarian: ['compact-output'],
   coder: ['executing-a-task-card', 'coding-discipline'],
   tester: ['executing-a-task-card', 'test-driven-development'],
   reviewer: ['executing-a-task-card', 'code-review'],

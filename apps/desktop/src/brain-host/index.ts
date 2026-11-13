@@ -113,6 +113,8 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
       ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_TIDY_SHIFT_DAYS']
         ? { tidy: { clockShiftDays: Number(process.env['INSECTOIDS_E2E_TIDY_SHIFT_DAYS']) || 0 } }
         : {}),
+      // e2e only (B3): the demo Inspector fails C-01 once, so a lesson is learned.
+      ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_INSPECTOR_FAILS_FIRST'] === '1' ? { demoInspectorFailsFirst: true } : {}),
     });
     await hive.init();
     await ms.init();

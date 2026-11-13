@@ -11,7 +11,8 @@ import { type Library, brainRules, inspectorPrompt, insectPrompt, queenPrompt } 
 import { type Plan, parsePlan, parseStatus, parseVerdict } from './protocol';
 import type { EngineId } from '@insectoids/shared';
 import { detectUsageLimit } from '../engines/limits';
-import { type ModelTiers, type Route, type RouteInput, budgetState, routeCard, runTokens } from './router';
+import { type AuditSummary, type LibrarianProposal, LibrarianProposalSchema, applyLibrarianProposal, lessonFrom, librarianPrompt, parseLibrarianReply } from './librarian';
+import { type ModelTiers, type Route, type RouteInput, budgetState, isInsectRole, routeCard, runTokens } from './router';
 
 export interface HiveOptions {
   brain: Brain;
@@ -96,6 +97,7 @@ export interface HiveEvent {
     | 'engine'
     | 'budget'
     | 'paused'
+    | 'librarian'
     | 'resumed'
     | 'run-started'
     | 'run-ended'
@@ -136,7 +138,7 @@ export interface RunInfo {
 export type MergeState = 'not-merged' | 'awaiting-approval' | 'merged' | 'undone';
 
 interface Job {
-  kind: 'insect' | 'inspector';
+  kind: 'insect' | 'inspector' | 'librarian';
   cardId: string;
   done: Promise<void>;
   stop(): void;
@@ -253,6 +255,45 @@ export class Hive {
       approvals.decide(approvalId, yes ? 'approved' : 'denied', { type: 'user' });
     } finally {
       this.#deciding.delete(approvalId);
+    }
+  }
+
+  /**
+   * The Librarian's review (B3): one read-only LLM run over a compact audit summary. It returns validated
+   * proposals; it changes nothing. Its cost is recorded like any run (no goal: it belongs to the Brain).
+   */
+  async librarianReview(summary: AuditSummary): Promise<{ ok: boolean; proposals: LibrarianProposal[]; dropped: number; error: string | null }> {
+    const scratch = join(this.#o.dataDir, 'librarian');
+    mkdirSync(scratch, { recursive: true });
+    const prompt = librarianPrompt(this.#o.library, summary);
+    let stopRun: (() => void) | undefined;
+    const agentId = 'Librarian';
+    const done = (async () => {
+      return this.#runWith(null, undefined, {
+        role: 'librarian',
+        agentId,
+        title: 'Brain review',
+        cwd: scratch,
+        system: prompt.system,
+        task: prompt.task,
+        route: this.#route({ role: 'librarian', priority: 'normal', attempts: 0 }),
+        guard: { workspace: scratch, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
+      }, (stop) => (stopRun = stop));
+    })().finally(() => this.#jobs.delete(agentId));
+    this.#jobs.set(agentId, { kind: 'librarian', cardId: '', done: done.then(() => undefined, () => undefined), stop: () => stopRun?.() });
+    const result = await done;
+    if (!result.ok) return { ok: false, proposals: [], dropped: 0, error: `The review run failed (${result.error ?? 'error'}).` };
+    const parsed = parseLibrarianReply(result.text, summary);
+    return { ok: parsed.error === null, ...parsed };
+  }
+
+  /** A lesson from a failed inspection, retried or escalated (01-E10, B3): free, no LLM. Never blocks the hive. */
+  #learn(shelf: string, card: BoardCard, reason: string): void {
+    try {
+      const lesson = lessonFrom({ title: card.title }, reason);
+      this.#o.brain.learn({ shelf, ...lesson, source: card.id }, { type: 'agent', id: 'Librarian' });
+    } catch {
+      // A reason that trips the secrets guard (or anything else) just doesn't become a lesson.
     }
   }
 
@@ -661,6 +702,7 @@ export class Hive {
       this.#lastFailure.set(card.id, verdict.note);
       brain.outcomes.settle(card.id, card.attempts, 'fail');
       const after = brain.taskboard.review(card.id, { verdict: 'fail', by: 'Inspector', note: verdict.note });
+      this.#learn(goal.shelf, card, verdict.note);
       await workspace.removeCard(goal.id, id);
       this.#emit({ type: 'card-rejected', goalId: goal.id, cardId: card.id, message: verdict.note });
       if (after.status === 'failed') {
@@ -722,6 +764,14 @@ export class Hive {
         const g = brain.goals.get(p.goalId)!;
         brain.goals.setBudget(p.goalId, Math.ceil((g.budgetTokens ?? g.spentTokens) * 1.5));
       }
+    } else if (p.action === 'librarian') {
+      // A Librarian proposal (B3): applied only when the user says yes, and then as the user.
+      const proposal = (a.payload as { proposal?: unknown }).proposal;
+      const parsed = LibrarianProposalSchema.safeParse(proposal);
+      if (yes && parsed.success) {
+        applyLibrarianProposal(brain, parsed.data);
+        this.#emit({ type: 'librarian', message: `Done: ${a.title}.` });
+      }
     } else if (p.action === 'resume-card' && p.cardId && p.agentId) {
       const card = brain.taskboard.get(p.cardId)!;
       const goal = brain.goals.get(card.goalId)!;
@@ -744,7 +794,7 @@ export class Hive {
   async #runEngine(goalId: string, cardId: string | undefined, req: EngineRequest, onStop?: (stop: () => void) => void): Promise<EngineResult> {
     // Outside services: only insects working a card that names integrations; never the Queen or Inspector.
     const services = this.#o.services;
-    const wanted = services && cardId && req.role !== 'queen' && req.role !== 'inspector' ? this.#cardIntegrations(goalId, cardId) : [];
+    const wanted = services && cardId && goalId && isInsectRole(req.role) ? this.#cardIntegrations(goalId, cardId) : [];
     if (!services || !cardId || !wanted.length) return this.#runWithBrain(goalId, cardId, req, onStop);
     let ticket: ServiceTicket;
     try {
@@ -777,7 +827,7 @@ ${brief}`,
     const write = brainWriteAccess(req.role);
     const shelf = this.#o.brain.goals.get(goalId)?.shelf ?? this.#o.shelf;
     // Insects' reads are tied to their card attempt, so a pass can credit what helped (B2).
-    const card = cardId && req.role !== 'queen' && req.role !== 'inspector' ? this.#o.brain.taskboard.get(cardId) : undefined;
+    const card = cardId && isInsectRole(req.role) ? this.#o.brain.taskboard.get(cardId) : undefined;
     const readKey = card ? cardReadKey(card.id, card.attempts) : undefined;
     const ticket: BrainTicket = await access.grant({ agentId: req.agentId, shelf, write, ...(readKey ? { readKey } : {}) });
     try {
@@ -791,7 +841,7 @@ ${brief}`,
     }
   }
 
-  async #runWith(goalId: string, cardId: string | undefined, req: EngineRequest, onStop?: (stop: () => void) => void): Promise<EngineResult> {
+  async #runWith(goalId: string | null, cardId: string | undefined, req: EngineRequest, onStop?: (stop: () => void) => void): Promise<EngineResult> {
     const info: RunInfo = {
       runId: `${req.agentId}#${++this.#runs}`,
       role: req.role,
@@ -801,7 +851,7 @@ ${brief}`,
       effort: req.route.effort,
       ...(req.route.reason ? { reason: req.route.reason } : {}),
     };
-    const ids = { goalId, ...(cardId ? { cardId } : {}), agentId: req.agentId };
+    const ids = { ...(goalId ? { goalId } : {}), ...(cardId ? { cardId } : {}), agentId: req.agentId };
     this.#emit({ type: 'run-started', ...ids, message: info.title, run: info });
     let result: EngineResult;
     try {
@@ -819,7 +869,7 @@ ${brief}`,
       throw err;
     }
     const tokens = runTokens(result.usage);
-    this.#o.brain.goals.addSpend(goalId, tokens, result.costUsd);
+    if (goalId) this.#o.brain.goals.addSpend(goalId, tokens, result.costUsd);
     this.#recordOutcome(info.runId, goalId, cardId, req, result);
     if (result.error === 'quota') {
       const until = result.resetAt ?? null;
@@ -843,15 +893,15 @@ ${result.stderrTail}`, this.#now());
   }
 
   /** One row per run in the Treasurer's memory. Finished insect runs wait for the Inspector (`pending`). */
-  #recordOutcome(runId: string, goalId: string, cardId: string | undefined, req: EngineRequest, result: EngineResult): void {
+  #recordOutcome(runId: string, goalId: string | null, cardId: string | undefined, req: EngineRequest, result: EngineResult): void {
     const card = cardId ? this.#o.brain.taskboard.get(cardId) : undefined;
-    const insect = req.role !== 'queen' && req.role !== 'inspector';
+    const insect = isInsectRole(req.role);
     const outcome = !result.ok
       ? result.error === 'auth' ? 'auth' : result.error === 'stopped' ? 'stopped' : result.error === 'quota' ? 'limit' : 'error'
       : insect ? 'pending' : 'pass';
     try {
       this.#o.brain.outcomes.record({
-        runId: `${goalId}:${runId}`,
+        runId: `${goalId ?? req.role}:${runId}`,
         goalId,
         cardId: cardId ?? null,
         role: req.role,

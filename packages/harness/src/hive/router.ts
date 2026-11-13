@@ -9,8 +9,14 @@ export interface ModelTiers {
   light: string;
 }
 
+/** Who runs: the Queen, the Inspector, the Librarian (a manager, B3), or an insect of a caste. */
+export type AgentRole = 'queen' | 'inspector' | 'librarian' | Caste;
+
+/** Insects work on cards; the Queen, the Inspector and the Librarian don't. */
+export const isInsectRole = (role: AgentRole): boolean => role !== 'queen' && role !== 'inspector' && role !== 'librarian';
+
 export interface RouteInput {
-  role: 'queen' | 'inspector' | Caste;
+  role: AgentRole;
   priority: Priority;
   /** Failed attempts so far on this card. */
   attempts: number;
@@ -42,6 +48,7 @@ export const budgetForTier = (tier: Tier): number => (tier === 'strongest' ? 5 :
 function ruleReason(input: RouteInput): string {
   if (input.role === 'queen') return 'rule: the Queen plans on the strongest model';
   if (input.role === 'inspector') return `rule: inspecting a ${input.priority} priority card`;
+  if (input.role === 'librarian') return 'rule: the Librarian reviews the Brain on the standard model, low effort';
   if (input.attempts > 0) return `rule: retry ${input.attempts}, so more effort or a stronger model`;
   return `rule: ${input.priority} priority card`;
 }
@@ -54,6 +61,11 @@ function ruleReason(input: RouteInput): string {
 export function routeCard(input: RouteInput, models: ModelTiers, engine: EngineId = 'claude'): Route {
   if (input.role === 'queen') {
     return { engine, tier: 'strongest', model: models.strongest, effort: 'high', reason: ruleReason(input), maxTurns: 30, maxBudgetUsd: 3, timeoutMs: 15 * MIN };
+  }
+
+  if (input.role === 'librarian') {
+    // A short, read-only review of a compact audit summary: the standard tier at low effort is plenty.
+    return { engine, tier: 'standard', model: models.standard, effort: 'low', reason: ruleReason(input), maxTurns: 12, maxBudgetUsd: 1, timeoutMs: 10 * MIN };
   }
 
   let tier: number;
@@ -114,7 +126,7 @@ export interface EngineCandidate {
 }
 
 /** Roles that never change files or run side-effecting commands: an engine limited to read-only work may take them. */
-const READ_ONLY_ROLES: ReadonlySet<RouteInput['role']> = new Set(['queen', 'reviewer', 'researcher', 'analyst']);
+const READ_ONLY_ROLES: ReadonlySet<RouteInput['role']> = new Set(['queen', 'librarian', 'reviewer', 'researcher', 'analyst']);
 
 export const isReadOnlyRole = (role: RouteInput['role']): boolean => READ_ONLY_ROLES.has(role);
 

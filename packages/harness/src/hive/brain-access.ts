@@ -1,5 +1,5 @@
 import { delimiter } from 'node:path';
-import type { Caste } from '@insectoids/shared';
+import { type AgentRole, isInsectRole } from './router';
 
 /**
  * Brain access for insects (Memory 01-D5: the doors). The hive mints a token per run, scoped to the
@@ -60,8 +60,8 @@ export interface RunBrain {
  * - The Inspector only reads: a verifier that can also write memory could talk itself into a pass;
  *   the hive records the verdict as the Inspector's outcome instead.
  */
-export function brainWriteAccess(role: 'queen' | 'inspector' | Caste): boolean {
-  return role !== 'queen' && role !== 'inspector';
+export function brainWriteAccess(role: AgentRole): boolean {
+  return isInsectRole(role);
 }
 
 export function brainEnv(b: RunBrain): Record<string, string> {

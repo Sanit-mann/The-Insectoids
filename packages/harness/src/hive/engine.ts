@@ -1,16 +1,15 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Caste } from '@insectoids/shared';
 import type { HookPolicy } from '@insectoids/reflexes';
 import type { ClaudeEvent } from '../claude/stream';
 import { type RunResult, runClaude } from '../claude/run';
 import { type RunBrain, brainMcpConfig, brainRunEnv } from './brain-access';
 import { type RunServices, servicesMcpServer } from './services-access';
-import type { Route } from './router';
+import { type AgentRole, type Route, isInsectRole } from './router';
 
 /** One run of one agent. The hive never cares which AI tool does the work (Connections 04-D5). */
 export interface EngineRequest {
-  role: 'queen' | 'inspector' | Caste;
+  role: AgentRole;
   agentId: string;
   /** What this run works on, for display (goal or card title). */
   title?: string;
@@ -124,7 +123,7 @@ export class FakeEngine implements Engine {
   run(req: EngineRequest): EngineRun {
     const index = this.calls.push(req) - 1;
     const reply = this.script(req, index);
-    const insect = req.role !== 'queen' && req.role !== 'inspector';
+    const insect = isInsectRole(req.role);
     this.#running++;
     if (insect) this.#insects++;
     this.maxConcurrent = Math.max(this.maxConcurrent, this.#running);

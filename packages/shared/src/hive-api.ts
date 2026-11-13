@@ -205,7 +205,8 @@ export const AgentViewSchema = z.object({
   /** Run id (unique per run). */
   runId: Id,
   agentId: z.string(),
-  role: z.enum(['queen', 'insect', 'inspector']),
+  /** 'librarian': the Librarian's LLM review of the Brain (B3); it belongs to no goal or card. */
+  role: z.enum(['queen', 'insect', 'inspector', 'librarian']),
   caste: CasteSchema.nullable(),
   goalId: z.string().nullable(),
   cardId: z.string().nullable(),
@@ -262,6 +263,57 @@ export const MeaningSearchSchema = z.object({
 });
 export type MeaningSearch = z.infer<typeof MeaningSearchSchema>;
 
+/** Brain health (Memory 01-E12; Phase 2 B3): 0–100, with the parts that make it up, in plain words. */
+export const BrainHealthSchema = z.object({
+  /** 0 (needs care) to 100 (tidy); null before the first audit. */
+  score: z.number().min(0).max(100).nullable(),
+  parts: z.array(
+    z.object({
+      id: z.enum(['stale', 'waiting', 'orphans', 'unused', 'duplicates', 'lessons']),
+      label: z.string(),
+      /** How many records this part counts. */
+      count: z.number().int(),
+      /** Points it costs the score. */
+      penalty: z.number(),
+      /** One line: what it means and what to do. */
+      hint: z.string(),
+    }),
+  ),
+  total: z.number().int(),
+  lastAuditAt: z.number().nullable(),
+  message: z.string(),
+});
+export type BrainHealth = z.infer<typeof BrainHealthSchema>;
+
+/** The Librarian, the memory keeper (Hive 02, manager "reflexes + brain"; Phase 2 B3). */
+export const LibrarianViewSchema = z.object({
+  /** idle; auditing = reflexes (free, code only); reviewing = its LLM brain is reading (spends tokens). */
+  state: z.enum(['idle', 'auditing', 'reviewing']),
+  lastAuditAt: z.number().nullable(),
+  lastReviewAt: z.number().nullable(),
+  /** When the next LLM review is due (every N finished cards, or weekly), as plain words. */
+  nextReview: z.string(),
+  /** Proposals it has waiting in the approval inbox. */
+  proposalsWaiting: z.number().int(),
+  message: z.string(),
+});
+export type LibrarianView = z.infer<typeof LibrarianViewSchema>;
+
+/** A lesson the hive learned from failed or retried work (Memory 01-E10), shown at boot. */
+export const LessonViewSchema = z.object({
+  id: z.string(),
+  /** "Don't … because …" in one line. */
+  title: z.string(),
+  body: z.string(),
+  trust: TrustSchema,
+  /** Where it came from (card or goal title), if known. */
+  source: z.string().nullable(),
+  /** How many failures taught it (similar lessons fold together). */
+  seen: z.number().int(),
+  createdAt: z.number(),
+});
+export type LessonView = z.infer<typeof LessonViewSchema>;
+
 export const HiveSnapshotSchema = z.object({
   /** null until the user picks a project folder. */
   project: ProjectViewSchema.nullable(),
@@ -270,6 +322,10 @@ export const HiveSnapshotSchema = z.object({
   /** Every known engine, in the user's preference order (Connections screen). */
   engines: z.array(EngineCardSchema),
   meaningSearch: MeaningSearchSchema,
+  brainHealth: BrainHealthSchema,
+  librarian: LibrarianViewSchema,
+  /** Current lessons for this project and global, newest first (max 50). */
+  lessons: z.array(LessonViewSchema),
   hive: z.object({
     paused: z.boolean(),
     pausedReason: z.string().nullable(),
@@ -311,6 +367,11 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('tidyBrain') }),
   /** Bring an archived (e.g. faded) Brain record back, as a new version. The user only (B2). */
   z.object({ type: z.literal('restoreRecord'), id: Id }),
+  /** Run the Librarian now: its free audit always; its LLM review only when an engine is ready (spends tokens). */
+  z.object({ type: z.literal('runLibrarian'), review: z.boolean() }),
+  /** The user confirms a lesson (it then always shows at boot) or retires it (archived, never deleted). */
+  z.object({ type: z.literal('confirmLesson'), id: Id }),
+  z.object({ type: z.literal('retireLesson'), id: Id }),
   /** Switch meaning search on (downloads the model once if needed) or off (vectors kept, search uses words only). */
   z.object({ type: z.literal('setMeaningSearch'), enabled: z.boolean() }),
   /** Forget an engine's "limit reached" state now (e.g. the user upgraded the plan). */

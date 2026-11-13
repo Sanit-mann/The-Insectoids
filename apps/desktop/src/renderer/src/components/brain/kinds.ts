@@ -1,4 +1,4 @@
-import { Bot, CheckCircle2, FileText, Gavel, type LucideIcon, ListChecks, Megaphone, Trophy } from 'lucide-react';
+import { BookOpenCheck, Bot, CheckCircle2, FileText, Gavel, type LucideIcon, ListChecks, Megaphone, Trophy } from 'lucide-react';
 import type { RecordKind, Trust } from '@insectoids/shared';
 
 export const KINDS: ReadonlyArray<{ kind: RecordKind; label: string; icon: LucideIcon }> = [
@@ -9,6 +9,7 @@ export const KINDS: ReadonlyArray<{ kind: RecordKind; label: string; icon: Lucid
   { kind: 'file', label: 'File', icon: FileText },
   { kind: 'update', label: 'Update', icon: Megaphone },
   { kind: 'agent_memory', label: 'Agent memory', icon: Bot },
+  { kind: 'lesson', label: 'Lesson', icon: BookOpenCheck },
 ];
 
 export const kindInfo = (k: RecordKind) => KINDS.find((x) => x.kind === k) ?? KINDS[0]!;

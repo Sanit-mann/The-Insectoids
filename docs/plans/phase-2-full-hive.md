@@ -392,3 +392,34 @@ Three milestones, each ending in something the user can try.
     - The host waits for it, the Foreman pass and background planning (capped at 30 s) before the project and the Brain close.
     - A regression test fails without the fix and passes with it.
   - **Environment note:** the Windows clipboard on this PC refused writes during the final runs (even PowerShell's `Set-Clipboard` failed). The copy-command e2e test now probes the clipboard first and skips with that reason instead of failing falsely.
+- **B3 Lessons register, Brain health, Librarian: done (2026-11-13).** Built by two parallel workers on the contract additions (record kind `lesson`; `snapshot.brainHealth`, `librarian`, `lessons`; `runLibrarian`, `confirmLesson`, `retireLesson`). 701 unit tests pass in two runs with no unhandled errors; e2e 88 passed, 2 skipped. No real engine runs; the Librarian's AI review is tested with the scripted engine.
+  - **Lessons:**
+    - Every failed inspection (retried or escalated) writes an **unconfirmed** lesson, "Don't hand in "<card>" as done because <Inspector's reason>", with no AI involved.
+    - The same failure folds into the same lesson and raises `seen`.
+    - The boot card lists confirmed lessons first, then up to 3 recent unconfirmed ones; briefs get relevant lessons through hybrid `read()`.
+    - The user can **confirm** (then it never fades) or **retire** (archived "retired by you", restorable).
+  - **Health score:** 100 − capped penalties, floored at 0, `null` before the first audit:
+    - stale (unused 90+ days): 0.4 per %, cap 25;
+    - waiting for the user: 2 each, cap 20;
+    - orphans: 0.3 per %, cap 15;
+    - never read: 0.25 per %, cap 15;
+    - duplicates only the user can merge: 3 each, cap 15;
+    - unconfirmed lessons > 14 days: 2 each, cap 10.
+  - **Librarian** (manager, "reflexes + brain", D8):
+    - **Free audit** (plain code): at start, every 6 h, and on demand. It runs B2's fading (only while idle), finds duplicates only the user can merge, and scores health.
+    - **AI review:**
+      - **When:** after 20 finished cards or a week, only with an engine ready, no agents working and the hive not paused, or when the user asks.
+      - **How it runs:** read-only Brain token, no workspace writes, no network; standard tier at low effort, routed by the Treasurer.
+      - **What it can do:** propose at most 10 merge / supersede / confirm / archive changes. Each becomes an approval "from Librarian" and is applied **as the user only on yes**; the Librarian never changes user records itself.
+      - **Bad replies:** a malformed reply gives no proposals and one activity line.
+    - Its summary reaches the user as one Queen activity line (D4).
+    - `library/agents/librarian/AGENT.md` was rewritten to describe exactly what the code does, plus the JSON contract.
+  - **UI:**
+    - **Brain screen row:**
+      - Health panel: score with Tidy / Fair / Needs care, a meter, a breakdown under "What makes up the score", and "Check now" (free).
+      - Librarian card: its state, last and next review, suggestions waiting (opens Approvals), and "review now" with a note that it uses a little of the AI subscription.
+      - Lessons list: Confirm, and hold-to-Retire.
+    - The Hive monitor labels Librarian runs.
+  - **Regression found while integrating and fixed:**
+    - **The bug:** the new start-up audit ran *after* the e2e seed. With the 90-day test clock, it faded the freshly seeded records, so three B2 e2e tests found nothing.
+    - **The fix:** the audit now runs before seeding, with a host regression test; the B2 tests weren't changed.
