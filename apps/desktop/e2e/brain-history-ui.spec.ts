@@ -1,4 +1,4 @@
-import { type Page, expect, test } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { type AppWindow, type LaunchedApp, launchApp } from './support/launch';
 
 /**
@@ -6,14 +6,6 @@ import { type AppWindow, type LaunchedApp, launchApp } from './support/launch';
  * what it replaced or absorbed, why it was archived) and searching with history included.
  */
 let launched: LaunchedApp;
-
-const app = (win: Page) => ({
-  search: (query: string, includeHistory = false) =>
-    win.evaluate(
-      ({ q, h }) => (globalThis as unknown as AppWindow).insectoids.hive.brainSearch({ query: q, ...(h ? { includeHistory: true } : {}) }),
-      { q: query, h: includeHistory },
-    ),
-});
 
 test.beforeAll(async () => {
   launched = await launchApp();
@@ -73,25 +65,58 @@ test('"Include history" switches on and off and the search follows it', async ()
   }
 });
 
-test('a replaced record shows "replaced" and links to what replaced it', async () => {
-  const { win } = launched;
-  // The backend decides what a replacement looks like; if this build makes none from the user's own
-  // re-answer, there is nothing honest to assert here.
-  await win.evaluate(() =>
-    (globalThis as unknown as AppWindow).insectoids.setup.saveAbout({ answers: [{ id: 'role', answer: 'I now build note-taking apps for writers.' }] }),
-  );
-  const hits = await app(win).search('writers', true);
-  const old = hits.find((h) => h.status === 'superseded');
-  test.skip(!old, 'This build records a re-answer as a new version, not as a replacement record.');
+/**
+ * A Brain seeded by the backend's e2e hook (INSECTOIDS_E2E_BRAIN_SEED): a superseded "Hosting provider"
+ * fact and old agent notes, with the tidy clock 90 days ahead so "Tidy now" fades them.
+ */
+test.describe('with a seeded Brain', () => {
+  let seeded: LaunchedApp;
 
-  await win.getByRole('switch', { name: 'Include history' }).click();
-  await win.getByTestId('brain-search').fill('writers');
-  const row = win.locator(`[data-testid="brain-hit"][data-status="superseded"]`).first();
-  await expect(row.getByTestId('hit-status')).toHaveText('replaced');
-  await row.click();
-  const validity = win.getByTestId('brain-reader').getByTestId('validity');
-  await expect(validity).toContainText('Replaced on');
-  await validity.getByTestId('superseded-by').click();
-  await expect(win.getByTestId('brain-reader').getByTestId('validity')).toContainText('Current since');
-  await win.getByRole('switch', { name: 'Include history' }).click();
+  test.beforeAll(async () => {
+    seeded = await launchApp({ env: { INSECTOIDS_E2E_BRAIN_SEED: '1', INSECTOIDS_E2E_TIDY_SHIFT_DAYS: '90' } });
+    const { win } = seeded;
+    await expect(win.getByTestId('brain-status')).toHaveAttribute('data-state', 'ready', { timeout: 20_000 });
+    await win.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Brain' }).click();
+  });
+
+  test.afterAll(async () => {
+    await seeded?.close();
+  });
+
+  test('a replaced fact shows "replaced" and links to what replaced it', async () => {
+    const { win } = seeded;
+    // Default search: only the current fact.
+    await win.getByTestId('brain-search').fill('hosting provider');
+    await expect(win.getByTestId('brain-hit')).toHaveCount(1, { timeout: 10_000 });
+    await expect(win.getByTestId('brain-hit').first()).toHaveAttribute('data-status', 'current');
+
+    await win.getByRole('switch', { name: 'Include history' }).click();
+    const row = win.locator('[data-testid="brain-hit"][data-status="superseded"]').first();
+    await expect(row.getByTestId('hit-status')).toHaveText('replaced', { timeout: 10_000 });
+    await row.click();
+    const validity = win.getByTestId('brain-reader').getByTestId('validity');
+    await expect(validity).toContainText('Replaced on');
+    await validity.getByTestId('superseded-by').click();
+    await expect(win.getByTestId('brain-reader').getByTestId('validity')).toContainText('Current since');
+    await expect(win.getByTestId('brain-reader').getByTestId('supersedes')).toContainText('Hosting provider');
+    await win.getByRole('switch', { name: 'Include history' }).click();
+  });
+
+  test('a faded note shows "faded" with its reason, and the user can restore it', async () => {
+    const { win } = seeded;
+    const tidied = await win.evaluate(() => (globalThis as unknown as AppWindow).insectoids.hive.command({ type: 'tidyBrain' }));
+    expect(tidied).toEqual({ ok: true });
+
+    await win.getByRole('switch', { name: 'Include history' }).click();
+    await win.getByTestId('brain-search').fill('carousel landing');
+    const row = win.locator('[data-testid="brain-hit"][data-status="archived"]').first();
+    await expect(row.getByTestId('hit-status')).toHaveText('faded', { timeout: 10_000 });
+    await row.click();
+    const note = win.getByTestId('brain-reader').getByTestId('archived-reason');
+    await expect(note).toContainText('faded: unused for 90 days');
+    await note.getByRole('button', { name: 'Restore' }).click();
+    await expect(win.getByTestId('brain-reader').getByTestId('archived-reason')).toHaveCount(0, { timeout: 10_000 });
+    await expect(win.getByTestId('brain-reader').getByTestId('validity')).toContainText('Current since');
+    await win.getByRole('switch', { name: 'Include history' }).click();
+  });
 });

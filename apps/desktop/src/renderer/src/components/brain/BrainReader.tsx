@@ -91,7 +91,7 @@ export function BrainReader({ id, onOpen }: { id: string; onOpen: (id: string) =
         ))}
       </div>
 
-      <RecordLife onOpen={onOpen} record={r} />
+      <RecordLife onChanged={() => setAttempt((a) => a + 1)} onOpen={onOpen} record={r} />
 
       <section aria-labelledby="links-title" className="flex flex-col gap-1">
         <h3 id="links-title" className="m-0 font-display text-sm font-semibold">

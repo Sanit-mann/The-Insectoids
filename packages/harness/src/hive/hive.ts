@@ -268,6 +268,16 @@ export class Hive {
     this.#emit({ type: 'resumed', message: 'Hive resumed.' });
   }
 
+  /**
+   * Stop every running agent and wait until each has finished its bookkeeping (spend, outcomes, commits,
+   * worktree cleanup). Call before the Brain or the workspace closes: work that outlives them would write
+   * to a closed database or a removed folder.
+   */
+  async settle(reason = 'Stopping.'): Promise<void> {
+    this.pause(reason);
+    while (this.#jobs.size > 0) await Promise.allSettled([...this.#jobs.values()].map((j) => j.done));
+  }
+
   /** The user stops a goal: its agents stop, its open approvals are closed, nothing is merged. */
   async cancelGoal(goalId: string): Promise<void> {
     const { brain } = this.#o;

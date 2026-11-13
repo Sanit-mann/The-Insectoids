@@ -365,19 +365,30 @@ Three milestones, each ending in something the user can try.
     - **Brain screen:** a meaning-search strip whose consent line states model, size and source before any download, then download progress / "Reading your Brain: n of m" / on; and a match badge on every result.
     - **Hint:** "Try meaning search" when a sentence finds nothing.
     - **Settings:** a Meaning search block.
-- **B2 Ranking, decay and dedupe: IN PROGRESS. Paused by the user on 2026-11-12 and saved as a work-in-progress commit.**
-  - **Contract:** in `packages/shared/src/hive-api.ts`:
-    - `BrainSearchRequest.includeHistory`;
-    - `BrainHitView.status` (current / superseded / archived);
-    - `BrainRecordView`: `usage` {reads, helped, lastUsedAt, importance}, `validFrom` / `validTo`, `supersededBy`, `supersedes`, `archivedReason`, `mergedFrom`.
-  - **Built so far:**
-    - Brain: usage tracking, the importance formula (`packages/brain/src/importance.ts`), supersede, near-duplicate merging, decay;
-    - Brain service, MCP, CLI and host wiring;
-    - the Brain reader UI (usage line, "Current since / Replaced by", history toggle and badges; `HitStatus.tsx`, `RecordLife.tsx`).
-  - **State when stopped:** typecheck and lint clean. Unit tests: 657 pass and **1 fails**, `apps/desktop/src/main/hive-manager-opencode.test.ts` ("is ready only with a provider; then a goal runs on it…"), probably affected by the B2 host changes. **The e2e suite was not run.** The backend worker had just finished its own tests and was about to run the full checks; the UI worker was splitting the last test in `e2e/brain-history-ui.spec.ts` into two seeded launches.
-  - **To resume:**
-    1. Fix the OpenCode host test.
-    2. Finish and run `e2e/brain-tidy.spec.ts` and `e2e/brain-history-ui.spec.ts`.
-    3. Run the full suite.
-    4. Review the B2 rules against the plan: nothing deleted; agents never change, merge, replace or fade user-confirmed notes; the secrets guard on every write path.
-    5. Write the B2 progress entry.
+- **B2 Ranking, decay and dedupe: done (2026-11-13).** Paused on 2026-11-12 and finished the next day. 659 unit tests pass three runs in a row with no unhandled errors; e2e 79 passed, 2 skipped.
+  - **Usage** (migration):
+    - reads per record, counted only when an agent actually *reads* it (`get`, `read()`, boot card and the Queen's lookups), never for showing up in a search;
+    - "helped" when a run that read it passes inspection (`cardReadKey` per card attempt).
+  - **Importance** (`packages/brain/src/importance.ts`): recency with a freshness half-life, log-scaled reads and the helped ratio, times a trust weight (confirmed 1.0, unconfirmed 0.8, proposed 0.7) and confidence. Search ranking = hybrid RRF × (0.7 + 0.3 × importance), so relevance still leads.
+  - **Time-aware facts:** `validFrom` / `validTo`, `supersede()` and the `supersedes` link. Default search shows current records only; `includeHistory` adds replaced and archived ones, each marked.
+  - **Near-duplicates:** same shelf and kind; cosine ≥ 0.95 with vectors, else trigram Jaccard ≥ 0.9; and **the numbers in both texts must match**, so facts with different numbers never merge.
+    - An agent near-duplicate of an agent record folds in as a new version; the incoming text is kept as an archived "merged into …" record.
+    - A near-duplicate of a user-confirmed record changes nothing.
+  - **Decay** (host job: at start and every 6 h, plus "Tidy now"):
+    - fades only agent-made `update` / `agent_memory` / `outcome` records unused for 60 days, and agent facts still unconfirmed after 90 days, and only when importance < 0.15;
+    - never decisions, tasks or files, never anything the user wrote, confirmed or ever edited;
+    - the reason is recorded ("faded: unused for N days").
+  - **Restore:** user only (`unarchive`, a user-only method on the Brain service; `restoreRecord` in the app), as a new version.
+  - **Rules checked in the code, not just the tests:**
+    - nothing is deleted;
+    - agents can't change, merge away, replace or fade what the user confirmed (they propose instead);
+    - the secrets guard runs before every write, merge and replace path.
+  - **UI:**
+    - the Brain reader shows the usage line and importance meter, "Current since / Replaced on … by …", "Replaces", "Merged from", and the archive reason with a working **Restore** button;
+    - search has an "Include history" toggle with "replaced" / "faded" badges;
+    - an intro line explains how the Brain keeps itself tidy.
+  - **Bug found while finishing B2 and fixed:** shutting the hive down didn't wait for running agents. In the app, a run could write spending to the Brain after it closed, or clean up a workspace copy after its folder was gone (seen as unhandled errors after tests).
+    - `Hive.settle()` stops running agents and waits for their bookkeeping.
+    - The host waits for it, the Foreman pass and background planning (capped at 30 s) before the project and the Brain close.
+    - A regression test fails without the fix and passes with it.
+  - **Environment note:** the Windows clipboard on this PC refused writes during the final runs (even PowerShell's `Set-Clipboard` failed). The copy-command e2e test now probes the clipboard first and skips with that reason instead of failing falsely.

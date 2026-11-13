@@ -68,6 +68,8 @@ import { Workspace } from '@insectoids/workspace';
 import { meaningSearchOffView } from './meaning-search';
 import type { DoorPaths } from './messages';
 
+/** Longest wait for running agents to wrap up when the project closes. */
+const SETTLE_TIMEOUT_MS = 30_000;
 const run = promisify(execFile);
 
 /** Without main's broker (tests without it): OpenCode can't get a pass, so its runs refuse. */
@@ -235,6 +237,10 @@ export class HiveManager {
   #changedReason = '';
   #ticking = false;
   #disposed = false;
+  /** The Foreman pass in progress, if any (awaited before the project closes). */
+  #tickRun: Promise<void> | null = null;
+  /** Work started without awaiting it (e.g. the Queen planning a goal), awaited before the project closes. */
+  readonly #background = new Set<Promise<unknown>>();
   #limits: HiveLimits;
   /** User caps per engine and vendor limit hits (persisted in the host settings). */
   #engineLimits: Partial<Record<EngineId, EngineLimits>>;
@@ -443,10 +449,13 @@ export class HiveManager {
           throw new Error(`${view.name} is not ready: ${view.message}`);
         }
         // Planning can take minutes with a real engine: start it and return. The goal shows up at once.
-        void p.hive.submitGoal(cmd.text, cmd.budgetTokens ? { budgetTokens: cmd.budgetTokens } : {}).catch((err: unknown) => {
-          this.#note('error', `The Queen could not plan: ${err instanceof Error ? err.message : String(err)}`);
-          this.#changed('plan-failed');
-        });
+        this.#track(
+          p.hive.submitGoal(cmd.text, cmd.budgetTokens ? { budgetTokens: cmd.budgetTokens } : {}).catch((err: unknown) => {
+            if (this.#disposed) return;
+            this.#note('error', `The Queen could not plan: ${err instanceof Error ? err.message : String(err)}`);
+            this.#changed('plan-failed');
+          }),
+        );
         // Let the synchronous part (goal created) run before the UI re-reads.
         await Promise.resolve();
         return;
@@ -569,8 +578,18 @@ export class HiveManager {
     if (!p) return;
     this.#project = null;
     clearInterval(p.timer);
-    p.hive.pause('Switching project.');
+    // Stop every agent and wait for its bookkeeping (spend, outcomes, worktree cleanup) to finish, plus the
+    // Foreman pass and background planning, so nothing writes to the Brain or the workspace after they
+    // close. Capped so a stuck engine can never hang shutdown.
+    const settled = Promise.allSettled([p.hive.settle('Switching project.'), this.#tickRun, ...this.#background]);
+    await Promise.race([settled, new Promise((r) => setTimeout(r, SETTLE_TIMEOUT_MS).unref?.())]);
     // Card worktrees stay on disk (they belong to goals in the Brain); nothing is deleted here.
+  }
+
+  /** Remember work started without awaiting it, so closing the project can wait for it. */
+  #track(work: Promise<unknown>): void {
+    this.#background.add(work);
+    void work.finally(() => this.#background.delete(work));
   }
 
   async #tick(): Promise<void> {
@@ -579,11 +598,13 @@ export class HiveManager {
     this.#ticking = true;
     try {
       this.#maybeResumeAfterLimit();
-      await p.hive.tick();
+      this.#tickRun = p.hive.tick();
+      await this.#tickRun;
     } catch (err) {
       this.#o.log?.(`[hive] tick failed: ${err instanceof Error ? err.stack ?? err.message : String(err)}`);
     } finally {
       this.#ticking = false;
+      this.#tickRun = null;
     }
   }
 

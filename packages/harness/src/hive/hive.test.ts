@@ -57,6 +57,30 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
+describe('shutting down while agents run', () => {
+  it('settle() stops running agents and waits until their bookkeeping is done', async () => {
+    const engine = new FakeEngine((req) => {
+      if (req.role === 'queen') return planReply([[card('C-01', 'coder')]]);
+      // A slow insect: still running when the hive shuts down.
+      return { text: 'Built it.\nSTATUS: DONE', delayMs: 800, effects: (cwd) => writeFileSync(join(cwd, 'slow.js'), 'x\n') };
+    });
+    const hive = makeHive(engine);
+    await hive.submitGoal('Build something slow');
+    await hive.tick();
+    expect(hive.runningJobs).toBe(1);
+
+    await hive.settle('Closing for the test.');
+    // Nothing is still running once settle() returns, so the Brain and the workspace can close safely.
+    expect(hive.runningJobs).toBe(0);
+    const spentAtClose = brain.goals.list()[0]!.spentTokens;
+    brain.close();
+    // If any work outlived settle(), it would now write to a closed Brain (an unhandled rejection fails the run).
+    await new Promise((r) => setTimeout(r, 1200));
+    brain = openBrain(':memory:'); // for afterEach
+    expect(spentAtClose).toBeGreaterThanOrEqual(0);
+  });
+});
+
 describe('one goal, end to end', () => {
   it('plans, builds in worktrees, verifies, and merges into main only after approval', async () => {
     const engine = new FakeEngine((req) => {

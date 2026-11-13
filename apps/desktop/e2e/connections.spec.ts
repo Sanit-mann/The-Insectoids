@@ -42,6 +42,13 @@ test('the Engines tab lists every engine in order, with the default marked', asy
 
 test('a command can be copied', async () => {
   const { win, app } = launched;
+  // This checks the real system clipboard. When the OS clipboard itself refuses writes (seen on Windows
+  // when another program or session holds it), there is nothing honest to assert, so say so instead.
+  const clipboardWorks = await app.evaluate(async ({ clipboard }) => {
+    await clipboard.writeText('insectoids-clipboard-probe');
+    return (await clipboard.readText()) === 'insectoids-clipboard-probe';
+  });
+  test.skip(!clipboardWorks, 'The system clipboard is not accepting writes on this computer right now.');
   const copy = win.getByRole('button', { name: /^Copy: / }).first();
   await expect(copy).toBeVisible();
   const command = (await copy.getAttribute('aria-label'))!.replace(/^Copy: /, '');
