@@ -177,6 +177,21 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
     case 'codeLookup':
       // Validated in main against CodeLookupRequestSchema before it gets here.
       return hive.codeLookup(params as Parameters<HiveManager['codeLookup']>[0]);
+    // Brain screens (Phase 2 B5): requests are validated in main and parsed again in the HiveManager.
+    case 'brainGraph':
+      return hive.brainGraph(params as Parameters<HiveManager['brainGraph']>[0]);
+    case 'brainDashboard':
+      return hive.brainDashboard();
+    case 'brainEdit':
+      return hive.brainEdit(params as Parameters<HiveManager['brainEdit']>[0]);
+    case 'e2eAgentEdit': {
+      // e2e only: refused unless this host itself runs under INSECTOIDS_E2E=1 (checked again in the HiveManager).
+      if (process.env['INSECTOIDS_E2E'] !== '1') throw new Error('Only available in end-to-end tests.');
+      const p = params as { id?: unknown; body?: unknown };
+      if (typeof p?.id !== 'string' || typeof p.body !== 'string') throw new Error('e2eAgentEdit needs an id and a body.');
+      hive.e2eAgentEdit(p.id, p.body);
+      return null;
+    }
     case 'setLimits':
       // Built in main from the shared PRESETS table; checked again by setLimits.
       hive.setLimits(params as Parameters<HiveManager['setLimits']>[0]);

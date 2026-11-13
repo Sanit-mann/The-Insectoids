@@ -1,9 +1,11 @@
-import { Brain, Code2, NotebookText, Network, Search } from 'lucide-react';
+import { Brain, Code2, LayoutDashboard, NotebookText, Network, Search } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { BrainHitView, RecordKind } from '@insectoids/shared';
 import { BrainCareRow } from '@/components/brain/BrainCare';
 import { BrainReader } from '@/components/brain/BrainReader';
 import { CodeMapView } from '@/components/brain/CodeMapView';
+import { DashboardView } from '@/components/brain/DashboardView';
+import { GraphView } from '@/components/brain/GraphView';
 import { KINDS, kindInfo } from '@/components/brain/kinds';
 import { HitStatusBadge } from '@/components/brain/HitStatus';
 import { MatchBadge, MeaningSearchStrip, TURN_ON_ID } from '@/components/brain/MeaningSearch';
@@ -19,15 +21,20 @@ type Results = { state: 'idle' } | { state: 'loading' } | { state: 'error'; mess
 /**
  * Brain (App 07, Memory 01-D10): search by words and, once switched on, by meaning (01-E11, Phase 2 B1);
  * filter by kind; read a record with its trust, versions and links. Above them (B3): Brain health, the
- * Librarian and the lessons the hive learned. The graph arrives later in Phase 2.
+ * Librarian and the lessons the hive learned. B5: the graph, the dashboard, and editing in the reader.
  */
-type BrainView = 'notes' | 'code';
+type BrainView = 'notes' | 'graph' | 'dashboard' | 'code';
 const VIEWS: Array<{ id: BrainView; label: string; icon: typeof Code2 }> = [
   { id: 'notes', label: 'Notes', icon: NotebookText },
+  { id: 'graph', label: 'Graph', icon: Network },
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'code', label: 'Code', icon: Code2 },
 ];
 
-/** Notes | Code (Phase 2 B4): the Brain's records, or the code map of the current project. Arrow keys switch. */
+/**
+ * Notes | Graph | Dashboard | Code (Phase 2 B4, B5): the Brain's records, the graph of how they link,
+ * the numbers and timeline, or the code map of the current project. Arrow keys switch.
+ */
 function ViewSwitch({ view, onChange }: { view: BrainView; onChange: (v: BrainView) => void }) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
   const onKeyDown = (e: KeyboardEvent<HTMLDivElement>): void => {
@@ -79,7 +86,29 @@ export function BrainScreen() {
       </div>
     );
   }
+  if (view === 'graph' || view === 'dashboard') return <WithReader switcher={<ViewSwitch onChange={setView} view={view} />} view={view} />;
   return <NotesView switcher={<ViewSwitch onChange={setView} view={view} />} />;
+}
+
+/** Graph or dashboard on the left, the reader beside it once a record is picked (B5). */
+function WithReader({ view, switcher }: { view: 'graph' | 'dashboard'; switcher: ReactNode }) {
+  const [openId, setOpenId] = useState<string | null>(null);
+  // Bumped when the reader changes a record, so the graph or the numbers follow at once.
+  const [refreshKey, setRefreshKey] = useState(0);
+  const changed = (): void => setRefreshKey((k) => k + 1);
+  return (
+    <div className="flex flex-1 flex-wrap items-start gap-6 p-6">
+      {switcher}
+      <div className="min-w-0 flex-[999_1_560px]">
+        {view === 'graph' ? <GraphView onOpen={setOpenId} openId={openId} refreshKey={refreshKey} /> : <DashboardView onOpen={setOpenId} refreshKey={refreshKey} />}
+      </div>
+      {openId && (
+        <div className="min-w-0 flex-[1_1_380px]">
+          <BrainReader id={openId} onChanged={changed} onOpen={setOpenId} />
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** The Brain's records: search, filters, the reader, and (B3) health, the Librarian and lessons. */
@@ -233,15 +262,11 @@ function NotesView({ switcher }: { switcher: ReactNode }) {
             })}
           </ul>
         )}
-
-        <p className="m-0 flex items-center gap-2 rounded-[10px] border border-dashed border-line px-3 py-2 text-xs text-muted">
-          <Network aria-hidden="true" className="size-4" /> Graph — later (Phase 2): records as nodes, lines only from real links.
-        </p>
       </section>
 
       <div className="min-w-0 flex-[999_1_420px]">
         {openId ? (
-          <BrainReader id={openId} onOpen={setOpenId} />
+          <BrainReader id={openId} onChanged={() => setAttempt((a) => a + 1)} onOpen={setOpenId} />
         ) : (
           <div className="flex flex-col items-center justify-center gap-3 rounded-2xl border border-dashed border-line p-10 text-center text-muted">
             <Brain size={40} strokeWidth={1.5} className="text-honey" aria-hidden="true" />

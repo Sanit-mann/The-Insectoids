@@ -1,6 +1,9 @@
 import { type IpcRendererEvent, contextBridge, ipcRenderer } from 'electron';
 import {
   AppInfoSchema,
+  BrainDashboardViewSchema,
+  BrainEditResultSchema,
+  BrainGraphViewSchema,
   BrainHitViewSchema,
   BrainRecordViewSchema,
   BrainStatusSchema,
@@ -50,6 +53,9 @@ const hive: HiveApi = {
   brainSearch: async (req) => BrainHitViewSchema.array().parse(await invoke(HIVE_IPC.brainSearch, req)),
   brainRecord: async (id) => BrainRecordViewSchema.nullable().parse(await invoke(HIVE_IPC.brainRecord, id)),
   codeLookup: async (req) => CodeLookupResultSchema.parse(await invoke(HIVE_IPC.codeLookup, req)),
+  brainGraph: async (req) => BrainGraphViewSchema.parse(await invoke(HIVE_IPC.brainGraph, req)),
+  brainDashboard: async () => BrainDashboardViewSchema.parse(await invoke(HIVE_IPC.brainDashboard)),
+  brainEdit: async (req) => BrainEditResultSchema.parse(await invoke(HIVE_IPC.brainEdit, req)),
   pickProject: async () => ProjectViewSchema.nullable().parse(await invoke(HIVE_IPC.pickProject)),
   onEvent: (listener) => {
     const handler = (_e: IpcRendererEvent, raw: unknown): void => {

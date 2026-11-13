@@ -1,5 +1,10 @@
 import { type BrowserWindow, type IpcMainInvokeEvent, dialog, ipcMain } from 'electron';
 import {
+  BrainDashboardViewSchema,
+  BrainEditRequestSchema,
+  BrainEditResultSchema,
+  BrainGraphRequestSchema,
+  BrainGraphViewSchema,
   BrainHitViewSchema,
   BrainRecordViewSchema,
   BrainSearchRequestSchema,
@@ -74,6 +79,11 @@ export function registerHiveIpc(d: Deps): void {
 
   // The code map (Phase 2 B4): read-only lookups on the current project's map, answered by the Brain host.
   handle(HIVE_IPC.codeLookup, async (arg) => CodeLookupResultSchema.parse(await host().call('codeLookup', CodeLookupRequestSchema.parse(arg))));
+
+  // Brain screens (Phase 2 B5): the graph and the dashboard are reads; the edit is the user's, through the single writer.
+  handle(HIVE_IPC.brainGraph, async (arg) => BrainGraphViewSchema.parse(await host().call('brainGraph', BrainGraphRequestSchema.parse(arg ?? {}))));
+  handle(HIVE_IPC.brainDashboard, async () => BrainDashboardViewSchema.parse(await host().call('brainDashboard')));
+  handle(HIVE_IPC.brainEdit, async (arg) => BrainEditResultSchema.parse(await host().call('brainEdit', BrainEditRequestSchema.parse(arg))));
 
   handle(HIVE_IPC.brainRecord, async (arg) => {
     const id = RecordId.parse(arg);

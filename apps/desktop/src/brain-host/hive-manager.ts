@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
-import { type Brain, type BoardCard, type Goal, brainHealth } from '@insectoids/brain';
+import { type Brain, type BoardCard, type Goal, ConflictError, SecretError, brainHealth } from '@insectoids/brain';
 import {
   approvalFor,
   auditSummary,
@@ -53,6 +53,13 @@ import {
   type AgentView,
   type ApprovalView,
   type BrainHealth,
+  type BrainDashboardView,
+  type BrainEditRequest,
+  BrainEditRequestSchema,
+  type BrainEditResult,
+  type BrainGraphRequest,
+  BrainGraphRequestSchema,
+  type BrainGraphView,
   type LessonView,
   type LibrarianView,
   type CardView,
@@ -547,7 +554,11 @@ export class HiveManager {
     });
   }
 
-  /** e2e: agent records that exercise B2 (two near-duplicates, a superseded fact, an old note) and B3 (two lessons). */
+  /**
+   * e2e: agent records that exercise B2 (two near-duplicates, a superseded fact, an old note), B3 (two
+   * lessons) and B5 (four linked records: a proposed decision, a task, an unconfirmed fact an agent may
+   * still change, and an update).
+   */
   #seedBrain(): void {
     const shelf = this.#project?.view.shelf;
     if (!shelf) return;
@@ -558,6 +569,14 @@ export class HiveManager {
     const old = b.write({ kind: 'fact', shelf, title: 'Hosting provider', body: 'The site is hosted on Netlify.' }, ant).id;
     b.write({ kind: 'fact', shelf, title: 'Hosting provider', body: 'The site moved to Vercel hosting.', supersedes: old }, ant);
     b.write({ kind: 'agent_memory', shelf, title: 'Scratch idea', body: 'Maybe try a carousel on the landing page someday.' }, ant);
+    // B5 (graph and edit): a small linked cluster. Its words stay clear of the searches the B2/B3 specs use.
+    const decision = b.write({ kind: 'decision', shelf, title: 'Take payments by card only', body: 'Only card payments at launch; no bank transfers yet.' }, ant).id;
+    const task = b.write({ kind: 'task', shelf, title: 'Build the order summary page', body: 'Show the items, the total and the delivery date before payment.' }, ant).id;
+    const fact = b.write({ kind: 'fact', shelf, title: 'Order emails come from the shop address', body: "Order confirmation emails are sent from the shop's own address." }, ant).id;
+    const progress = b.write({ kind: 'update', shelf, title: 'Order page progress', body: 'The order summary page has its layout; totals come next.' }, ant).id;
+    b.link(task, decision, 'implements');
+    b.link(fact, decision, 'about');
+    b.link(progress, task, 'about');
     const lib = { type: 'agent' as const, id: LIBRARIAN };
     b.learn({ shelf, title: 'Don\'t hand in "Add the pricing table" as done because the prices were placeholders', body: 'Card: Add the pricing table\nWhat the Inspector found: the prices were placeholders.' }, lib);
     b.learn({ shelf, title: 'Don\'t hand in "Fix the login test" as done because the test was skipped, not fixed', body: 'Card: Fix the login test\nWhat the Inspector found: the test was skipped, not fixed.' }, lib);
@@ -643,6 +662,14 @@ export class HiveManager {
     if (cmd.type === 'restoreRecord') {
       this.#o.brain.unarchive(cmd.id, { type: 'user' });
       this.#note('brain-tidy', 'Brought a record back from the archive.');
+      return;
+    }
+    if (cmd.type === 'archiveRecord') {
+      const rec = this.#o.brain.get(cmd.id);
+      if (!rec) throw new Error('That record is not in the Brain.');
+      if (rec.archived) return;
+      this.#o.brain.archive(cmd.id, { type: 'user' }, 'by you');
+      this.#note('brain-edit', `Archived "${short(rec.title, 120)}" (you can bring it back).`);
       return;
     }
     if (cmd.type === 'setEngineEnabled') return this.#setEngineEnabled(cmd.engineId, cmd.enabled);
@@ -1024,6 +1051,76 @@ export class HiveManager {
   }
 
   /** Newest records on the project shelf (plus global), for the Brain screen without a query. */
+  // ---- Brain screens (Phase 2 B5) ------------------------------------------------------------------
+
+  /** Graph view: the open project's shelf (plus global), global alone, or every shelf. Request checked in main. */
+  brainGraph(req: BrainGraphRequest): BrainGraphView {
+    const r = BrainGraphRequestSchema.parse(req);
+    const shelf = r.scope === 'all' ? undefined : r.scope === 'global' ? 'global' : (this.#project?.view.shelf ?? 'global');
+    return this.#o.brain.graph({
+      ...(shelf !== undefined ? { shelf } : {}),
+      ...(r.kinds?.length ? { kinds: r.kinds } : {}),
+      ...(r.since !== undefined ? { since: r.since } : {}),
+      ...(r.includeArchived ? { includeArchived: true } : {}),
+      limit: r.limit,
+    });
+  }
+
+  /** Dashboard numbers for the open project's shelf (plus global), or global when no project is open. */
+  brainDashboard(): BrainDashboardView {
+    return this.#o.brain.dashboard(this.#project?.view.shelf ?? 'global');
+  }
+
+  /**
+   * The user edits a record (Memory 01-D12): a new version, confirmed, only if nobody changed it since the
+   * version the edit started from. Otherwise nothing is saved and the current text comes back.
+   */
+  brainEdit(req: BrainEditRequest): BrainEditResult {
+    const r = BrainEditRequestSchema.parse(req);
+    const brain = this.#o.brain;
+    const cur = brain.get(r.id);
+    if (!cur) return { status: 'error', message: 'That record is not in the Brain any more.' };
+    if (cur.archived) return { status: 'error', message: 'This record is archived. Bring it back first.' };
+    try {
+      const version = brain.update(
+        r.id,
+        { title: r.title, body: r.body, summary: r.summary?.trim() ? r.summary : null, trust: 'confirmed', expectedVersion: r.baseVersion },
+        { type: 'user' },
+      );
+      this.#note('brain-edit', `You edited "${short(r.title, 120)}" (version ${version}).`);
+      return { status: 'saved', version };
+    } catch (err) {
+      if (err instanceof ConflictError) {
+        const now = brain.get(r.id);
+        if (!now) return { status: 'error', message: 'That record is not in the Brain any more.' };
+        if (now.archived) return { status: 'error', message: 'This record is archived. Bring it back first.' };
+        const last = brain.history(r.id).at(-1);
+        return {
+          status: 'conflict',
+          current: {
+            version: now.version,
+            title: now.title,
+            body: now.body,
+            summary: now.summary,
+            changedBy: last?.changedBy ?? now.owner,
+            changedAt: last?.changedAt ?? now.updatedAt,
+          },
+        };
+      }
+      if (err instanceof SecretError) {
+        return { status: 'error', message: 'Not saved: it looks like a password or key. Keys belong in the Vault, never in the Brain.' };
+      }
+      return { status: 'error', message: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /** e2e only (the host refuses it otherwise): an agent changes a record's body, to show an edit conflict. */
+  e2eAgentEdit(id: string, body: string): void {
+    if (process.env['INSECTOIDS_E2E'] !== '1') throw new Error('Only available in end-to-end tests.');
+    this.#o.brain.update(id, { body }, { type: 'agent', id: 'e2e-agent' });
+    this.#changed('brain-edit');
+  }
+
   brainRecent(params: { kinds?: Parameters<Brain['recent']>[0]['kinds']; includeHistory?: boolean } = {}) {
     const shelf = this.#project?.view.shelf ?? 'global';
     return this.#o.brain

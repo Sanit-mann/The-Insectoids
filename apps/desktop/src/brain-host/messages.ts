@@ -39,7 +39,19 @@ export interface HiveSetup {
 }
 
 /** Host RPC methods (main -> host). Inputs and outputs are validated in main against the shared schemas. */
-export type HostMethod = 'snapshot' | 'command' | 'changes' | 'project' | 'brainRecent' | 'setLimits' | 'codeLookup';
+export type HostMethod =
+  | 'snapshot'
+  | 'command'
+  | 'changes'
+  | 'project'
+  | 'brainRecent'
+  | 'setLimits'
+  | 'codeLookup'
+  // Brain screens (Phase 2 B5). 'e2eAgentEdit' works only when the host runs under INSECTOIDS_E2E=1.
+  | 'brainGraph'
+  | 'brainDashboard'
+  | 'brainEdit'
+  | 'e2eAgentEdit';
 
 /**
  * Requests the host makes to main (the reverse direction): the secret broker and the Vault live in

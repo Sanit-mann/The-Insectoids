@@ -20,6 +20,10 @@ export const HIVE_IPC = {
   brainRecord: 'hive:brain-record',
   /** Look up the code map (Phase 2 B4): symbols, files, who calls what. */
   codeLookup: 'hive:code-lookup',
+  /** Brain screens (Phase 2 B5): the graph, the dashboard, and the user's safe edit of a record. */
+  brainGraph: 'hive:brain-graph',
+  brainDashboard: 'hive:brain-dashboard',
+  brainEdit: 'hive:brain-edit',
   /** Opens the folder picker in main; returns the chosen project or null if cancelled. */
   pickProject: 'hive:pick-project',
   /** main -> renderer push. */
@@ -424,6 +428,8 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('tidyBrain') }),
   /** Bring an archived (e.g. faded) Brain record back, as a new version. The user only (B2). */
   z.object({ type: z.literal('restoreRecord'), id: Id }),
+  /** The user archives a record (Phase 2 B5): it leaves search, stays readable, and can be brought back. */
+  z.object({ type: z.literal('archiveRecord'), id: Id }),
   /** Run the Librarian now: its free audit always; its LLM review only when an engine is ready (spends tokens). */
   z.object({ type: z.literal('runLibrarian'), review: z.boolean() }),
   /** Rebuild the code map now (otherwise it refreshes changed files by itself). */
@@ -521,6 +527,90 @@ export const BrainRecordViewSchema = z.object({
 });
 export type BrainRecordView = z.infer<typeof BrainRecordViewSchema>;
 
+// ---- Brain screens (Phase 2 B5; Memory 01-D10–D13) --------------------------------------------
+
+/** Graph view: records as nodes, edges only from real links (01-D13). Filters by shelf, kind and date. */
+export const BrainGraphRequestSchema = z.object({
+  /** 'project' = the open project's shelf (global when none is open); 'global'; or 'all' shelves. */
+  scope: z.enum(['project', 'global', 'all']).default('project'),
+  kinds: z.array(RecordKindSchema).max(20).optional(),
+  /** Only records updated at or after this time (ms). */
+  since: z.number().int().nonnegative().optional(),
+  includeArchived: z.boolean().optional(),
+  /** Most important first; the rest is counted in `hidden`. */
+  limit: z.number().int().min(1).max(400).default(200),
+});
+export const BrainGraphNodeSchema = z.object({
+  id: z.string(),
+  kind: RecordKindSchema,
+  title: z.string(),
+  trust: TrustSchema,
+  shelf: z.string(),
+  archived: z.boolean(),
+  /** 0..1 (B2): drawn as node size. */
+  importance: z.number().min(0).max(1),
+  updatedAt: z.number(),
+});
+export const BrainGraphEdgeSchema = z.object({ from: z.string(), to: z.string(), rel: z.string() });
+export const BrainGraphViewSchema = z.object({
+  nodes: z.array(BrainGraphNodeSchema),
+  /** Only edges whose both ends are in `nodes`. */
+  edges: z.array(BrainGraphEdgeSchema),
+  /** Records that matched the filters but were left out by `limit`. */
+  hidden: z.number().int().nonnegative(),
+});
+export type BrainGraphRequest = z.input<typeof BrainGraphRequestSchema>;
+export type BrainGraphNode = z.infer<typeof BrainGraphNodeSchema>;
+export type BrainGraphView = z.infer<typeof BrainGraphViewSchema>;
+
+/** Dashboard (01-D13 phase 2): health is in the snapshot (B3); this adds counts, growth, most used and a timeline. */
+export const BrainDashboardViewSchema = z.object({
+  /** Shelf the numbers are for (the open project's, or global). */
+  shelf: z.string(),
+  totals: z.object({ records: z.number().int(), archived: z.number().int(), confirmed: z.number().int(), links: z.number().int() }),
+  byKind: z.array(z.object({ kind: RecordKindSchema, count: z.number().int() })),
+  /** Last 8 weeks, oldest first: records added and agent reads per week. */
+  weeks: z.array(z.object({ weekStart: z.number(), added: z.number().int(), reads: z.number().int() })),
+  /** Top 5 by importance among current records. */
+  mostUsed: z.array(z.object({ id: z.string(), kind: RecordKindSchema, title: z.string(), reads: z.number().int(), helped: z.number().int(), importance: z.number() })),
+  /** Timeline: the latest 30 changes to records on the shelf, newest first. */
+  timeline: z.array(
+    z.object({
+      id: z.string(),
+      kind: RecordKindSchema,
+      title: z.string(),
+      version: z.number().int(),
+      change: z.string(),
+      /** 'user' or the agent id. */
+      changedBy: z.string(),
+      changedAt: z.number(),
+    }),
+  ),
+});
+export type BrainDashboardView = z.infer<typeof BrainDashboardViewSchema>;
+
+/**
+ * The user edits a record (01-D12). Saved as a new version; user edits count as confirmed. If someone
+ * (an agent) changed it after `baseVersion`, nothing is saved and the current text comes back as a conflict.
+ */
+export const BrainEditRequestSchema = z.object({
+  id: Id,
+  baseVersion: z.number().int().positive(),
+  title: z.string().trim().min(1).max(300),
+  body: z.string().max(100_000),
+  summary: z.string().max(1_000).nullable(),
+});
+export const BrainEditResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('saved'), version: z.number().int() }),
+  z.object({
+    status: z.literal('conflict'),
+    current: z.object({ version: z.number().int(), title: z.string(), body: z.string(), summary: z.string().nullable(), changedBy: z.string(), changedAt: z.number() }),
+  }),
+  z.object({ status: z.literal('error'), message: z.string() }),
+]);
+export type BrainEditRequest = z.infer<typeof BrainEditRequestSchema>;
+export type BrainEditResult = z.infer<typeof BrainEditResultSchema>;
+
 // ---- push events -----------------------------------------------------------------------------
 
 export const HivePushSchema = z.discriminatedUnion('type', [
@@ -539,6 +629,9 @@ export interface HiveApi {
   brainSearch(req: z.infer<typeof BrainSearchRequestSchema>): Promise<BrainHitView[]>;
   brainRecord(id: string): Promise<BrainRecordView | null>;
   codeLookup(req: z.infer<typeof CodeLookupRequestSchema>): Promise<CodeLookupResult>;
+  brainGraph(req: BrainGraphRequest): Promise<BrainGraphView>;
+  brainDashboard(): Promise<BrainDashboardView>;
+  brainEdit(req: BrainEditRequest): Promise<BrainEditResult>;
   pickProject(): Promise<ProjectView | null>;
   /** Returns an unsubscribe function. */
   onEvent(listener: (e: HivePush) => void): () => void;

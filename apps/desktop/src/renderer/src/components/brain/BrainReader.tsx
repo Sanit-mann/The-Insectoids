@@ -2,18 +2,43 @@ import { Archive, ArrowDownLeft, ArrowUpRight, Pencil } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import type { BrainRecordView } from '@insectoids/shared';
 import { InlineError } from '@/components/changes/CardChanges';
+import { HoldButton } from '@/components/kokonutui/hold-button';
+import { InlineAlert } from '@/components/kokonutui/inline-alert';
+import { Button } from '@/components/ui/button';
+import { runCommand } from '@/lib/hive-store';
 import { cn } from '@/lib/utils';
 import { TRUST, kindInfo } from './kinds';
+import { RecordEditor } from './RecordEditor';
 import { RecordLife } from './RecordLife';
 
 type Load = { state: 'loading' } | { state: 'missing' } | { state: 'error'; message: string } | { state: 'ready'; record: BrainRecordView };
 
 const when = (ms: number): string => new Date(ms).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
 
-/** Reader pane: one Brain record with trust, source, versions and links (Memory 01-D10, App 07 Brain). */
-export function BrainReader({ id, onOpen }: { id: string; onOpen: (id: string) => void }) {
+/**
+ * Reader pane: one Brain record with trust, source, versions and links (Memory 01-D10, App 07 Brain).
+ * Phase 2 B5: Edit (a new version, confirmed, conflicts shown instead of overwritten; RecordEditor) and
+ * hold-to-archive (Kokonut UI `hold-button`). `onChanged` tells the screen around it (graph, dashboard).
+ */
+export function BrainReader({ id, onOpen, onChanged }: { id: string; onOpen: (id: string) => void; onChanged?: () => void }) {
   const [result, setResult] = useState<{ key: string; load: Load } | null>(null);
   const [attempt, setAttempt] = useState(0);
+  /** The record being edited (an id, so opening another record closes the editor). */
+  const [editing, setEditing] = useState<string | null>(null);
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState<string | null>(null);
+  const reload = (): void => {
+    setAttempt((a) => a + 1);
+    onChanged?.();
+  };
+  const archive = async (recordId: string): Promise<void> => {
+    setArchiving(true);
+    setArchiveError(null);
+    const res = await runCommand({ type: 'archiveRecord', id: recordId });
+    setArchiving(false);
+    if (!res.ok) setArchiveError(res.error);
+    reload();
+  };
   const key = [id, attempt].join('/');
   const load: Load = result?.key === key ? result.load : { state: 'loading' };
 
@@ -74,24 +99,46 @@ export function BrainReader({ id, onOpen }: { id: string; onOpen: (id: string) =
       {r.summary && <p className="m-0 text-sm text-muted">{r.summary}</p>}
       <div className="whitespace-pre-wrap break-words rounded-[10px] border border-line bg-ground p-3 text-sm">{r.body}</div>
 
-      <div className="flex flex-wrap gap-2">
-        {[
-          { label: 'Edit', icon: Pencil },
-          { label: 'Archive', icon: Archive },
-        ].map(({ label, icon: I }) => (
-          <span key={label} title={`${label} arrives in Phase 2. Every change will be saved as a new version.`}>
-            <button
-              type="button"
-              disabled
-              className="inline-flex min-h-10 cursor-not-allowed items-center gap-2 rounded-[10px] border border-line px-3.5 font-semibold text-muted opacity-60"
-            >
-              <I aria-hidden="true" className="size-4" /> {label}
-            </button>
-          </span>
-        ))}
-      </div>
+      {editing === r.id ? (
+        <RecordEditor
+          onCancel={() => {
+            setEditing(null);
+            reload();
+          }}
+          onSaved={() => {
+            setEditing(null);
+            reload();
+          }}
+          record={r}
+        />
+      ) : (
+        !r.archived && (
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button data-testid="record-edit" onClick={() => setEditing(r.id)} variant="outline">
+                <Pencil aria-hidden="true" /> Edit
+              </Button>
+              <HoldButton
+                aria-label={`Hold to archive ${r.title}`}
+                completeLabel="Archived"
+                data-testid="record-archive"
+                disabled={archiving}
+                holdingLabel="Keep holding"
+                icon={Archive}
+                onHoldComplete={() => void archive(r.id)}
+                resetAfter={1500}
+                variant="danger"
+              >
+                Hold to archive
+              </HoldButton>
+            </div>
+            <p className="m-0 text-xs text-muted">Archived records leave search but stay readable here, and you can bring them back.</p>
+            {archiveError && <InlineAlert message={archiveError} onDismiss={() => setArchiveError(null)} title="Not archived" tone="error" />}
+          </div>
+        )
+      )}
 
-      <RecordLife onChanged={() => setAttempt((a) => a + 1)} onOpen={onOpen} record={r} />
+      <RecordLife onChanged={reload} onOpen={onOpen} record={r} />
 
       <section aria-labelledby="links-title" className="flex flex-col gap-1">
         <h3 id="links-title" className="m-0 font-display text-sm font-semibold">

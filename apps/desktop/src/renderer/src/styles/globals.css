@@ -23,6 +23,18 @@
   --st-done: #86c98a;
   --st-paused: #b49cf0;
   --st-idle: #6e675a;
+  /*
+   * Brain graph kinds (Phase 2 B5): the dataviz reference categorical palette, dark steps; validated on
+   * our dark surface (all checks pass). Never colour alone: every kind also has its own shape and label.
+   */
+  --kind-1: #3987e5;
+  --kind-2: #d95926;
+  --kind-3: #199e70;
+  --kind-4: #c98500;
+  --kind-5: #d55181;
+  --kind-6: #008300;
+  --kind-7: #9085e9;
+  --kind-8: #e66767;
   color-scheme: dark;
 }
 
@@ -36,6 +48,15 @@
   --muted: #6b6354;
   --honey-text: #8f5600;
   --active: #f6e7c8;
+  /* Brain graph kinds, light steps (three sit under 3:1 on white: shapes, labels and the list view carry them). */
+  --kind-1: #2a78d6;
+  --kind-2: #eb6834;
+  --kind-3: #1baf7a;
+  --kind-4: #eda100;
+  --kind-5: #e87ba4;
+  --kind-6: #008300;
+  --kind-7: #6250d6;
+  --kind-8: #e34948;
   color-scheme: light;
 }
 

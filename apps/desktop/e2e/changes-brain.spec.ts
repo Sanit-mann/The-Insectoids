@@ -89,7 +89,8 @@ test('after the merge, "Undo merge" asks for approval', async () => {
 
 test('the Brain finds the goal and opens it with its trust level', async () => {
   await nav('Brain').click();
-  await expect(t.win.getByText('Graph — later')).toBeVisible();
+  // Phase 2 B5: the graph is a real view now, next to Notes.
+  await expect(t.win.getByTestId('brain-view-switch').getByRole('tab', { name: 'Graph' })).toBeVisible();
   await t.win.getByTestId('brain-search').fill('hello');
   const hit = t.win.getByTestId('brain-hit').filter({ hasText: 'Say hello' }).first();
   await expect(hit).toBeVisible({ timeout: 10_000 });
@@ -98,5 +99,6 @@ test('the Brain finds the goal and opens it with its trust level', async () => {
   await expect(reader.getByRole('heading', { name: /Say hello/ })).toBeVisible();
   // The user gave the goal, so the record is confirmed (Memory 01-D3); trust is shown as words.
   await expect(reader.getByTestId('trust-badge')).toHaveText('Confirmed');
-  await expect(reader.getByRole('button', { name: 'Edit' })).toBeDisabled();
+  // Phase 2 B5: the user can edit it (saved as a new version; brain-edit-ui covers the rest).
+  await expect(reader.getByRole('button', { name: 'Edit' })).toBeEnabled();
 });

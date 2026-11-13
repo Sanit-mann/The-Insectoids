@@ -448,3 +448,33 @@ Three milestones, each ending in something the user can try.
       - **The bug:** the hold only completed when its fill animation finished, and a busy or background window can pause animation frames.
       - **The fix:** completion now follows a plain timer, and the fill is only visual (a change to the Kokonut UI `hold-button`).
       - **The tests:** they hold until the button reports `data-complete` (`e2e/support/hold.ts`), pinned to one element, since some buttons rename themselves mid-hold. They no longer use a fixed 1.5 s wait. If the page shifts and the button rightly cancels the hold, the helper measures it again and presses again.
+- **B5 Brain screens: done (2026-11-13).** Built by two parallel workers (backend; screens and e2e) on the contract additions (`brainGraph`, `brainDashboard`, `brainEdit`, command `archiveRecord`). Unit tests: 744 pass, 17 of them new, with no unhandled errors. e2e: 109 passed, 2 skipped by design, in three full runs in a row. Lint and typecheck are clean. No AI, no network, no real engine runs.
+  - **Brain screen tabs:** Notes | Graph | Dashboard | Code.
+  - **Graph** (custom by design, App 07):
+    - **Drawing:**
+      - Records are nodes with a shape *and* a colour per kind, plus a legend.
+      - Size shows importance (B2); unconfirmed and proposed records are dashed, archived ones faded.
+      - Lines come only from real links, labelled on hover or focus.
+      - The layout is deterministic, so refreshing doesn't reshuffle it.
+    - **Filters:** this project / global / all; kind; changed in the last 7, 30 or 90 days; include archived.
+    - **Moving around:** pan, zoom and fit.
+    - **Access:** arrow keys walk the nodes, Enter opens one in the reader, and "Show as list" is the accessible alternative. "N more not shown" appears past 200 nodes, most important first.
+    - **Kind colours:** the dataviz skill's palette, checked with its validator in light and dark.
+  - **Reader with edit (01-D12):**
+    - **Edit:** changes title, summary and body. Saving makes a new version, and the user's edit counts as **confirmed**.
+    - **Conflicts:** the save carries the version the user started from (`expectedVersion` in `Brain.update`). If an agent changed the record meanwhile, nothing is overwritten: the reader shows who changed it and when, their text next to the user's, and "Keep mine" / "Use theirs".
+    - **Archive:** "Hold to archive" archives the record "by you"; Restore was already there from B2.
+    - **Bad edits:** archived records can't be edited, and secrets are refused with a pointer to the Vault.
+  - **Dashboard (01-D13 phase 2):**
+    - totals, records by kind, and the last 8 weeks (records added and agent reads, as text-labelled bars);
+    - most used (only records agents actually read) and a timeline of the latest 30 changes (who, what, when);
+    - the B3 Health, Librarian and Lessons panels, reused.
+    - Weekly reads count only reads made for a card attempt (`record_reads`); other reads raise a record's total but have no week.
+  - **e2e support:**
+    - Under `INSECTOIDS_E2E=1` only, the main process exposes `__insectoidsE2E.agentEditRecord` so a test can make an agent change a record and produce a real conflict. The host refuses it outside e2e, and the renderer can't reach it.
+    - The e2e seed gained a small linked cluster: a decision, a task, an unconfirmed fact and an update.
+  - **UI pieces:** shadcn `button`; Kokonut UI `hold-button` and `inline-alert`. The graph, its layout, the conflict view and the dashboard charts are custom.
+  - **Updated test:** the Phase 1 `changes-brain` e2e test checked for the old "Graph — later" placeholder and a disabled Edit button. It now checks for the Graph tab and an enabled Edit button.
+  - **Not built yet:**
+    - from 01-D13: Tables, the 3D Globe and the Obsidian export (01-D11, E13);
+    - "tokens saved" on the dashboard.

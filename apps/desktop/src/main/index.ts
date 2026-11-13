@@ -254,6 +254,17 @@ function registerIpc(): void {
     ...(testPickedFolder ? { testPickedFolder } : {}),
   });
   registerHiveIpc({ host: () => brainHost, window: () => mainWindow, assertTrustedSender });
+  if (isE2E) {
+    // e2e only, main process only (never reachable from the renderer): an agent changes a record while the
+    // user edits it, so the Brain screen's conflict view can be tested (Phase 2 B5). The host refuses it
+    // unless it runs under INSECTOIDS_E2E=1 too.
+    (globalThis as unknown as { __insectoidsE2E?: unknown }).__insectoidsE2E = {
+      agentEditRecord: async (id: string, body: string): Promise<void> => {
+        if (!brainHost) throw new Error('The Brain is not running.');
+        await brainHost.call('e2eAgentEdit', { id, body });
+      },
+    };
+  }
   registerVaultIpc({ vault: vault!, services: services!, broker: broker!, providers: providers!, assertTrustedSender });
   registerProvidersIpc({ providers: providers!, vault: vault!, llm: llm!, assertTrustedSender });
   ipcMain.handle(IPC.brainStatus, (event) => {

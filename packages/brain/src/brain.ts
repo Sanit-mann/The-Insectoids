@@ -45,8 +45,55 @@ export interface WriteResult {
 export interface UpdateInput {
   title?: string;
   body?: string;
-  summary?: string;
+  /** null clears it. */
+  summary?: string | null;
   trust?: Trust;
+  /**
+   * The version the change was made from (the user's edit in the Brain screen, 01-D12; B5). If the record
+   * has moved on since (an agent changed it), nothing is saved: ConflictError.
+   */
+  expectedVersion?: number;
+}
+
+/** Graph view (01-D13; B5): records as nodes, edges only from real links. */
+export interface GraphOptions {
+  /** A project shelf (plus global, like search), 'global' alone, or undefined for every shelf. */
+  shelf?: string;
+  kinds?: RecordKind[];
+  /** Only records updated at or after this time (ms). */
+  since?: number;
+  /** Also records that are not current (archived or replaced); they are marked `archived`. */
+  includeArchived?: boolean;
+  limit: number;
+}
+
+export interface GraphNode {
+  id: string;
+  kind: RecordKind;
+  title: string;
+  trust: Trust;
+  shelf: string;
+  /** Not current: archived, or replaced by a newer record. */
+  archived: boolean;
+  importance: number;
+  updatedAt: number;
+}
+
+export interface Graph {
+  nodes: GraphNode[];
+  edges: Array<{ from: string; to: string; rel: string }>;
+  /** Matched the filters but left out by `limit` (the least important). */
+  hidden: number;
+}
+
+/** Dashboard numbers (01-D13 phase 2; B5) for a shelf (a project's includes global, like the health score). */
+export interface Dashboard {
+  shelf: string;
+  totals: { records: number; archived: number; confirmed: number; links: number };
+  byKind: Array<{ kind: RecordKind; count: number }>;
+  weeks: Array<{ weekStart: number; added: number; reads: number }>;
+  mostUsed: Array<{ id: string; kind: RecordKind; title: string; reads: number; helped: number; importance: number }>;
+  timeline: Array<{ id: string; kind: RecordKind; title: string; version: number; change: string; changedBy: string; changedAt: number }>;
 }
 
 export interface BrainRecord {
@@ -461,6 +508,9 @@ export class Brain {
     return this.#tx(() => {
       const cur = this.#mustGet(id);
       if (cur.archived) throw new ConflictError(`${id} is archived`);
+      if (changes.expectedVersion !== undefined && cur.version !== changes.expectedVersion) {
+        throw new ConflictError(`${id} changed since version ${changes.expectedVersion} (now version ${cur.version}).`);
+      }
       this.#assertAgentMayChange(cur, actor);
       if (actor.type === 'agent' && changes.trust === 'confirmed' && NEEDS_CONFIRMATION.has(cur.kind)) {
         throw new TrustError(`Only the user can confirm a ${cur.kind}.`);
@@ -469,7 +519,7 @@ export class Brain {
       const next = {
         title: changes.title ?? cur.title,
         body: changes.body ?? cur.body,
-        summary: changes.summary ?? cur.summary,
+        summary: changes.summary === undefined ? cur.summary : changes.summary,
         trust: changes.trust ?? cur.trust,
       };
       const version = cur.version + 1;
@@ -912,6 +962,131 @@ export class Brain {
       unused: count('r.reads = 0 AND r.created_at < ?', now - 30 * DAY),
       lessons: count("r.kind = 'lesson' AND r.trust != 'confirmed' AND r.created_at < ?", now - 14 * DAY),
     };
+  }
+
+  // ---- Brain screens (B5) ----------------------------------------------------------------------
+
+  /**
+   * The graph view (01-D13): the records that match, most important first, and the links among them.
+   * Edges come only from the links table (real connections), never from similarity.
+   */
+  graph(opts: GraphOptions, now = this.#now()): Graph {
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (opts.shelf !== undefined) {
+      if (opts.shelf === GLOBAL_SHELF) where.push('r.shelf = ?');
+      else where.push('r.shelf IN (?, ?)');
+      params.push(...(opts.shelf === GLOBAL_SHELF ? [GLOBAL_SHELF] : [opts.shelf, GLOBAL_SHELF]));
+    }
+    if (!opts.includeArchived) where.push('r.archived = 0 AND r.valid_to IS NULL');
+    if (opts.kinds?.length) {
+      where.push(`r.kind IN (${opts.kinds.map(() => '?').join(', ')})`);
+      params.push(...opts.kinds);
+    }
+    if (opts.since !== undefined) {
+      where.push('r.updated_at >= ?');
+      params.push(opts.since);
+    }
+    const rows = this.#db
+      .prepare(`SELECT ${HIT_COLUMNS} FROM records r ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`)
+      .all(...params) as unknown as HitRow[];
+    const ranked = rows
+      .map((r) => ({ r, importance: importanceOf(r, now) }))
+      .sort((x, y) => y.importance - x.importance || y.r.updated_at - x.r.updated_at || (x.r.id < y.r.id ? -1 : 1));
+    const limit = Math.max(1, Math.floor(opts.limit));
+    const chosen = ranked.slice(0, limit);
+    const ids = new Set(chosen.map((c) => c.r.id));
+    const edges: Graph['edges'] = [];
+    if (ids.size) {
+      // Links touching the chosen nodes, in chunks (SQLite parameter limits); kept only when both ends are in.
+      const list = [...ids];
+      const seen = new Set<string>();
+      for (let i = 0; i < list.length; i += 400) {
+        const chunk = list.slice(i, i + 400);
+        const marks = chunk.map(() => '?').join(', ');
+        const links = this.#db
+          .prepare(`SELECT from_id, to_id, rel FROM links WHERE from_id IN (${marks}) ORDER BY created_at, rowid`)
+          .all(...chunk) as Array<{ from_id: string; to_id: string; rel: string }>;
+        for (const l of links) {
+          const key = `${l.from_id}\u0000${l.to_id}\u0000${l.rel}`;
+          if (!ids.has(l.to_id) || seen.has(key)) continue;
+          seen.add(key);
+          edges.push({ from: l.from_id, to: l.to_id, rel: l.rel });
+        }
+      }
+    }
+    return {
+      nodes: chosen.map(({ r, importance: imp }) => ({
+        id: r.id,
+        kind: r.kind as RecordKind,
+        title: r.title,
+        trust: r.trust as Trust,
+        shelf: r.shelf,
+        archived: r.archived === 1 || r.valid_to !== null,
+        importance: imp,
+        updatedAt: r.updated_at,
+      })),
+      edges,
+      hidden: ranked.length - chosen.length,
+    };
+  }
+
+  /**
+   * Dashboard numbers (01-D13 phase 2) for a shelf. A project shelf includes the global one, like search
+   * and the health score. Weekly `reads` come from the per-card read log (record_reads): reads made for a
+   * card attempt. Reads without a card (e.g. the Queen's lookups) only raise each record's total, so they
+   * can't be placed in a week and are not in these bars.
+   */
+  dashboard(shelf: string, now = this.#now()): Dashboard {
+    const shelves = shelf === GLOBAL_SHELF ? [GLOBAL_SHELF] : [shelf, GLOBAL_SHELF];
+    const on = `r.shelf IN (${shelves.map(() => '?').join(', ')})`;
+    const current = 'r.archived = 0 AND r.valid_to IS NULL';
+    const one = (sql: string, ...extra: Array<string | number>): number => (this.#db.prepare(sql).get(...shelves, ...extra) as { n: number }).n;
+
+    const totals = {
+      records: one(`SELECT COUNT(*) AS n FROM records r WHERE ${on}`),
+      archived: one(`SELECT COUNT(*) AS n FROM records r WHERE ${on} AND r.archived = 1`),
+      confirmed: one(`SELECT COUNT(*) AS n FROM records r WHERE ${on} AND ${current} AND r.trust = 'confirmed'`),
+      links: one(
+        `SELECT COUNT(*) AS n FROM links l WHERE EXISTS (SELECT 1 FROM records r WHERE ${on} AND (r.id = l.from_id OR r.id = l.to_id))`,
+      ),
+    };
+    const byKind = (
+      this.#db.prepare(`SELECT r.kind AS kind, COUNT(*) AS n FROM records r WHERE ${on} AND ${current} GROUP BY r.kind ORDER BY n DESC, r.kind`).all(...shelves) as Array<{
+        kind: string;
+        n: number;
+      }>
+    ).map((k) => ({ kind: k.kind as RecordKind, count: k.n }));
+
+    const WEEK = 7 * DAY;
+    const weeks: Dashboard['weeks'] = [];
+    for (let i = 7; i >= 0; i--) {
+      const start = now - (i + 1) * WEEK;
+      // The newest bucket includes "now" itself.
+      const end = i === 0 ? now + 1 : now - i * WEEK;
+      weeks.push({
+        weekStart: start,
+        added: one(`SELECT COUNT(*) AS n FROM records r WHERE ${on} AND r.created_at >= ? AND r.created_at < ?`, start, end),
+        reads: one(`SELECT COUNT(*) AS n FROM record_reads x JOIN records r ON r.id = x.record_id WHERE ${on} AND x.at >= ? AND x.at < ?`, start, end),
+      });
+    }
+
+    const mostUsed = (this.#db.prepare(`SELECT ${HIT_COLUMNS} FROM records r WHERE ${on} AND ${current}`).all(...shelves) as unknown as HitRow[])
+      .map((r) => ({ id: r.id, kind: r.kind as RecordKind, title: r.title, reads: r.reads, helped: r.helped, importance: importanceOf(r, now) }))
+      .sort((a, b) => b.importance - a.importance || b.reads - a.reads || (a.id < b.id ? -1 : 1))
+      .slice(0, 5);
+
+    const timeline = (
+      this.#db
+        .prepare(
+          `SELECT v.record_id AS id, r.kind AS kind, v.title AS title, v.version AS version, v.change AS change, v.changed_by AS changed_by, v.changed_at AS changed_at
+           FROM record_versions v JOIN records r ON r.id = v.record_id
+           WHERE ${on} ORDER BY v.changed_at DESC, v.rowid DESC LIMIT 30`,
+        )
+        .all(...shelves) as Array<{ id: string; kind: string; title: string; version: number; change: string; changed_by: string; changed_at: number }>
+    ).map((t) => ({ id: t.id, kind: t.kind as RecordKind, title: t.title, version: t.version, change: t.change, changedBy: t.changed_by, changedAt: t.changed_at }));
+
+    return { shelf, totals, byKind, weeks, mostUsed, timeline };
   }
 
   // ---- internals -------------------------------------------------------------------------------
