@@ -343,6 +343,12 @@ const MIGRATIONS: readonly string[] = [
   );
   CREATE INDEX library_proposals_at ON library_proposals (at);
   `,
+  // v12: the Treasurer's routing rule per run, in plain words, for the Budgets screen's routing history
+  // (Phase 2 C4). Null for runs recorded before it.
+  `
+  ALTER TABLE run_outcomes ADD COLUMN reason TEXT;
+  CREATE INDEX run_outcomes_at ON run_outcomes (at);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

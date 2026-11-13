@@ -89,7 +89,8 @@ test('the hive monitor lists insect lanes with their live output', async () => {
   await expect(log).not.toHaveText('No output yet.', { timeout: 30_000 });
   await expect(log).toHaveText(/\S/);
   await expect(panel.getByRole('button', { name: 'Take over' })).toBeDisabled();
-  await expect(t.win.getByRole('tab', { name: /Living hive/ })).toBeDisabled();
+  // The living hive is a real view since Phase 2 C4 (living-hive.spec covers it).
+  await expect(t.win.getByRole('tab', { name: /Living hive/ })).toBeEnabled();
 });
 
 test('pause and resume the hive', async () => {

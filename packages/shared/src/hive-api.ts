@@ -30,6 +30,10 @@ export const HIVE_IPC = {
   libraryItem: 'hive:library-item',
   /** Import a skill or agent folder (C3): main opens a folder picker; the item is scanned and waits for approval. */
   libraryImport: 'hive:library-import',
+  /** Budgets screen (C4): goal, caste and subscription spend, and the Treasurer's routing history. */
+  budgets: 'hive:budgets',
+  /** One-click engine install after the user saw the exact command and said yes (C4, 04-D6). */
+  engineInstall: 'hive:engine-install',
   /** Opens the folder picker in main; returns the chosen project or null if cancelled. */
   pickProject: 'hive:pick-project',
   /** main -> renderer push. */
@@ -797,6 +801,59 @@ export const CasteViewSchema = z.object({
 });
 export type CasteView = z.infer<typeof CasteViewSchema>;
 
+// ---- Budgets (Phase 2 C4; Hive 02-D7, D9; Connections 04-D7) ------------------------------------
+
+export const BudgetsViewSchema = z.object({
+  /** Goals, newest first (max 30): their budget, what they used, and the most expensive cards. */
+  goals: z.array(
+    z.object({
+      id: z.string(),
+      title: z.string(),
+      status: z.string(),
+      budgetTokens: z.number().nullable(),
+      usedTokens: z.number(),
+      costUsd: z.number(),
+      /** True when any cost in it is the hive's estimate (engine didn't report cost). */
+      costEstimated: z.boolean(),
+      cards: z.array(z.object({ id: z.string(), title: z.string(), caste: CasteSchema, tokens: z.number(), costUsd: z.number(), attempts: z.number().int() })),
+    }),
+  ),
+  /** Last 14 days, oldest first: tokens and cost per day across all agents. */
+  days: z.array(z.object({ day: z.number(), tokens: z.number(), costUsd: z.number(), runs: z.number().int() })),
+  /** Spend by role/caste over the last 14 days (insect castes plus queen, inspector and managers). */
+  byRole: z.array(z.object({ role: z.string(), runs: z.number().int(), tokens: z.number(), costUsd: z.number(), passRate: z.number().nullable() })),
+  /** The Treasurer's latest routing decisions, newest first (max 100). */
+  routing: z.array(
+    z.object({
+      at: z.number(),
+      runId: z.string(),
+      role: z.string(),
+      caste: CasteSchema.nullable(),
+      cardId: z.string().nullable(),
+      title: z.string(),
+      engine: EngineIdSchema.nullable(),
+      model: z.string().nullable(),
+      effort: z.string().nullable(),
+      /** The rule in plain words ("retry 1, so more effort or a stronger model"). */
+      rule: z.string(),
+      outcome: z.enum(['passed', 'failed', 'running', 'stopped', 'other']),
+      tokens: z.number(),
+      costUsd: z.number(),
+    }),
+  ),
+  /** What the Treasurer has learned (A5 Thompson sampling): tries and passes per role and tier. */
+  learned: z.array(z.object({ role: z.string(), engine: EngineIdSchema, tier: z.enum(['strongest', 'standard', 'light']), tries: z.number().int(), passes: z.number().int() })),
+});
+export type BudgetsView = z.infer<typeof BudgetsViewSchema>;
+
+export const EngineInstallResultSchema = z.discriminatedUnion('status', [
+  z.object({ status: z.literal('installed'), version: z.string().nullable(), message: z.string() }),
+  /** A step on the install ladder is missing (e.g. no npm): nothing was run; `message` says what to do. */
+  z.object({ status: z.literal('not-run'), message: z.string() }),
+  z.object({ status: z.literal('failed'), message: z.string(), exitCode: z.number().nullable() }),
+]);
+export type EngineInstallResult = z.infer<typeof EngineInstallResultSchema>;
+
 // ---- push events -----------------------------------------------------------------------------
 
 export const HivePushSchema = z.discriminatedUnion('type', [
@@ -804,6 +861,8 @@ export const HivePushSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('changed'), reason: z.string() }),
   /** Live output from one run; append to that lane. */
   z.object({ type: z.literal('agent-output'), runId: z.string(), lines: z.array(z.string()) }),
+  /** Live output of an engine install the user approved (C4, 04-D6). */
+  z.object({ type: z.literal('install-output'), engineId: z.string(), lines: z.array(z.string()) }),
 ]);
 export type HivePush = z.infer<typeof HivePushSchema>;
 
@@ -824,6 +883,12 @@ export interface HiveApi {
   libraryItem(name: string): Promise<LibraryItemDetail | null>;
   /** Opens a folder picker for a skill (SKILL.md) or agent (AGENT.md) folder; scans it; it waits as a draft for approval. */
   libraryImport(): Promise<LibraryImportResult>;
+  budgets(): Promise<BudgetsView>;
+  /**
+   * Runs the engine's own official install command (the one its card shows), after the user agreed in the app.
+   * Output streams as 'install-output' pushes; the engine is checked again at the end.
+   */
+  engineInstall(engineId: string): Promise<EngineInstallResult>;
   pickProject(): Promise<ProjectView | null>;
   /** Returns an unsubscribe function. */
   onEvent(listener: (e: HivePush) => void): () => void;

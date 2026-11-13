@@ -7,9 +7,9 @@ import { PROVIDERS_IPC, type Provider } from '@insectoids/shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Broker } from './broker';
 import { handleBrokerRequest } from './broker-requests';
-import { LlmRoute, addUsage, streamRedactor } from './llm-route';
+import { ANTHROPIC_VERSION, LlmRoute, addUsage, streamRedactor, upstreamAuth } from './llm-route';
 import { ProvidersStore, checkProviderBase } from './providers';
-import { createProvidersHandlers, modelIds } from './providers-handlers';
+import { KNOWN_MODELS, createProvidersHandlers, modelIds } from './providers-handlers';
 import { ServicesStore } from './services';
 import { type SecretCrypto, Vault } from './vault';
 import { createVaultHandlers } from './vault-handlers';
@@ -56,7 +56,8 @@ beforeAll(async () => {
       seen.push(s);
       if (s.url.endsWith('/models')) {
         res.writeHead(200, { 'content-type': 'application/json' });
-        res.end(JSON.stringify({ data: [{ id: 'llama3.2:3b' }, { id: 'qwen2.5-coder:7b' }] }));
+        // "/empty/…" answers but lists nothing (C4: the known-models fallback).
+        res.end(JSON.stringify({ data: s.url.includes('/empty/') ? [] : [{ id: 'llama3.2:3b' }, { id: 'qwen2.5-coder:7b' }] }));
         return;
       }
       if (s.url.endsWith('/chat/completions') && JSON.parse(body || '{}').stream === false) {
@@ -318,5 +319,44 @@ describe('host requests and no leaks', () => {
     expect(r.push('xx abc') + r.push('def yy') + r.end()).toBe('xx [REDACTED] yy');
     const none = streamRedactor(null);
     expect(none.push('as is')).toBe('as is');
+  });
+});
+
+describe('direct API keys (C4): Anthropic and OpenAI presets', () => {
+  it('Anthropic gets Bearer plus x-api-key and anthropic-version upstream; the engine never sees the key', async () => {
+    providers.save(provider({ id: 'anthropic', label: 'Anthropic API', preset: 'anthropic' }));
+    const { baseUrl, pass } = broker.issueLlm({ runId: 'r-a', providerId: 'anthropic' });
+    const res = await chat(baseUrl, pass);
+    const text = await res.text();
+    expect(res.status).toBe(200);
+    const s = seen.at(-1)!;
+    expect(s.headers['authorization']).toBe(`Bearer ${KEY}`);
+    expect(s.headers['x-api-key']).toBe(KEY);
+    expect(s.headers['anthropic-version']).toBe(ANTHROPIC_VERSION);
+    expect(text).not.toContain(KEY);
+  });
+
+  it('OpenAI gets only Bearer (no Anthropic headers)', async () => {
+    providers.save(provider({ id: 'openai', label: 'OpenAI API', preset: 'openai' }));
+    const { baseUrl, pass } = broker.issueLlm({ runId: 'r-o', providerId: 'openai' });
+    expect((await chat(baseUrl, pass)).status).toBe(200);
+    const s = seen.at(-1)!;
+    expect(s.headers['authorization']).toBe(`Bearer ${KEY}`);
+    expect(s.headers['x-api-key']).toBeUndefined();
+    expect(s.headers['anthropic-version']).toBeUndefined();
+  });
+
+  it('both presets need a key; an Anthropic Test that lists nothing offers the known Claude models', async () => {
+    providers.save(provider({ id: 'anthropic', label: 'Anthropic API', preset: 'anthropic', baseUrl: 'https://api.anthropic.com/v1', secretRef: null }));
+    providers.save(provider({ id: 'openai', label: 'OpenAI API', preset: 'openai', baseUrl: 'https://api.openai.com/v1', secretRef: null }));
+    const h = createProvidersHandlers({ providers, vault, llm });
+    const list = (await h[PROVIDERS_IPC.list](undefined)) as Array<{ id: string; status: string }>;
+    expect(list.filter((p) => p.id === 'anthropic' || p.id === 'openai').map((p) => p.status)).toEqual(['needs-key', 'needs-key']);
+    providers.save(provider({ id: 'anthropic', label: 'Anthropic API', preset: 'anthropic', baseUrl: `${upstreamUrl}/empty/v1` }));
+    const r = (await h[PROVIDERS_IPC.test]('anthropic')) as { ok: boolean; models: string[] };
+    expect(r.ok).toBe(true);
+    expect(r.models).toEqual([...KNOWN_MODELS.anthropic!]);
+    expect(seen.at(-1)!.headers['x-api-key']).toBe(KEY);
+    expect(upstreamAuth({ preset: 'custom' }, null)).toEqual({});
   });
 });

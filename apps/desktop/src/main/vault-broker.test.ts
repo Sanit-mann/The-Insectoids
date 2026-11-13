@@ -7,7 +7,7 @@ import { VAULT_IPC } from '@insectoids/shared';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Broker, MAX_BODY_BYTES, checkPath } from './broker';
 import { handleBrokerRequest } from './broker-requests';
-import { ServicesStore } from './services';
+import { ServicesStore, testRequest } from './services';
 import { type SecretCrypto, Vault } from './vault';
 import { createVaultHandlers } from './vault-handlers';
 
@@ -256,6 +256,9 @@ describe('services registry', () => {
     expect(views.map((v) => [v.id, v.status, v.enabled])).toEqual([
       ['github', 'needs-key', false],
       ['brave-search', 'needs-key', false],
+      ['notion', 'needs-key', false],
+      ['linear', 'needs-key', false],
+      ['slack', 'needs-key', false],
     ]);
     githubOn();
     expect(services.views((r) => vault.has(r))[0]!.status).toBe('ready');
@@ -265,5 +268,134 @@ describe('services registry', () => {
     strict.save({ ...rest, baseUrl: 'https://example.com/api' });
     expect(strict.get('notes')?.baseUrl).toBe('https://example.com/api');
     expect(() => strict.remove('github')).toThrow(/switched off/);
+  });
+});
+
+describe('Phase 2 services (C4): Notion, Linear, Slack, Jira', () => {
+  let store: ServicesStore;
+  let b: Broker;
+  beforeEach(async () => {
+    store = new ServicesStore({
+      dir,
+      rules: { allowLoopbackHttp: true, baseOverrides: { notion: `${upstreamUrl}/notion`, linear: `${upstreamUrl}/graphql`, slack: `${upstreamUrl}/slack` } },
+    });
+    b = new Broker({ services: store, reveal: (r) => vault.reveal(r), timeoutMs: 2_000 });
+    await b.start();
+  });
+  afterEach(() => b.close());
+
+  const on = (id: string, secret = KEY): void => {
+    const ref = vault.add(`${id} key`, secret);
+    store.save({ ...store.get(id)!, secretRef: ref, enabled: true });
+  };
+  const send = async (token: string, body: unknown) => {
+    const res = await fetch(`${b.url}/call`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: `Bearer ${token}` }, body: JSON.stringify(body) });
+    return { status: res.status, json: (await res.json()) as Record<string, unknown> };
+  };
+
+  it('Notion: sends Notion-Version, reads with GET and the read-only POSTs, holds other POSTs for approval', async () => {
+    on('notion');
+    const t = b.issue({ cardId: 'G.C-01', integrations: ['notion'], approvedRules: [] });
+    expect((await send(t.token, { integration: 'notion', method: 'GET', path: '/users/me' })).status).toBe(200);
+    expect(seen.at(-1)!.headers['notion-version']).toBe('2022-06-28');
+    expect(seen.at(-1)!.headers['authorization']).toBe(`Bearer ${KEY}`);
+    expect((await send(t.token, { integration: 'notion', method: 'POST', path: '/search', body: '{}' })).status).toBe(200);
+    expect((await send(t.token, { integration: 'notion', method: 'POST', path: '/databases/abc123/query', body: '{}' })).status).toBe(200);
+    const before = seen.length;
+    // "*" is one segment only, and creating a page is a change.
+    expect((await send(t.token, { integration: 'notion', method: 'POST', path: '/databases/a/b/query', body: '{}' })).status).toBe(403);
+    expect((await send(t.token, { integration: 'notion', method: 'POST', path: '/pages', body: '{}' })).status).toBe(403);
+    expect(seen.length).toBe(before);
+  });
+
+  it('Linear: a GraphQL query is a read, a mutation needs approval; the raw key goes in Authorization', async () => {
+    on('linear');
+    const t = b.issue({ cardId: 'G.C-01', integrations: ['linear'], approvedRules: [] });
+    const q = await send(t.token, { integration: 'linear', method: 'POST', path: '/', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: '{ viewer { id } }' }) });
+    expect(q.status).toBe(200);
+    expect(seen.at(-1)!.url).toBe('/graphql');
+    expect(seen.at(-1)!.headers['authorization']).toBe(KEY);
+    const before = seen.length;
+    for (const query of ['mutation { issueCreate(input: {title: "x"}) { success } }', 'query A { viewer { id } } mutation B { x }', '  # just a comment\n subscription { x }']) {
+      expect((await send(t.token, { integration: 'linear', method: 'POST', path: '/', body: JSON.stringify({ query }) })).status).toBe(403);
+    }
+    expect((await send(t.token, { integration: 'linear', method: 'POST', path: '/', body: 'not json' })).status).toBe(403);
+    expect(seen.length).toBe(before);
+    // The word inside a string is just text.
+    const text = '{ issues(filter: {title: {contains: "mutation"}}) { nodes { id } } }';
+    expect((await send(t.token, { integration: 'linear', method: 'POST', path: '/', body: JSON.stringify({ query: text }) })).status).toBe(200);
+  });
+
+  it('Slack: GET reads pass, posting a message needs approval', async () => {
+    on('slack');
+    const t = b.issue({ cardId: 'G.C-01', integrations: ['slack'], approvedRules: [] });
+    expect((await send(t.token, { integration: 'slack', method: 'GET', path: '/auth.test' })).status).toBe(200);
+    expect(seen.at(-1)!.url).toBe('/slack/auth.test');
+    expect((await send(t.token, { integration: 'slack', method: 'POST', path: '/chat.postMessage', body: '{}' })).status).toBe(403);
+  });
+
+  it('Jira is added as a template with Basic auth; the broker encodes "email:token" and redacts both forms', async () => {
+    const secret = 'me@example.com:FAKEjiraTOKEN0123456789';
+    const ref = vault.add('Jira token', secret);
+    store.save({ id: 'jira', label: 'Jira', kind: 'jira', baseUrl: `${upstreamUrl}/jira`, authType: 'basic', authHeader: null, secretRef: ref, enabled: true, readMethods: ['GET'], description: 'Jira' });
+    const b64 = Buffer.from(secret).toString('base64');
+    reply = (s) => ({ status: 200, body: JSON.stringify({ echoed: s.headers['authorization'], raw: secret }) });
+    const t = b.issue({ cardId: 'G.C-01', integrations: ['jira'], approvedRules: [] });
+    const r = await send(t.token, { integration: 'jira', method: 'GET', path: '/rest/api/3/myself' });
+    expect(r.status).toBe(200);
+    expect(seen.at(-1)!.headers['authorization']).toBe(`Basic ${b64}`);
+    const text = JSON.stringify(r.json);
+    expect(text).not.toContain(secret);
+    expect(text).not.toContain(b64);
+    expect(text).toContain('[REDACTED]');
+  });
+
+  it('the Connections Jira template (GET+HEAD, search POSTs as reads) works through the broker', async () => {
+    const ref = vault.add('Jira token', 'me@example.com:FAKEjiraTOKEN0123456789');
+    store.save({
+      id: 'jira', label: 'Jira', kind: 'jira', baseUrl: `${upstreamUrl}/jira`, authType: 'basic', authHeader: null, secretRef: ref, enabled: true,
+      readMethods: ['GET', 'HEAD'], readPosts: ['/rest/api/3/search', '/rest/api/3/search/jql'], description: 'Jira',
+    });
+    const t = b.issue({ cardId: 'G.C-01', integrations: ['jira'], approvedRules: [] });
+    expect((await send(t.token, { integration: 'jira', method: 'POST', path: '/rest/api/3/search/jql', body: '{"jql":"project = X"}' })).status).toBe(200);
+    expect(seen.at(-1)!.headers['authorization']).toMatch(/^Basic /);
+    expect((await send(t.token, { integration: 'jira', method: 'POST', path: '/rest/api/3/issue', body: '{}' })).status).toBe(403);
+    expect(testRequest(store.get('jira')!)).toEqual({ method: 'GET', path: '/rest/api/3/myself' });
+  });
+
+  it('users can only add rest and jira; Jira needs Basic or Bearer; extra headers can never carry auth', () => {
+    const base = { label: 'X', baseUrl: 'https://example.com/api', authHeader: null, secretRef: null, enabled: false, readMethods: ['GET' as const], description: 'x' };
+    expect(() => store.save({ ...base, id: 'my-notion', kind: 'notion', authType: 'bearer' })).toThrow(/built in/);
+    expect(() => store.save({ ...base, id: 'jira', kind: 'jira', authType: 'none' })).toThrow(/Basic|Bearer/);
+    expect(() => store.save({ ...base, id: 'sneaky', kind: 'rest', authType: 'none', extraHeaders: { Authorization: 'Bearer x' } })).toThrow(/not allowed/);
+    store.save({ ...base, id: 'jira', kind: 'jira', authType: 'basic', baseUrl: 'https://acme.atlassian.net' });
+    expect(store.get('jira')).toMatchObject({ kind: 'jira', authType: 'basic', readPosts: [], extraHeaders: {} });
+  });
+
+  it('an extra header that slips in never overrides the key', async () => {
+    const ref = vault.add('k', KEY);
+    const raw = {
+      id: 'odd', label: 'Odd', kind: 'rest' as const, baseUrl: `${upstreamUrl}/odd`, authType: 'bearer' as const, authHeader: null, secretRef: ref,
+      enabled: true, readMethods: ['GET' as const], readPosts: [], extraHeaders: { Authorization: 'Bearer NOT-THE-KEY', 'X-Ok': 'yes' }, description: 'x',
+    };
+    const fake = { all: () => [raw], get: (id: string) => (id === 'odd' ? raw : undefined), rules: { allowLoopbackHttp: true } } as unknown as ServicesStore;
+    const ob = new Broker({ services: fake, reveal: (r) => vault.reveal(r), timeoutMs: 2_000 });
+    await ob.start();
+    try {
+      const r = await ob.callAsUser({ integration: 'odd', method: 'GET', path: '/x' });
+      expect(r.ok).toBe(true);
+      expect(seen.at(-1)!.headers['authorization']).toBe(`Bearer ${KEY}`);
+      expect(seen.at(-1)!.headers['x-ok']).toBe('yes');
+    } finally {
+      await ob.close();
+    }
+  });
+
+  it('testRequest makes a harmless read for every kind', () => {
+    expect(testRequest(store.get('notion')!)).toEqual({ method: 'GET', path: '/users/me' });
+    expect(testRequest(store.get('slack')!)).toEqual({ method: 'GET', path: '/auth.test' });
+    const lin = testRequest(store.get('linear')!);
+    expect(lin.method).toBe('POST');
+    expect(JSON.parse(lin.body!)).toEqual({ query: '{ viewer { id } }' });
   });
 });

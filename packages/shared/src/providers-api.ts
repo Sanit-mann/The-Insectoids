@@ -16,7 +16,8 @@ export const PROVIDERS_IPC = {
   test: 'providers:test',
 } as const;
 
-export const ProviderPresetSchema = z.enum(['openrouter', 'freellmapi', 'ollama', 'lmstudio', 'custom']);
+/** C4 adds direct Anthropic and OpenAI API keys (Connections 04-D3). */
+export const ProviderPresetSchema = z.enum(['openrouter', 'freellmapi', 'ollama', 'lmstudio', 'anthropic', 'openai', 'custom']);
 export type ProviderPreset = z.infer<typeof ProviderPresetSchema>;
 
 export const ProviderSchema = z.object({
@@ -77,6 +78,18 @@ export const PROVIDER_PRESETS: Record<ProviderPreset, { label: string; baseUrl: 
     baseUrl: 'http://127.0.0.1:1234/v1',
     needsKey: false,
     note: 'Local models on this computer: free, private, nothing leaves the PC.',
+  },
+  anthropic: {
+    label: 'Anthropic API',
+    baseUrl: 'https://api.anthropic.com/v1',
+    needsKey: true,
+    note: 'Your own Anthropic API key, billed per token by Anthropic (separate from a Claude subscription).',
+  },
+  openai: {
+    label: 'OpenAI API',
+    baseUrl: 'https://api.openai.com/v1',
+    needsKey: true,
+    note: 'Your own OpenAI API key, billed per token by OpenAI (separate from a ChatGPT subscription).',
   },
   custom: {
     label: 'OpenAI-compatible',

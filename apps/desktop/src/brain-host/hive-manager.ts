@@ -71,6 +71,9 @@ import {
   LibrarySearchRequestSchema,
   type LibrarySearchResult,
   type BrainDashboardView,
+  type BudgetsView,
+  BudgetsViewSchema,
+  CasteSchema,
   type BrainEditRequest,
   BrainEditRequestSchema,
   type BrainEditResult,
@@ -322,6 +325,8 @@ export class HiveManager {
   #health: BrainHealth | null = null;
   /** Card id → its latest attempt's library skills, while one snapshot is being built. */
   #cardSkills: Map<string, string[]> | null = null;
+  /** e2e only (C4): engines a scripted install marked as installed. */
+  readonly #e2eInstalled = new Set<EngineId>();
   #lastAuditAt: number | null = null;
   #review: { lastReviewAt: number | null; since: number; cardsSince: number };
   #codeMap: CodeMapBuilder | null = null;
@@ -440,7 +445,12 @@ export class HiveManager {
       install: a.install,
       signIn: a.signIn,
       privacyNote: a.privacyNote,
-      detect: async () => ({ state: 'missing', version: null, message: 'Not checked: the scripted engine runs everything here.' }),
+      // e2e (C4): after a scripted install the engine shows as installed but signed out, so a test can never
+      // route real work to it.
+      detect: async () =>
+        this.#e2eInstalled.has(a.id)
+          ? { state: 'signed-out', version: 'e2e-installed', message: 'Installed (test). Sign in to use it.' }
+          : { state: 'missing', version: null, message: 'Not checked: the scripted engine runs everything here.' },
     });
     // In tests, OpenCode is real only when the test gave it its own detection (a stand-in binary).
     return [scripted, listedOnly(claude), listedOnly(gemini), ...plannedAdapters(), this.#o.opencodeDetect ? opencode : listedOnly(opencode)];
@@ -1279,6 +1289,86 @@ export class HiveManager {
     });
   }
 
+  /**
+   * The Budgets screen (Phase 2 C4; 02-D7, D9; 04-D7). Goals are the open project's; days, roles, routing and
+   * what the Treasurer learned span every project, because subscriptions are shared by all of them.
+   */
+  budgets(): BudgetsView {
+    const { brain } = this.#o;
+    const now = this.#now();
+    const goals = this.#goals().slice(0, 30);
+    const runs = brain.outcomes.forGoals(goals.map((g) => g.id));
+    const tokensOf = (o: { tokensIn: number; tokensOut: number; tokensCache: number }): number => o.tokensIn + o.tokensOut + o.tokensCache;
+    const goalViews = goals.map((g) => {
+      const mine = runs.filter((o) => o.goalId === g.id);
+      const byCard = new Map<string, { tokens: number; costUsd: number }>();
+      for (const o of mine) {
+        if (!o.cardId) continue;
+        const s = byCard.get(o.cardId) ?? { tokens: 0, costUsd: 0 };
+        s.tokens += tokensOf(o);
+        s.costUsd += o.costUsd;
+        byCard.set(o.cardId, s);
+      }
+      const cards = [...byCard.entries()]
+        .map(([id, s]) => ({ id, card: brain.taskboard.get(id), ...s }))
+        .filter((c) => c.card)
+        .sort((a, b) => b.costUsd - a.costUsd || b.tokens - a.tokens)
+        .slice(0, 10)
+        .map(({ id, card, tokens, costUsd }) => ({ id, title: card!.title, caste: card!.caste, tokens, costUsd, attempts: card!.attempts }));
+      return {
+        id: g.id,
+        title: g.title,
+        status: g.status,
+        budgetTokens: g.budgetTokens,
+        usedTokens: g.spentTokens,
+        costUsd: g.spentUsd,
+        costEstimated: mine.some((o) => o.costEstimated),
+        cards,
+      };
+    });
+    const dayStart = (t: number): number => {
+      const d = new Date(t);
+      d.setHours(0, 0, 0, 0);
+      return d.getTime();
+    };
+    const outcome = (r: string): BudgetsView['routing'][number]['outcome'] =>
+      r === 'pass' ? 'passed' : r === 'fail' || r === 'error' ? 'failed' : r === 'pending' ? 'running' : r === 'stopped' ? 'stopped' : 'other';
+    const engineOf = (e: string): EngineId | null => (EngineIdSchema.safeParse(e).success ? (e as EngineId) : null);
+    const routing = brain.outcomes.recent(100).map((o) => {
+      const card = o.cardId ? brain.taskboard.get(o.cardId) : undefined;
+      const goal = o.goalId ? brain.goals.get(o.goalId) : undefined;
+      const title =
+        o.role === 'queen' ? `Plan: ${goal?.title ?? 'a goal'}` : o.role === 'inspector' ? `Verify: ${card?.title ?? 'a card'}` : (card?.title ?? goal?.title ?? o.role);
+      return {
+        at: o.at,
+        runId: o.runId,
+        role: o.role,
+        caste: CasteSchema.safeParse(o.role).success ? (o.role as CardView['caste']) : null,
+        cardId: o.cardId,
+        title,
+        engine: engineOf(o.engine),
+        model: o.model || null,
+        effort: o.effort || null,
+        rule: o.reason ?? 'Rule not recorded (an older run).',
+        outcome: outcome(o.result),
+        tokens: tokensOf(o),
+        costUsd: o.costUsd,
+      };
+    });
+    const TIERS = new Set(['strongest', 'standard', 'light']);
+    const learned = brain.outcomes
+      .learned()
+      .filter((l) => engineOf(l.engine) && TIERS.has(l.tier))
+      .map((l) => ({ role: l.role, engine: l.engine as EngineId, tier: l.tier as 'strongest' | 'standard' | 'light', tries: l.tries, passes: l.passes }));
+    return BudgetsViewSchema.parse({
+      goals: goalViews,
+      days: brain.outcomes.byDay(14, now, dayStart),
+      byRole: brain.outcomes.byRole(dayStart(now) - 13 * 86_400_000),
+      routing,
+      learned,
+    });
+  }
+
   /** Dashboard numbers for the open project's shelf (plus global), or global when no project is open. */
   brainDashboard(): BrainDashboardView {
     return this.#o.brain.dashboard(this.#project?.view.shelf ?? 'global');
@@ -1332,6 +1422,22 @@ export class HiveManager {
     if (process.env['INSECTOIDS_E2E'] !== '1') throw new Error('Only available in end-to-end tests.');
     this.#o.brain.update(id, { body }, { type: 'agent', id: 'e2e-agent' });
     this.#changed('brain-edit');
+  }
+
+  /**
+   * e2e only (C4): a scripted engine install "finished", so that listed engine now shows as installed and signed
+   * out (never ready: it has no runner here). Refused outside end-to-end tests.
+   */
+  async e2eEngineInstalled(engineId: string): Promise<void> {
+    if (process.env['INSECTOIDS_E2E'] !== '1') throw new Error('Only available in end-to-end tests.');
+    const id = EngineIdSchema.parse(engineId);
+    this.#e2eInstalled.add(id);
+    await this.#recheckEngines();
+  }
+
+  /** The engine cards (Connections), for main's installer: it reads the install command from here. */
+  engineCard(engineId: string): EngineCard | null {
+    return this.snapshot().engines.find((e) => e.id === engineId) ?? null;
   }
 
   brainRecent(params: { kinds?: Parameters<Brain['recent']>[0]['kinds']; includeHistory?: boolean } = {}) {

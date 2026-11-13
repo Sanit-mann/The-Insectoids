@@ -4,6 +4,7 @@ import { PlaceholderScreen } from '@/components/PlaceholderScreen';
 import { Rail } from '@/components/Rail';
 import { ApprovalsScreen } from '@/components/screens/ApprovalsScreen';
 import { BrainScreen } from '@/components/screens/BrainScreen';
+import { BudgetsScreen } from '@/components/screens/BudgetsScreen';
 import { ChangesScreen } from '@/components/screens/ChangesScreen';
 import { ConnectionsScreen } from '@/components/screens/ConnectionsScreen';
 import { HiveScreen } from '@/components/screens/HiveScreen';
@@ -29,6 +30,7 @@ const LIVE: Partial<Record<ScreenId, () => ReactNode>> = {
   settings: () => <SettingsScreen />,
   connections: () => <ConnectionsScreen />,
   library: () => <LibraryScreen />,
+  budgets: () => <BudgetsScreen />,
 };
 
 export function App() {

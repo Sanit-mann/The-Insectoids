@@ -182,6 +182,15 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
       return hive.brainGraph(params as Parameters<HiveManager['brainGraph']>[0]);
     case 'brainDashboard':
       return hive.brainDashboard();
+    case 'budgets':
+      return hive.budgets();
+    case 'engineCard':
+      return hive.engineCard(String((params as { id?: unknown })?.id ?? ''));
+    case 'e2eEngineInstalled': {
+      if (process.env['INSECTOIDS_E2E'] !== '1') throw new Error('Only available in end-to-end tests.');
+      await hive.e2eEngineInstalled(String((params as { id?: unknown })?.id ?? ''));
+      return null;
+    }
     case 'brainEdit':
       return hive.brainEdit(params as Parameters<HiveManager['brainEdit']>[0]);
     case 'e2eAgentEdit': {

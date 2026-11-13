@@ -591,3 +591,28 @@ Three milestones, each ending in something the user can try.
   - **Not built yet:**
     - meaning-based similarity for repeated work (word overlap only);
     - re-reading learned or imported files after a Brain reset.
+- **C4 UI: living hive, Budgets, Connections finished: done (2026-11-14).** Built by three parallel workers. Unit tests: 889 pass, with no unhandled errors. e2e: 134 passed, 3 skipped, in three full runs in a row (4 workers). Lint and typecheck are clean. No real installs or engine runs.
+  - **Living hive** (Hive screen):
+    - **Cells:** a custom SVG honeycomb, one cell per agent, with its role icon and its status as icon plus word.
+    - **Motion:** only working cells breathe. It pauses when the Lanes tab shows or the window is hidden, and is off under reduced motion (`data-animating`).
+    - **Keyboard:** arrows, Home and End move between cells; Enter shows the agent's output.
+  - **Budgets screen** (new rail item):
+    - goals with used-against-budget meters and their costliest cards;
+    - 14-day token and cost charts (a new `--chart` token, checked with the dataviz validator) with a table toggle;
+    - spend by role with pass rates, and subscriptions;
+    - the Treasurer's routing history with each rule in words, and what it has learned.
+    - Brain v12 stores each run's routing reason.
+  - **Connections finished:**
+    - **One-click engine install with consent (04-D6):**
+      - **Consent:** a dialog shows the exact command before anything runs.
+      - **What can run:** only the adapter's own command, in two shapes: `npm install -g <checked package>` or Claude's official installer line.
+      - **Ladder:** the needed tool must be on PATH first, or nothing runs and the user gets advice.
+      - **Running:** a 10-minute timeout, one install at a time, and live output with secret-looking lines hidden.
+      - **e2e:** a fake installer (`INSECTOIDS_E2E_FAKE_INSTALL`).
+    - **Providers:** Anthropic API and OpenAI API presets (D3).
+    - **Services:**
+      - Notion, Linear and Slack are built in;
+      - Jira is a template with Basic `email:token` auth;
+      - the broker gained `readPosts` path patterns, a GraphQL query-as-read rule for Linear, and fixed extra headers that never override auth.
+    - **UI pieces:** a shadcn Dialog on the existing `radix-ui`; Kokonut UI `inline-alert` and `hold-button`.
+  - **Not built yet:** the Treasurer's live per-run budget bars, and an e2e check that the honeycomb pauses when the whole window is minimised.

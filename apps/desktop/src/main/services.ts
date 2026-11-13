@@ -1,7 +1,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { type Integration, IntegrationSchema, type IntegrationView } from '@insectoids/shared';
+import { type Integration, type IntegrationInput, IntegrationSchema, type IntegrationView } from '@insectoids/shared';
 
 /**
  * Outside services the hive may use (Connections 04-D5), metadata only: `<userData>/services.json`.
@@ -20,6 +20,8 @@ export const BUILT_IN: readonly Integration[] = [
     secretRef: null,
     enabled: false,
     readMethods: ['GET', 'HEAD'],
+    readPosts: [],
+    extraHeaders: {},
     description: 'Read repositories, issues and pull requests. Creating or changing anything on GitHub needs your approval.',
   },
   {
@@ -32,16 +34,81 @@ export const BUILT_IN: readonly Integration[] = [
     secretRef: null,
     enabled: false,
     readMethods: ['GET'],
+    readPosts: [],
+    extraHeaders: {},
     description: 'Search the web with the Brave Search API.',
+  },
+  // Phase 2 services (04-D5), C4.
+  {
+    id: 'notion',
+    label: 'Notion',
+    kind: 'notion',
+    baseUrl: 'https://api.notion.com/v1',
+    authType: 'bearer',
+    authHeader: null,
+    secretRef: null,
+    enabled: false,
+    readMethods: ['GET'],
+    // Searching and querying a database are POSTs that only read.
+    readPosts: ['/search', '/databases/*/query'],
+    extraHeaders: { 'Notion-Version': '2022-06-28' },
+    description: 'Read pages and databases shared with your Notion integration. Creating or changing pages needs your approval.',
+  },
+  {
+    id: 'linear',
+    label: 'Linear',
+    kind: 'linear',
+    baseUrl: 'https://api.linear.app/graphql',
+    // Linear personal API keys go in the Authorization header as they are (no "Bearer").
+    authType: 'header',
+    authHeader: 'Authorization',
+    secretRef: null,
+    enabled: false,
+    // GraphQL: every call is a POST; the broker lets queries through and holds mutations for approval.
+    readMethods: [],
+    readPosts: [],
+    extraHeaders: {},
+    description: 'Read issues, projects and teams in Linear. Creating or changing issues needs your approval.',
+  },
+  {
+    id: 'slack',
+    label: 'Slack',
+    kind: 'slack',
+    baseUrl: 'https://slack.com/api',
+    authType: 'bearer',
+    authHeader: null,
+    secretRef: null,
+    enabled: false,
+    readMethods: ['GET'],
+    readPosts: [],
+    extraHeaders: {},
+    description: 'Read channels and messages your Slack app can see. Posting anything needs your approval.',
   },
 ];
 
 const BUILT_IN_IDS = new Set(BUILT_IN.map((b) => b.id));
 
+/** Kinds the user can add themselves: any REST service, and Jira (its address is per site). */
+const USER_KINDS = new Set<Integration['kind']>(['rest', 'jira']);
+
+export interface TestRequest {
+  method: 'GET' | 'POST';
+  path: string;
+  query?: Record<string, string>;
+  headers?: Record<string, string>;
+  body?: string;
+}
+
 /** The harmless read `testService` makes for each kind (it goes through the broker like any call). */
-export function testRequest(i: Integration): { method: 'GET'; path: string; query?: Record<string, string> } {
+export function testRequest(i: Integration): TestRequest {
   if (i.kind === 'github') return { method: 'GET', path: '/user' };
   if (i.kind === 'brave-search') return { method: 'GET', path: '/web/search', query: { q: 'test', count: '1' } };
+  if (i.kind === 'notion') return { method: 'GET', path: '/users/me' };
+  if (i.kind === 'slack') return { method: 'GET', path: '/auth.test' };
+  if (i.kind === 'jira') return { method: 'GET', path: '/rest/api/3/myself' };
+  if (i.kind === 'linear') {
+    return { method: 'POST', path: '/', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ query: '{ viewer { id } }' }) };
+  }
   return { method: 'GET', path: '/' };
 }
 
@@ -128,16 +195,24 @@ export class ServicesStore {
   }
 
   /** Adds or updates one. Built-ins: only label, key and on/off can change. */
-  save(input: Integration): void {
+  save(input: IntegrationInput): void {
     const i = IntegrationSchema.parse(input);
     const file = this.#read();
     if (BUILT_IN_IDS.has(i.id)) {
       const base = BUILT_IN.find((b) => b.id === i.id)!;
       this.#upsert(file, { ...base, label: i.label, secretRef: i.secretRef, enabled: i.enabled });
     } else {
-      if (i.kind !== 'rest') throw new Error('Only "rest" services can be added; GitHub and Brave Search are built in.');
+      if (!USER_KINDS.has(i.kind)) {
+        throw new Error('Only your own REST services and Jira can be added; GitHub, Brave Search, Notion, Linear and Slack are built in.');
+      }
       if (!isAllowedBase(i.baseUrl, this.#rules)) throw new Error('The base address must be https, with no user name, query or fragment.');
       if (i.authType === 'header' && !i.authHeader) throw new Error('Name the header that carries the key.');
+      if (i.kind === 'jira' && i.authType !== 'basic' && i.authType !== 'bearer') {
+        throw new Error('Jira signs in with your email and an API token (Basic), or a personal access token (Bearer).');
+      }
+      // User services can't send fixed headers that would stand in for (or override) the key.
+      const unsafe = Object.keys(i.extraHeaders).find((h) => /^(authorization|cookie|proxy-authorization|host)$/i.test(h) || h.toLowerCase() === i.authHeader?.toLowerCase());
+      if (unsafe) throw new Error(`The extra header "${unsafe}" is not allowed.`);
       this.#upsert(file, i);
     }
     this.#write(file);

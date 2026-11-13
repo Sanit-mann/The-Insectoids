@@ -1414,6 +1414,7 @@ ${result.stderrTail}`, this.#now());
         costEstimated: result.costEstimated ?? false,
         durationMs: result.durationMs,
         at: this.#now(),
+        reason: req.route.reason ?? null,
       });
     } catch {
       // Bookkeeping must never stop the hive.

@@ -1,9 +1,10 @@
 import type { AgentView } from '@insectoids/shared';
 import { Hexagon, Pause, Play } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { type KeyboardEvent, useEffect, useMemo, useRef, useState } from 'react';
 import { AgentOutput } from '@/components/hive/AgentOutput';
 import { LANE_LABEL, agentName } from '@/components/hive/format';
 import { LanesTable } from '@/components/hive/LanesTable';
+import { LivingHive } from '@/components/hive/LivingHive';
 import { ManagersPanel } from '@/components/hive/ManagersPanel';
 import { WatchdogPanel } from '@/components/hive/WatchdogPanel';
 import { useNow } from '@/components/hive/useNow';
@@ -39,10 +40,27 @@ function useThrottled(text: string, ms: number): string {
   return said;
 }
 
+type HiveViewId = 'lanes' | 'living';
+const VIEWS: Array<{ id: HiveViewId; label: string }> = [
+  { id: 'lanes', label: 'Lanes' },
+  { id: 'living', label: 'Living hive' },
+];
+
 export function HiveScreen() {
   const { snapshot, error, loading } = useHive();
   const now = useNow(1000);
+  const [view, setView] = useState<HiveViewId>('lanes');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /** Left/right arrows switch the tab and move focus to it (tablist keyboard pattern). */
+  const onTabKey = (e: KeyboardEvent<HTMLDivElement>): void => {
+    const step = e.key === 'ArrowRight' ? 1 : e.key === 'ArrowLeft' ? -1 : 0;
+    if (!step) return;
+    e.preventDefault();
+    const i = VIEWS.findIndex((v) => v.id === view);
+    const next = VIEWS[(i + step + VIEWS.length) % VIEWS.length]!.id;
+    setView(next);
+    document.getElementById(`hive-view-${next}`)?.focus();
+  };
   const [busy, setBusy] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
 
@@ -78,21 +96,26 @@ export function HiveScreen() {
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       <div role="group" aria-label="Hive controls" className="flex flex-wrap items-center gap-2.5 border-b border-line px-6 py-3">
-        <div role="tablist" aria-label="Hive view" className="flex gap-1.5">
-          <button type="button" role="tab" aria-selected="true" className="min-h-10 rounded-full border border-honey bg-surface px-3 text-sm text-honey-text">
-            Lanes
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected="false"
-            aria-disabled="true"
-            disabled
-            title="The living hive arrives in Phase 2"
-            className="min-h-10 rounded-full border border-line bg-surface px-3 text-sm text-muted disabled:cursor-not-allowed"
-          >
-            Living hive <span className="ml-1 rounded-full border border-line px-1.5 text-[11px]">Later</span>
-          </button>
+        <div role="tablist" aria-label="Hive view" className="flex gap-1.5" onKeyDown={onTabKey}>
+          {VIEWS.map((v) => (
+            <button
+              type="button"
+              role="tab"
+              key={v.id}
+              id={`hive-view-${v.id}`}
+              aria-selected={view === v.id}
+              aria-controls={`hive-panel-${v.id}`}
+              tabIndex={view === v.id ? 0 : -1}
+              data-testid={`hive-view-${v.id}`}
+              onClick={() => setView(v.id)}
+              className={cn(
+                'min-h-10 rounded-full border bg-surface px-3 text-sm',
+                view === v.id ? 'border-honey text-honey-text' : 'border-line text-muted hover:text-text',
+              )}
+            >
+              {v.label}
+            </button>
+          ))}
         </div>
         <span className="ml-auto text-xs text-muted">
           {agents.length} agent{agents.length === 1 ? '' : 's'} · {working} working · insect limit {snapshot?.hive.insectCap ?? '—'} (set by you)
@@ -137,19 +160,34 @@ export function HiveScreen() {
             <div key={i} className="h-12 animate-pulse rounded-xl bg-surface-2" />
           ))}
         </div>
-      ) : agents.length === 0 ? (
-        <EmptyHint icon={Hexagon} title="No insects working">
-          No insects working. Give the Queen a goal.
-        </EmptyHint>
       ) : (
-        <div className="flex min-h-0 flex-1 flex-wrap">
-          <div className="flex min-w-0 flex-[999_1_600px] flex-col gap-3 p-5">
-            <AgentLanesTimeline lanes={lanes} now={now} selectedId={selected?.runId ?? null} onSelect={setSelectedId} />
-            <LanesTable agents={agents} selectedId={selected?.runId ?? null} onSelect={setSelectedId} now={now} />
-            <p className="m-0 text-xs text-muted">Each row is one agent run. Colour shows status; the label always says it too.</p>
+        <>
+          {/* Both views stay mounted: the hidden one keeps its place, and the honeycomb's motion pauses. */}
+          <div aria-labelledby="hive-view-lanes" hidden={view !== 'lanes'} id="hive-panel-lanes" role="tabpanel" className="min-h-0 flex-1">
+            {agents.length === 0 ? (
+              <EmptyHint icon={Hexagon} title="No insects working">
+                No insects working. Give the Queen a goal.
+              </EmptyHint>
+            ) : (
+              <div className="flex min-h-0 flex-1 flex-wrap">
+                <div className="flex min-w-0 flex-[999_1_600px] flex-col gap-3 p-5">
+                  <AgentLanesTimeline lanes={lanes} now={now} selectedId={selected?.runId ?? null} onSelect={setSelectedId} />
+                  <LanesTable agents={agents} selectedId={selected?.runId ?? null} onSelect={setSelectedId} now={now} />
+                  <p className="m-0 text-xs text-muted">Each row is one agent run. Colour shows status; the label always says it too.</p>
+                </div>
+                {view === 'lanes' && selected && <AgentOutput agent={selected} />}
+              </div>
+            )}
           </div>
-          {selected && <AgentOutput agent={selected} />}
-        </div>
+          <div aria-labelledby="hive-view-living" hidden={view !== 'living'} id="hive-panel-living" role="tabpanel" className="min-h-0 flex-1">
+            <div className="flex min-h-0 flex-1 flex-wrap">
+              <div className="flex min-w-0 flex-[999_1_600px] flex-col gap-3 p-5">
+                <LivingHive active={view === 'living'} agents={agents} onSelect={setSelectedId} selectedId={selected?.runId ?? null} />
+              </div>
+              {view === 'living' && selected && <AgentOutput agent={selected} />}
+            </div>
+          </div>
+        </>
       )}
 
       {/* C2: the Watchdog's incidents and the managers' brain side, always visible once the hive is loaded. */}

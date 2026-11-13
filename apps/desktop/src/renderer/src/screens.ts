@@ -9,6 +9,7 @@ import {
   MessageSquare,
   Plug,
   Settings,
+  Wallet,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -21,6 +22,7 @@ export type ScreenId =
   | 'changes'
   | 'library'
   | 'connections'
+  | 'budgets'
   | 'cadence'
   | 'settings';
 
@@ -42,6 +44,7 @@ export const SCREENS: readonly ScreenDef[] = [
   { id: 'changes', label: 'Changes', icon: GitBranch, phase: 1, blurb: 'What each card changed, undo, and merging into your main branch.' },
   { id: 'library', label: 'Library', icon: BookOpen, phase: 2, blurb: 'Agents, skills and tools: active and dormant.' },
   { id: 'connections', label: 'Connections', icon: Plug, phase: 2, blurb: 'AI engines, API providers, services and the vault.' },
+  { id: 'budgets', label: 'Budgets', icon: Wallet, phase: 2, blurb: 'Goal, caste and subscription spend, and how the Treasurer routed each run.' },
   { id: 'cadence', label: 'Cadence', icon: Clock, phase: 3, blurb: 'Schedules, triggers and the "while you were away" digest.' },
   { id: 'settings', label: 'Settings', icon: Settings, phase: 1, blurb: 'Limits, protected paths, Brain location, theme.' },
 ];

@@ -1,6 +1,25 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Provider } from '@insectoids/shared';
 import type { ProvidersStore } from './providers';
+
+/** The Anthropic API version sent with Anthropic keys (its own endpoints, such as GET /models, need it). */
+export const ANTHROPIC_VERSION = '2023-06-01';
+
+/**
+ * How the key goes upstream. Every provider gets "Authorization: Bearer" (the OpenAI protocol, which
+ * OpenAI and Anthropic's OpenAI-compatible endpoint both accept). Anthropic also gets its own x-api-key
+ * and anthropic-version, so its native model listing answers the Test too (C4, 04-D3).
+ */
+export function upstreamAuth(p: Pick<Provider, 'preset'>, key: string | null): Record<string, string> {
+  if (!key) return {};
+  const h: Record<string, string> = { authorization: `Bearer ${key}` };
+  if (p.preset === 'anthropic') {
+    h['x-api-key'] = key;
+    h['anthropic-version'] = ANTHROPIC_VERSION;
+  }
+  return h;
+}
 
 /**
  * The broker's LLM route (Connections 04-D3/D4, Phase 2 step A4): `/llm/<providerId>/<path>`, OpenAI-compatible.
@@ -193,7 +212,7 @@ export class LlmRoute {
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), 30_000);
     try {
-      const res = await this.#upstream(p.baseUrl, path, 'GET', undefined, { accept: 'application/json' }, key, ac.signal);
+      const res = await this.#upstream(p, path, 'GET', undefined, { accept: 'application/json' }, key, ac.signal);
       const text = await readCapped(res, MAX_PARSE_BYTES);
       return { ok: true, status: res.status, body: redactAll(text, key) };
     } catch (err) {
@@ -283,7 +302,7 @@ export class LlmRoute {
     usage.calls++;
     if (requestedModel) usage.model = requestedModel;
     try {
-      const up = await this.#upstream(p.baseUrl, path, method, body || undefined, headers, key, ac.signal);
+      const up = await this.#upstream(p, path, method, body || undefined, headers, key, ac.signal);
       const back: Record<string, string> = { 'cache-control': 'no-store' };
       for (const h of RETURN_HEADERS) {
         const v = up.headers.get(h);
@@ -329,7 +348,7 @@ export class LlmRoute {
   }
 
   #upstream(
-    baseUrl: string,
+    p: Provider,
     path: string,
     method: string,
     body: string | undefined,
@@ -337,9 +356,8 @@ export class LlmRoute {
     key: string | null,
     signal: AbortSignal,
   ): Promise<Response> {
-    const url = `${baseUrl.replace(/\/+$/, '')}${path}`;
-    const h: Record<string, string> = { 'user-agent': 'The-Insectoids-broker', ...headers };
-    if (key) h['authorization'] = `Bearer ${key}`;
+    const url = `${p.baseUrl.replace(/\/+$/, '')}${path}`;
+    const h: Record<string, string> = { 'user-agent': 'The-Insectoids-broker', ...headers, ...upstreamAuth(p, key) };
     return (this.#d.fetch ?? fetch)(url, { method, headers: h, ...(body !== undefined ? { body } : {}), redirect: 'manual', signal });
   }
 

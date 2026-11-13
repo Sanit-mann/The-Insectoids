@@ -112,7 +112,8 @@ export function checkPath(path: string): string | null {
 export function resolveUnderBase(baseUrl: string, path: string, query?: Record<string, string>): URL | null {
   const base = new URL(baseUrl);
   const prefix = base.pathname.replace(/\/+$/, '');
-  const url = new URL(`${prefix}${path}`, base.origin);
+  // "/" is the base itself (a GraphQL endpoint like /graphql has no trailing slash).
+  const url = new URL(path === '/' && prefix ? prefix : `${prefix}${path}`, base.origin);
   if (url.origin !== base.origin) return null;
   if (prefix && url.pathname !== prefix && !url.pathname.startsWith(`${prefix}/`)) return null;
   for (const [k, v] of Object.entries(query ?? {})) url.searchParams.set(k, String(v));
@@ -260,7 +261,7 @@ export class Broker {
     if (!i) return refuse(404, `No service "${String(req.integration)}".`);
     const why = this.#usable(i, asUser);
     if (why) return refuse(403, `"${i.id}" can't be used: ${why}.`);
-    if (!(i.readMethods as string[]).includes(method) && !approvedRules.includes('publish')) {
+    if (!isRead(i, method, String(req.path), req.body) && !approvedRules.includes('publish')) {
       return refuse(
         403,
         `${method} changes something on ${i.label} and needs the user's approval. Don't retry; end with "STATUS: BLOCKED: need approval to ${method} ${req.path} on ${i.label}".`,
@@ -280,8 +281,16 @@ export class Broker {
     for (const [k, v] of Object.entries(req.headers ?? {})) {
       if (PASS_HEADERS.has(k.toLowerCase()) && typeof v === 'string' && !/[\r\n]/.test(v)) headers[k.toLowerCase()] = v;
     }
+    // Fixed headers the service needs (e.g. Notion-Version). Set before auth, so they can never replace it.
+    for (const [k, v] of Object.entries(i.extraHeaders ?? {})) {
+      const name = k.toLowerCase();
+      if (!/[\r\n]/.test(v) && !NEVER_EXTRA.has(name)) headers[name] = v;
+    }
     if (key && i.authType === 'bearer') headers['authorization'] = `Bearer ${key}`;
     if (key && i.authType === 'header' && i.authHeader) headers[i.authHeader.toLowerCase()] = key;
+    // Basic: the Vault holds "email:token" (Jira Cloud); only the broker ever encodes it.
+    const basic = key && i.authType === 'basic' ? Buffer.from(key, 'utf8').toString('base64') : null;
+    if (basic) headers['authorization'] = `Basic ${basic}`;
 
     const ac = new AbortController();
     const timer = setTimeout(() => ac.abort(), this.#d.timeoutMs ?? TIMEOUT_MS);
@@ -294,18 +303,19 @@ export class Broker {
         signal: ac.signal,
       });
       // Read a key's length past the cap, redact, then cut: a key split by the cap can't leak in part.
-      const read = await readCapped(res, MAX_BODY_BYTES + (key?.length ?? 0));
-      let body = redact(read.text, key);
+      const read = await readCapped(res, MAX_BODY_BYTES + Math.max(key?.length ?? 0, basic?.length ?? 0));
+      let body = redact(redact(read.text, key), basic);
       let truncated = read.truncated;
       if (Buffer.byteLength(body) > MAX_BODY_BYTES) {
         body = Buffer.from(body).subarray(0, MAX_BODY_BYTES).toString('utf8');
         truncated = true;
       }
       if (key && truncated) body = redactPrefixAtEnd(body, key);
+      if (basic && truncated) body = redactPrefixAtEnd(body, basic);
       const back: Record<string, string> = {};
       for (const h of RETURN_HEADERS) {
         const v = res.headers.get(h);
-        if (v) back[h] = redact(v, key);
+        if (v) back[h] = redact(redact(v, key), basic);
       }
       record(res.status);
       return { ok: true, status: res.status, headers: back, body, truncated };
@@ -350,6 +360,50 @@ export class Broker {
       send(500, { ok: false, status: 500, error: 'The broker hit an error; the call was not made.' });
     }
   }
+}
+
+/** Headers a service template may never set itself (the broker owns auth and the connection). */
+const NEVER_EXTRA = new Set(['authorization', 'proxy-authorization', 'cookie', 'host', 'content-length', 'user-agent']);
+
+/** Does a path match a read pattern? "*" matches exactly one path segment; everything else is literal. */
+export function matchesReadPath(pattern: string, path: string): boolean {
+  const p = pattern.replace(/\/+$/, '').split('/');
+  const s = path.replace(/\/+$/, '').split('/');
+  if (p.length !== s.length) return false;
+  return p.every((seg, n) => (seg === '*' ? s[n] !== '' && s[n] !== undefined : seg === s[n]));
+}
+
+/**
+ * A GraphQL request body that only reads: every operation is a query (no "mutation" or "subscription"
+ * anywhere outside strings and comments). Anything unclear counts as a change and needs approval.
+ */
+export function isGraphqlRead(body: string | undefined): boolean {
+  if (typeof body !== 'string' || !body) return false;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(body);
+  } catch {
+    return false;
+  }
+  const docs = Array.isArray(parsed) ? parsed : [parsed];
+  if (!docs.length) return false;
+  return docs.every((d) => {
+    const q = (d as { query?: unknown } | null)?.query;
+    if (typeof q !== 'string' || !q.trim()) return false;
+    const bare = q
+      .replace(/"""[\s\S]*?"""/g, ' ')
+      .replace(/"(?:[^"\\]|\\.)*"/g, ' ')
+      .replace(/#[^\n]*/g, ' ');
+    return !/\b(mutation|subscription)\b/.test(bare);
+  });
+}
+
+/** Whether a call only reads: a read method, a read-only POST path, or a GraphQL query (Linear). */
+export function isRead(i: Integration, method: string, path: string, body?: string): boolean {
+  if ((i.readMethods as string[]).includes(method)) return true;
+  if (method !== 'POST') return false;
+  if ((i.readPosts ?? []).some((p) => matchesReadPath(p, path))) return true;
+  return i.kind === 'linear' && isGraphqlRead(body);
 }
 
 /** Every occurrence of the key in text becomes [REDACTED] (some APIs echo credentials in errors). */

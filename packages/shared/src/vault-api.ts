@@ -52,10 +52,12 @@ export const VaultAddSchema = z.object({
 });
 export type VaultAdd = z.infer<typeof VaultAddSchema>;
 
-export const IntegrationKindSchema = z.enum(['github', 'brave-search', 'rest']);
+/** C4 adds the Phase 2 services (04-D5): Notion, Linear, Slack built in; Jira as a template (its address is per site). */
+export const IntegrationKindSchema = z.enum(['github', 'brave-search', 'notion', 'linear', 'slack', 'jira', 'rest']);
 export type IntegrationKind = z.infer<typeof IntegrationKindSchema>;
 
-export const AuthTypeSchema = z.enum(['none', 'bearer', 'header']);
+/** basic = HTTP Basic with a vault secret written as "email:token" (Jira Cloud API tokens). */
+export const AuthTypeSchema = z.enum(['none', 'bearer', 'header', 'basic']);
 
 /** An outside service the hive may use (metadata only). */
 export const IntegrationSchema = z.object({
@@ -76,10 +78,20 @@ export const IntegrationSchema = z.object({
    * (POST/PUT/PATCH/DELETE) need the user's approval for that card ("publish", 02-D7).
    */
   readMethods: z.array(z.enum(['GET', 'HEAD', 'POST'])),
+  /**
+   * POST paths that only read (e.g. Notion "/search", "/databases/<id>/query"), as path patterns where "*"
+   * matches one path segment. Other POSTs need approval unless POST is in readMethods. For GraphQL services
+   * (Linear) the broker also treats a POST whose body is a query (not a mutation) as a read.
+   */
+  readPosts: z.array(z.string().max(200)).max(20).default([]),
+  /** Fixed extra headers the service needs (e.g. Notion-Version). Never secrets. */
+  extraHeaders: z.record(z.string().regex(/^[A-Za-z0-9-]{1,64}$/), z.string().max(200)).default({}),
   /** One line for the Services tab: what the hive can do with it. */
   description: z.string().max(300),
 });
 export type Integration = z.infer<typeof IntegrationSchema>;
+/** What callers send (readPosts and extraHeaders may be left out; they default to none). */
+export type IntegrationInput = z.input<typeof IntegrationSchema>;
 
 export const IntegrationViewSchema = IntegrationSchema.extend({
   status: z.enum(['ready', 'needs-key', 'off', 'error']),
@@ -114,7 +126,7 @@ export interface VaultApi {
   remove(ref: string): Promise<VaultResult>;
   services(): Promise<IntegrationView[]>;
   /** Adds or updates an integration (built-in ones: only label, secretRef and enabled can change). */
-  saveService(i: Integration): Promise<VaultResult>;
+  saveService(i: IntegrationInput): Promise<VaultResult>;
   setServiceEnabled(id: string, enabled: boolean): Promise<VaultResult>;
   /** Built-in templates can't be removed, only switched off. */
   removeService(id: string): Promise<VaultResult>;

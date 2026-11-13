@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react';
 import { Button } from '@/components/ui/button';
 
 /** Copies text: the async Clipboard API, with the old textarea route as a fallback. */
-async function copyText(text: string): Promise<boolean> {
+export async function copyText(text: string): Promise<boolean> {
   try {
     await navigator.clipboard.writeText(text);
     return true;
@@ -23,7 +23,7 @@ async function copyText(text: string): Promise<boolean> {
 
 /**
  * An exact command in a mono box with a Copy button (Connections 04-D6: the user sees exactly what
- * would run). The app doesn't run it from here; one-click install with consent comes in Phase 2 · A2.
+ * would run). It is also the fallback next to the one-click install with consent (EngineInstall, C4).
  */
 export function CopyCommand({ label, command, note, testId }: { label: string; command: string; note: string; testId?: string }) {
   const [state, setState] = useState<'idle' | 'copied' | 'failed'>('idle');

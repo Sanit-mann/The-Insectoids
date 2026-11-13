@@ -57,7 +57,13 @@ export type HostMethod =
   // Library screen (Phase 2 C1): the castes and the catalog, read-only.
   | 'libraryCastes'
   | 'librarySearch'
-  | 'libraryItem';
+  | 'libraryItem'
+  // Budgets screen (Phase 2 C4), read-only.
+  | 'budgets'
+  // Engine install (C4): main reads the engine's card (its official install command) from the host.
+  // 'e2eEngineInstalled' works only when the host runs under INSECTOIDS_E2E=1.
+  | 'engineCard'
+  | 'e2eEngineInstalled';
 
 /**
  * Requests the host makes to main (the reverse direction): the secret broker and the Vault live in

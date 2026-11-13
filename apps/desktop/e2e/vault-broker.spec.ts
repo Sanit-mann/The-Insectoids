@@ -42,7 +42,13 @@ test('a key goes into the Vault once, is used by the broker, and never comes bac
 
   // Built-ins start off and need a key.
   const before = await win.evaluate(() => (globalThis as unknown as AppWindow).insectoids.vault.services());
-  expect(before.map((s) => [s.id, s.status])).toEqual([['github', 'needs-key'], ['brave-search', 'needs-key']]);
+  expect(before.map((s) => [s.id, s.status])).toEqual([
+    ['github', 'needs-key'],
+    ['brave-search', 'needs-key'],
+    ['notion', 'needs-key'],
+    ['linear', 'needs-key'],
+    ['slack', 'needs-key'],
+  ]);
 
   const github = before.find((s) => s.id === 'github')!;
   const integration = {

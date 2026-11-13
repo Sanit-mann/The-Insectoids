@@ -253,7 +253,7 @@ function registerIpc(): void {
     switchBrainDir,
     ...(testPickedFolder ? { testPickedFolder } : {}),
   });
-  registerHiveIpc({ host: () => brainHost, window: () => mainWindow, assertTrustedSender });
+  registerHiveIpc({ host: () => brainHost, window: () => mainWindow, assertTrustedSender, push: forwardPush });
   if (isE2E) {
     // e2e only, main process only (never reachable from the renderer): an agent changes a record while the
     // user edits it, so the Brain screen's conflict view can be tested (Phase 2 B5). The host refuses it

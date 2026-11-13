@@ -89,3 +89,50 @@ describe('releasing a card without using an attempt', () => {
     expect(brain.taskboard.events('G1.C-01').at(-1)).toMatchObject({ from: 'in_progress', to: 'open', note: 'Claude Code hit its usage limit' });
   });
 });
+
+describe('Budgets numbers (Phase 2 C4)', () => {
+  const DAY = 86_400_000;
+  const dayStart = (t: number): number => t - (t % DAY);
+
+  it('keeps the routing rule in plain words; older runs have none', () => {
+    brain.outcomes.record({ ...run({ runId: 'r1' }), reason: 'rule: retry 1, so more effort or a stronger model' });
+    brain.outcomes.record(run({ runId: 'r2' }));
+    expect(brain.outcomes.get('r1')?.reason).toBe('rule: retry 1, so more effort or a stronger model');
+    expect(brain.outcomes.get('r2')?.reason).toBeNull();
+  });
+
+  it('sums spend per day, oldest first, with empty days filled in', () => {
+    clock = 10 * DAY + 5_000;
+    brain.outcomes.record({ ...run({ runId: 'today', costUsd: 0.2 }), at: clock });
+    brain.outcomes.record({ ...run({ runId: 'twoago', costUsd: 0.3 }), at: 8 * DAY + 100 });
+    brain.outcomes.record({ ...run({ runId: 'old' }), at: DAY });
+    const days = brain.outcomes.byDay(3, clock, dayStart);
+    expect(days.map((d) => d.day)).toEqual([8 * DAY, 9 * DAY, 10 * DAY]);
+    expect(days.map((d) => d.runs)).toEqual([1, 0, 1]);
+    expect(days[0]).toMatchObject({ tokens: 160, costUsd: 0.3 });
+    expect(days[2]!.costUsd).toBeCloseTo(0.2);
+  });
+
+  it('spend by role with a pass rate over settled runs only', () => {
+    brain.outcomes.record(run({ runId: 'a', role: 'coder', result: 'pass', costUsd: 0.5 }));
+    brain.outcomes.record(run({ runId: 'b', role: 'coder', result: 'fail', costUsd: 0.25 }));
+    brain.outcomes.record(run({ runId: 'c', role: 'coder', result: 'pending', costUsd: 0.25 }));
+    brain.outcomes.record(run({ runId: 'q', role: 'queen', result: 'limit', costUsd: 0.1 }));
+    const roles = brain.outcomes.byRole(0);
+    expect(roles[0]).toMatchObject({ role: 'coder', runs: 3, costUsd: 1, passRate: 0.5 });
+    expect(roles[1]).toMatchObject({ role: 'queen', runs: 1, passRate: null });
+  });
+
+  it('what the Treasurer learned: tries and passes per role, engine and tier; a goal\'s runs', () => {
+    brain.outcomes.record(run({ runId: 'a', result: 'pass' }));
+    brain.outcomes.record(run({ runId: 'b', result: 'error' }));
+    brain.outcomes.record(run({ runId: 'c', result: 'stopped' }));
+    brain.outcomes.record(run({ runId: 'd', goalId: 'G2', result: 'pass', tier: 'strongest' }));
+    expect(brain.outcomes.learned()).toEqual([
+      { role: 'coder', engine: 'claude', tier: 'standard', tries: 2, passes: 1 },
+      { role: 'coder', engine: 'claude', tier: 'strongest', tries: 1, passes: 1 },
+    ]);
+    expect(brain.outcomes.forGoals(['G2']).map((o) => o.runId)).toEqual(['d']);
+    expect(brain.outcomes.forGoals([])).toEqual([]);
+  });
+});

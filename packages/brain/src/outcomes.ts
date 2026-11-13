@@ -29,6 +29,25 @@ export interface RunOutcome {
   costEstimated: boolean;
   durationMs: number;
   at: number;
+  /** The Treasurer's routing rule in plain words (C4); null for older runs. */
+  reason?: string | null;
+}
+
+/** One day of spend (C4 Budgets). `day` is the start of that local day (epoch ms). */
+export interface DaySum {
+  day: number;
+  tokens: number;
+  costUsd: number;
+  runs: number;
+}
+
+/** Spend by role over a window (C4 Budgets). passRate counts settled insect runs only; null when none. */
+export interface RoleSum {
+  role: string;
+  runs: number;
+  tokens: number;
+  costUsd: number;
+  passRate: number | null;
 }
 
 /** Learning numbers for one way of running a caste's cards (engine × tier × effort). */
@@ -69,9 +88,11 @@ interface Row {
   cost_estimated: number;
   duration_ms: number;
   at: number;
+  reason: string | null;
 }
 
 const toOutcome = (r: Row): RunOutcome => ({
+  reason: r.reason ?? null,
   runId: r.run_id,
   goalId: r.goal_id,
   cardId: r.card_id,
@@ -103,13 +124,13 @@ export class OutcomeStore {
     this.db
       .prepare(
         `INSERT OR REPLACE INTO run_outcomes (run_id, goal_id, card_id, role, priority, engine, tier, model, effort, attempt, result,
-           tokens_in, tokens_out, tokens_cache, cost_usd, cost_estimated, duration_ms, at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+           tokens_in, tokens_out, tokens_cache, cost_usd, cost_estimated, duration_ms, at, reason)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         o.runId, o.goalId, o.cardId, o.role, o.priority, o.engine, o.tier, o.model, o.effort, o.attempt, o.result,
         Math.round(o.tokensIn), Math.round(o.tokensOut), Math.round(o.tokensCache), o.costUsd, o.costEstimated ? 1 : 0,
-        Math.round(o.durationMs), o.at ?? this.now(),
+        Math.round(o.durationMs), o.at ?? this.now(), o.reason ?? null,
       );
   }
 
@@ -171,5 +192,58 @@ export class OutcomeStore {
   /** Newest first, for the Budgets screen and tests. */
   recent(limit = 50): RunOutcome[] {
     return (this.db.prepare('SELECT * FROM run_outcomes ORDER BY at DESC, rowid DESC LIMIT ?').all(limit) as unknown as Row[]).map(toOutcome);
+  }
+
+  /** Every run of some goals (Budgets: a goal's spend and its most expensive cards). */
+  forGoals(goalIds: string[]): RunOutcome[] {
+    if (!goalIds.length) return [];
+    const marks = goalIds.map(() => '?').join(', ');
+    return (this.db.prepare(`SELECT * FROM run_outcomes WHERE goal_id IN (${marks})`).all(...goalIds) as unknown as Row[]).map(toOutcome);
+  }
+
+  /**
+   * Spend per local day for the last `days` days, oldest first, with empty days filled in (C4 Budgets).
+   * `dayStart` maps a time to the start of its local day (injected so tests don't depend on the time zone).
+   */
+  byDay(days: number, now: number, dayStart: (t: number) => number): DaySum[] {
+    const today = dayStart(now);
+    const starts: number[] = [];
+    for (let i = days - 1; i >= 0; i--) starts.push(dayStart(today - i * 86_400_000 + 3_600_000 * 12));
+    const from = starts[0]!;
+    const rows = this.db
+      .prepare('SELECT at, tokens_in + tokens_out + tokens_cache AS tokens, cost_usd FROM run_outcomes WHERE at >= ?')
+      .all(from) as Array<{ at: number; tokens: number; cost_usd: number }>;
+    const sums = new Map(starts.map((d) => [d, { day: d, tokens: 0, costUsd: 0, runs: 0 }]));
+    for (const r of rows) {
+      const s = sums.get(dayStart(r.at));
+      if (!s) continue;
+      s.tokens += r.tokens;
+      s.costUsd += r.cost_usd;
+      s.runs += 1;
+    }
+    return starts.map((d) => sums.get(d)!);
+  }
+
+  /** Spend by role since `since`, most expensive first (C4 Budgets). */
+  byRole(since: number): RoleSum[] {
+    const rows = this.db
+      .prepare(
+        `SELECT role, COUNT(*) AS runs, COALESCE(SUM(tokens_in + tokens_out + tokens_cache), 0) AS tokens, COALESCE(SUM(cost_usd), 0) AS cost,
+           SUM(CASE WHEN result = 'pass' THEN 1 ELSE 0 END) AS passes,
+           SUM(CASE WHEN result IN ('pass', 'fail', 'error') THEN 1 ELSE 0 END) AS settled
+         FROM run_outcomes WHERE at >= ? GROUP BY role ORDER BY cost DESC, tokens DESC`,
+      )
+      .all(since) as Array<{ role: string; runs: number; tokens: number; cost: number; passes: number; settled: number }>;
+    return rows.map((r) => ({ role: r.role, runs: r.runs, tokens: r.tokens, costUsd: r.cost, passRate: r.settled ? r.passes / r.settled : null }));
+  }
+
+  /** Tries and passes per role × engine × tier, over settled runs (the Treasurer's learning, A5). */
+  learned(): Array<{ role: string; engine: string; tier: string; tries: number; passes: number }> {
+    return this.db
+      .prepare(
+        `SELECT role, engine, tier, COUNT(*) AS tries, SUM(CASE WHEN result = 'pass' THEN 1 ELSE 0 END) AS passes
+         FROM run_outcomes WHERE result IN ('pass', 'fail', 'error') GROUP BY role, engine, tier ORDER BY role, engine, tier`,
+      )
+      .all() as Array<{ role: string; engine: string; tier: string; tries: number; passes: number }>;
   }
 }

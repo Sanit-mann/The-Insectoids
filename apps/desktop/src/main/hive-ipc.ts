@@ -9,6 +9,11 @@ import {
   BrainRecordViewSchema,
   BrainSearchRequestSchema,
   CasteViewSchema,
+  BudgetsViewSchema,
+  EngineCardSchema,
+  EngineIdSchema,
+  EngineInstallResultSchema,
+  type HivePush,
   LibraryImportResultSchema,
   LibraryItemDetailSchema,
   LibrarySearchRequestSchema,
@@ -25,11 +30,14 @@ import {
 } from '@insectoids/shared';
 import type { BrainClient } from '@insectoids/brain-service';
 import type { BrainHost } from './brain-host';
+import { EngineInstaller, fakeInstallDeps, hasToolOnPath, runPlan } from './engine-install';
 
 interface Deps {
   host: () => BrainHost | null;
   window: () => BrowserWindow | null;
   assertTrustedSender: (event: IpcMainInvokeEvent) => void;
+  /** Pushes to the window (C4: engine install output). */
+  push?: (p: HivePush) => void;
 }
 
 /** Same rule as every id in the hive contract. */
@@ -140,6 +148,26 @@ export function registerHiveIpc(d: Deps): void {
       mergedFrom: live.filter((l) => l.rel === 'merged_into' && l.direction === 'in').map(({ id, title }) => ({ id, title })),
     });
   }
+
+  // C4: the Budgets screen (read-only).
+  handle(HIVE_IPC.budgets, async () => BudgetsViewSchema.parse(await host().call('budgets')));
+
+  // C4: one-click engine install with consent (04-D6). The command comes from the engine's adapter (via its
+  // card in the host), never from the renderer. Under e2e no real installer ever runs.
+  const e2e = process.env['INSECTOIDS_E2E'] === '1';
+  const installer = new EngineInstaller({
+    card: async (id) => {
+      const c = await host().call('engineCard', { id });
+      return c ? EngineCardSchema.parse(c) : null;
+    },
+    recheck: async (id) => {
+      if (e2e) await host().call('e2eEngineInstalled', { id });
+      else await host().call('command', { type: 'checkEngine' });
+    },
+    push: (p) => d.push?.(p),
+    ...(e2e ? fakeInstallDeps(process.env['INSECTOIDS_E2E_FAKE_INSTALL'] ?? 'ok') : { hasTool: (t: string) => hasToolOnPath(t), run: runPlan }),
+  });
+  handle(HIVE_IPC.engineInstall, async (arg) => EngineInstallResultSchema.parse(await installer.install(EngineIdSchema.parse(arg))));
 
   // C3: import a skill or agent folder. Under e2e a fixture path replaces the dialog (tests can't click it).
   handle(HIVE_IPC.libraryImport, async () => {

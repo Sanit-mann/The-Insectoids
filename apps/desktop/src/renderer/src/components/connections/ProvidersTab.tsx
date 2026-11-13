@@ -12,7 +12,7 @@ import { Switch } from './Switch';
 
 const STATUS_DOT = { ready: 'done', 'needs-key': 'waiting', off: 'idle', error: 'blocked' } as const;
 const STATUS_LABEL: Record<ProviderView['status'], string> = { ready: 'Ready', 'needs-key': 'Needs a key', off: 'Off', error: 'Problem' };
-const PRESET_ORDER: ProviderPreset[] = ['openrouter', 'freellmapi', 'ollama', 'lmstudio', 'custom'];
+const PRESET_ORDER: ProviderPreset[] = ['openrouter', 'anthropic', 'openai', 'freellmapi', 'ollama', 'lmstudio', 'custom'];
 const TIERS = [
   { key: 'strongest', label: 'Strongest' },
   { key: 'standard', label: 'Standard' },

@@ -28,7 +28,8 @@ test('opens with the rail and asks for a project first', async () => {
   await expect(win).toHaveTitle('The Insectoids');
   const nav = win.getByRole('navigation', { name: 'Main' });
   await expect(nav).toBeVisible();
-  await expect(nav.getByRole('button')).toHaveCount(10);
+  // 11 since Phase 2 C4 added Budgets.
+  await expect(nav.getByRole('button')).toHaveCount(11);
   await expect(nav.getByRole('button', { name: 'Queen' })).toHaveAttribute('aria-current', 'page');
   // No project yet (this spec launches without one): the Queen asks for a folder before anything else.
   await expect(win.getByRole('heading', { name: 'Choose a project for the hive' })).toBeVisible();

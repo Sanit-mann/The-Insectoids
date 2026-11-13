@@ -5,6 +5,7 @@ import { StatusDot } from '@/components/StatusDot';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { CopyCommand } from './CopyCommand';
+import { EngineInstall } from './EngineInstall';
 import { GUARD_TEXT, STATE_DOT, STATE_LABEL } from './engine-names';
 import { EngineUsageView } from './EngineUsage';
 import { Switch } from './Switch';
@@ -86,6 +87,9 @@ export function EngineCardView({ engine: e, isDefault, index, count, busy, error
 
       {e.privacyNote ? <p className="m-0 rounded-[10px] border border-st-waiting/30 bg-st-waiting/10 px-3 py-2 text-xs">{e.privacyNote}</p> : null}
 
+      {/* One click with consent (04-D6, C4): the dialog shows the exact command and asks first. It stays
+          mounted after a successful install (the card's state changes) so the result stays on screen. */}
+      {e.install && !unsupported ? <EngineInstall engine={e} offer={e.state === 'missing' || e.state === 'outdated'} /> : null}
       {e.install && (e.state === 'missing' || e.state === 'outdated' || unsupported) ? (
         <CopyCommand command={e.install.command} label={e.state === 'outdated' ? 'Update' : 'Install'} note={e.install.note} testId={`engine-${e.id}-install`} />
       ) : null}

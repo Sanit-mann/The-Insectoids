@@ -1,4 +1,11 @@
-import { PROVIDERS_IPC, ProviderResultSchema, ProviderSchema, ProviderTestResultSchema, ProviderViewSchema } from '@insectoids/shared';
+import {
+  PROVIDERS_IPC,
+  type ProviderPreset,
+  ProviderResultSchema,
+  ProviderSchema,
+  ProviderTestResultSchema,
+  ProviderViewSchema,
+} from '@insectoids/shared';
 import type { LlmRoute } from './llm-route';
 import type { ProvidersStore } from './providers';
 import type { Vault } from './vault';
@@ -14,6 +21,14 @@ const SetEnabled = ProviderSchema.pick({ id: true, enabled: true });
 
 const message = (err: unknown): string =>
   (err as { name?: string })?.name === 'ZodError' ? 'That input is not valid.' : err instanceof Error ? err.message : String(err);
+
+/**
+ * Fallback model ids when a direct-key provider answers the Test but lists none (C4). Only Anthropic: its
+ * current models are known (Claude 5 family); OpenAI's own /models list is reliable, so it needs no fallback.
+ */
+export const KNOWN_MODELS: Partial<Record<ProviderPreset, readonly string[]>> = {
+  anthropic: ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5'],
+};
 
 /** Model ids from an OpenAI-style `GET /models` answer ({ data: [{ id }] }, or a bare array). */
 export function modelIds(body: string): string[] {
@@ -79,6 +94,8 @@ export function createProvidersHandlers(d: ProvidersDeps): Record<(typeof PROVID
       if (!r.ok) msg = r.error;
       else if (r.status >= 200 && r.status < 300) {
         models = modelIds(r.body);
+        // A provider that answered but listed nothing: offer its well-known models, if we know them.
+        if (!models.length) models = [...(KNOWN_MODELS[p.preset] ?? [])];
         ok = true;
         msg = models.length ? `Connected: ${p.label} lists ${models.length} model${models.length === 1 ? '' : 's'}.` : `Connected to ${p.label}, but it listed no models.`;
       } else if (r.status === 401 || r.status === 403) msg = `${p.label} refused the key (HTTP ${r.status}). Check the key in the Vault.`;

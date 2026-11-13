@@ -8,6 +8,8 @@ import {
   BrainRecordViewSchema,
   BrainStatusSchema,
   CasteViewSchema,
+  BudgetsViewSchema,
+  EngineInstallResultSchema,
   LibraryImportResultSchema,
   LibraryItemDetailSchema,
   LibrarySearchResultSchema,
@@ -64,6 +66,8 @@ const hive: HiveApi = {
   librarySearch: async (req) => LibrarySearchResultSchema.parse(await invoke(HIVE_IPC.librarySearch, req)),
   libraryItem: async (name) => LibraryItemDetailSchema.nullable().parse(await invoke(HIVE_IPC.libraryItem, name)),
   libraryImport: async () => LibraryImportResultSchema.parse(await invoke(HIVE_IPC.libraryImport)),
+  budgets: async () => BudgetsViewSchema.parse(await invoke(HIVE_IPC.budgets)),
+  engineInstall: async (engineId) => EngineInstallResultSchema.parse(await invoke(HIVE_IPC.engineInstall, engineId)),
   pickProject: async () => ProjectViewSchema.nullable().parse(await invoke(HIVE_IPC.pickProject)),
   onEvent: (listener) => {
     const handler = (_e: IpcRendererEvent, raw: unknown): void => {

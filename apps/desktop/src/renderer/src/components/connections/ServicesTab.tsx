@@ -1,16 +1,30 @@
 import { type Integration, type IntegrationView, IntegrationSchema, type SecretMeta } from '@insectoids/shared';
 import { PlugZap, Plus, Trash2 } from 'lucide-react';
-import { type FormEvent, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, useState } from 'react';
 import { HoldButton } from '@/components/kokonutui/hold-button';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { StatusDot } from '@/components/StatusDot';
 import { Button } from '@/components/ui/button';
+import { cn } from '@/lib/utils';
 import { refreshVault, useVault, vaultAction } from '@/lib/vault-store';
 import { Switch } from './Switch';
 
 const STATUS_DOT = { ready: 'done', 'needs-key': 'waiting', off: 'idle', error: 'blocked' } as const;
 const STATUS_LABEL: Record<IntegrationView['status'], string> = { ready: 'Ready', 'needs-key': 'Needs a key', off: 'Off', error: 'Problem' };
-const AUTH_LABEL: Record<Integration['authType'], string> = { none: 'No key', bearer: 'Bearer token', header: 'Key in a header' };
+const AUTH_LABEL: Record<Integration['authType'], string> = { none: 'No key', bearer: 'Bearer token', header: 'Key in a header', basic: 'Email and API token' };
+
+/** Ready-made forms for the Add-a-service form (C4, 04-D5). Jira's address is per site, so it is a template, not a built-in. */
+type TemplateId = 'rest' | 'jira';
+const JIRA_SITE_PLACEHOLDER = 'https://<your-site>.atlassian.net';
+const TEMPLATES: Record<TemplateId, { label: string; hint: string }> = {
+  rest: { label: 'Any REST service', hint: 'Any web service with a REST API.' },
+  jira: {
+    label: 'Jira',
+    hint: 'Jira Cloud: read issues and projects. Put your site in the address, and save the key in the Vault as email:token (your Atlassian email, a colon, then an API token).',
+  },
+};
+/** Jira's search endpoints take POST but only read. */
+const JIRA_READ_POSTS = ['/rest/api/3/search', '/rest/api/3/search/jql'];
 
 const toIntegration = (s: IntegrationView): Integration => ({
   id: s.id,
@@ -22,8 +36,18 @@ const toIntegration = (s: IntegrationView): Integration => ({
   secretRef: s.secretRef,
   enabled: s.enabled,
   readMethods: s.readMethods,
+  readPosts: s.readPosts,
+  extraHeaders: s.extraHeaders,
   description: s.description,
 });
+
+/** What the hive may do without asking, in words (reads pass through the broker; changes wait for the user). */
+function readsLine(s: Pick<Integration, 'kind' | 'readMethods' | 'readPosts'>): string {
+  const parts = [s.readMethods.filter((m) => m !== 'POST').join(' and ') + ' requests'];
+  if (s.readMethods.includes('POST')) parts.push('any POST');
+  if (s.kind === 'linear') parts.push('GraphQL queries (not mutations)');
+  return parts.join(', ');
+}
 
 const slug = (label: string): string =>
   label
@@ -136,7 +160,27 @@ function ServiceCard({ service: s, secrets, onOpenVault }: { service: Integratio
           {AUTH_LABEL[s.authType]}
           {s.authType === 'header' && s.authHeader ? <span className="font-mono"> ({s.authHeader})</span> : null}
         </dd>
+        <dt className="text-muted">Reads freely</dt>
+        <dd className="m-0" data-testid={`service-${s.id}-reads`}>
+          {readsLine(s)}
+          {s.readPosts.length ? (
+            <>
+              {', and POST to '}
+              {s.readPosts.map((r, i) => (
+                <span key={r}>
+                  {i ? ', ' : ''}
+                  <code className="font-mono text-xs">{r}</code>
+                </span>
+              ))}
+            </>
+          ) : null}
+        </dd>
+        <dt className="text-muted">Changes</dt>
+        <dd className="m-0">Anything that changes something on {s.label} waits for your OK.</dd>
       </dl>
+      {s.authType === 'basic' ? (
+        <p className="m-0 text-xs text-muted">Save its key in the Vault as email:token (your account email, a colon, then the API token).</p>
+      ) : null}
 
       {needsKey ? (
         secrets.length ? (
@@ -198,6 +242,7 @@ function ServiceCard({ service: s, secrets, onOpenVault }: { service: Integratio
 }
 
 function AddServiceForm({ secrets, taken, onDone, onOpenVault }: { secrets: SecretMeta[]; taken: string[]; onDone: () => void; onOpenVault: () => void }) {
+  const [template, setTemplate] = useState<TemplateId>('rest');
   const [label, setLabel] = useState('');
   const [id, setId] = useState('');
   const [idTouched, setIdTouched] = useState(false);
@@ -209,22 +254,52 @@ function AddServiceForm({ secrets, taken, onDone, onOpenVault }: { secrets: Secr
   const [busy, setBusy] = useState(false);
 
   const effectiveId = idTouched ? id : slug(label);
+  const readPosts = template === 'jira' ? JIRA_READ_POSTS : [];
+
+  const chooseTemplate = (t: TemplateId): void => {
+    setTemplate(t);
+    if (t === 'jira') {
+      setLabel('Jira');
+      setIdTouched(false);
+      setBaseUrl(JIRA_SITE_PLACEHOLDER);
+      setAuthType('basic');
+    } else {
+      setLabel('');
+      setIdTouched(false);
+      setBaseUrl('https://');
+      setAuthType('bearer');
+    }
+  };
+
+  const onTemplateKey = (ev: KeyboardEvent<HTMLButtonElement>, i: number): void => {
+    const ids = Object.keys(TEMPLATES) as TemplateId[];
+    const step = ev.key === 'ArrowRight' || ev.key === 'ArrowDown' ? 1 : ev.key === 'ArrowLeft' || ev.key === 'ArrowUp' ? -1 : 0;
+    if (!step) return;
+    ev.preventDefault();
+    const next = ids[(i + step + ids.length) % ids.length]!;
+    chooseTemplate(next);
+    document.getElementById(`service-template-${next}`)?.focus();
+  };
 
   const onSubmit = async (ev: FormEvent): Promise<void> => {
     ev.preventDefault();
     const candidate: Integration = {
       id: effectiveId,
       label: label.trim(),
-      kind: 'rest',
+      kind: template === 'jira' ? 'jira' : 'rest',
       baseUrl: baseUrl.trim(),
       authType,
       authHeader: authType === 'header' ? authHeader.trim() : null,
       secretRef: authType === 'none' ? null : secretRef || null,
       enabled: false,
       readMethods: ['GET', 'HEAD'],
-      description: `Your service at ${baseUrl.trim()}.`,
+      readPosts,
+      extraHeaders: {},
+      description:
+        template === 'jira' ? 'Read Jira issues and projects. Creating or changing anything in Jira needs your approval.' : `Your service at ${baseUrl.trim()}.`,
     };
     const problems: string[] = [];
+    if (candidate.baseUrl.includes('<your-site>')) problems.push('Address: put your Jira site name in place of <your-site>.');
     const parsed = IntegrationSchema.safeParse(candidate);
     if (!parsed.success) {
       for (const i of parsed.error.issues) {
@@ -264,7 +339,30 @@ function AddServiceForm({ secrets, taken, onDone, onOpenVault }: { secrets: Secr
       <h2 className="m-0 font-display text-base font-semibold" id="service-add-title">
         Add a service
       </h2>
-      <p className="m-0 text-xs text-muted">Any web service with a REST API. It starts switched off; insects can only read until you approve more.</p>
+      <div aria-label="Kind of service" className="flex flex-wrap gap-2" role="radiogroup">
+        {(Object.keys(TEMPLATES) as TemplateId[]).map((t, i) => (
+          <button
+            aria-checked={template === t}
+            className={cn(
+              'inline-flex min-h-10 items-center rounded-full border px-4 text-sm outline-none focus-visible:ring-2 focus-visible:ring-honey',
+              template === t ? 'border-honey text-honey-text' : 'border-line bg-ground text-text hover:bg-surface-2',
+            )}
+            data-testid={`service-template-${t}`}
+            id={`service-template-${t}`}
+            key={t}
+            onClick={() => chooseTemplate(t)}
+            onKeyDown={(ev) => onTemplateKey(ev, i)}
+            role="radio"
+            tabIndex={template === t ? 0 : -1}
+            type="button"
+          >
+            {TEMPLATES[t].label}
+          </button>
+        ))}
+      </div>
+      <p className="m-0 text-xs text-muted" data-testid="service-template-hint">
+        {TEMPLATES[template].hint} It starts switched off; insects can only read until you approve more.
+      </p>
       <div className="grid gap-3 md:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-muted">Name</span>
@@ -293,8 +391,14 @@ function AddServiceForm({ secrets, taken, onDone, onOpenVault }: { secrets: Secr
             <option value="none">No key</option>
             <option value="bearer">Bearer token</option>
             <option value="header">Key in a header</option>
+            <option value="basic">Email and API token</option>
           </select>
         </label>
+        {authType === 'basic' ? (
+          <p className="m-0 self-end text-xs text-muted md:col-span-1" data-testid="service-basic-hint">
+            Save the key in the Vault as <span className="font-mono">email:token</span>.
+          </p>
+        ) : null}
         {authType === 'header' ? (
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-muted">Header name</span>
@@ -321,6 +425,18 @@ function AddServiceForm({ secrets, taken, onDone, onOpenVault }: { secrets: Secr
           )
         ) : null}
       </div>
+      {readPosts.length ? (
+        <p className="m-0 text-xs text-muted" data-testid="service-read-posts">
+          These POST paths only read, so they don&rsquo;t need your OK:{' '}
+          {readPosts.map((r, i) => (
+            <span key={r}>
+              {i ? ', ' : ''}
+              <code className="font-mono">{r}</code>
+            </span>
+          ))}
+          .
+        </p>
+      ) : null}
       {errors.length ? (
         <InlineAlert
           message={
