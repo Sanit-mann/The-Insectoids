@@ -2,6 +2,7 @@ import type { CardView, GoalView } from '@insectoids/shared';
 import { Columns3 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { StatusDot } from '@/components/StatusDot';
+import { FromCadence } from '@/components/cadence/FromCadence';
 import { CARD_STATUS, casteLabel } from '@/components/hive/format';
 import { useNow } from '@/components/hive/useNow';
 import { CardDetail } from '@/components/taskboard/CardDetail';
@@ -133,6 +134,7 @@ export function TaskboardScreen() {
               ))}
             </select>
           </label>
+          <FromCadence cadenceId={goal.cadenceId} snap={snapshot} />
           <div role="group" aria-label="Wave" className="flex flex-wrap gap-1.5">
             {(['all', ...Array.from({ length: waveCount }, (_, i) => i + 1)] as WaveFilter[]).map((w) => (
               <button

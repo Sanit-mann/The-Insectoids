@@ -4,6 +4,7 @@ import { Crown, User } from 'lucide-react';
 import { KIND_META, ago, decide } from '@/components/approvals/kinds';
 import { ApprovalCard, DecisionLine } from '@/components/kokonutui/ai-tool-approval';
 import { StatusDot } from '@/components/StatusDot';
+import { FromCadence } from '@/components/cadence/FromCadence';
 import { GOAL_STATUS, goalProgress, tokens, usd } from './goal-status';
 import { PlanBody } from './PlanView';
 
@@ -119,7 +120,8 @@ export function GoalThread({ goal, snap, onAdjust, onError }: GoalThreadProps) {
   const run = (a: ApprovalView, approve: boolean) => decide(a, approve).catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)));
 
   return (
-    <article aria-label={`Goal: ${goal.title}`} className="flex flex-col gap-3" data-goal-id={goal.id}>
+    <article aria-label={`Goal: ${goal.title}`} className="flex flex-col gap-3 outline-none" data-goal-id={goal.id} tabIndex={-1}>
+      <FromCadence cadenceId={goal.cadenceId} className="self-end" snap={snap} />
       <Bubble who="you">
         <p className="m-0 whitespace-pre-wrap text-[14px]">{goal.text}</p>
       </Bubble>

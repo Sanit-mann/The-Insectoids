@@ -349,6 +349,38 @@ const MIGRATIONS: readonly string[] = [
   ALTER TABLE run_outcomes ADD COLUMN reason TEXT;
   CREATE INDEX run_outcomes_at ON run_outcomes (at);
   `,
+  // v13: cadences (Cadence 05; Phase 3 A1). A cadence = when (JSON, see @insectoids/shared CadenceWhen) + what (a
+  // goal for the Queen) + limits, on one project shelf. `pending` = a run is owed and happens once it can (paused
+  // hive, another project open). Runs are the trigger log; deleting a cadence keeps its runs. Goals remember the
+  // cadence that started them.
+  `
+  CREATE TABLE cadences (
+    id             TEXT PRIMARY KEY,
+    shelf          TEXT NOT NULL,
+    name           TEXT NOT NULL,
+    when_json      TEXT NOT NULL,
+    goal           TEXT NOT NULL,
+    budget_tokens  INTEGER NOT NULL,
+    autonomy       TEXT NOT NULL,
+    enabled        INTEGER NOT NULL,
+    next_run_at    INTEGER,
+    pending        INTEGER NOT NULL DEFAULT 0,
+    created_at     INTEGER NOT NULL,
+    updated_at     INTEGER NOT NULL
+  );
+  CREATE INDEX cadences_shelf ON cadences (shelf);
+  CREATE TABLE cadence_runs (
+    id          TEXT PRIMARY KEY,
+    cadence_id  TEXT NOT NULL,
+    at          INTEGER NOT NULL,
+    reason      TEXT NOT NULL,
+    outcome     TEXT NOT NULL,
+    goal_id     TEXT,
+    message     TEXT NOT NULL
+  );
+  CREATE INDEX cadence_runs_cadence ON cadence_runs (cadence_id, at);
+  ALTER TABLE goals ADD COLUMN cadence_id TEXT;
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

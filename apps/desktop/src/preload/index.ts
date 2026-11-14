@@ -9,6 +9,7 @@ import {
   BrainStatusSchema,
   CasteViewSchema,
   BudgetsViewSchema,
+  CadenceRunViewSchema,
   EngineInstallResultSchema,
   LibraryImportResultSchema,
   LibraryItemDetailSchema,
@@ -69,6 +70,7 @@ const hive: HiveApi = {
   libraryItem: async (name) => LibraryItemDetailSchema.nullable().parse(await invoke(HIVE_IPC.libraryItem, name)),
   libraryImport: async () => LibraryImportResultSchema.parse(await invoke(HIVE_IPC.libraryImport)),
   budgets: async () => BudgetsViewSchema.parse(await invoke(HIVE_IPC.budgets)),
+  cadenceRuns: async (req) => CadenceRunViewSchema.array().parse(await invoke(HIVE_IPC.cadenceRuns, req)),
   engineInstall: async (engineId) => EngineInstallResultSchema.parse(await invoke(HIVE_IPC.engineInstall, engineId)),
   pickProject: async () => ProjectViewSchema.nullable().parse(await invoke(HIVE_IPC.pickProject)),
   onEvent: (listener) => {

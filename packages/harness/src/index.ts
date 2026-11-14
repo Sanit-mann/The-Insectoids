@@ -31,3 +31,4 @@ export * from './hive/managers';
 export * from './library/scan';
 export * from './library/user-library';
 export * from './library/proposals';
+export * from './cadence/schedule';

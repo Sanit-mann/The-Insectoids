@@ -61,6 +61,8 @@ export const CadenceInputSchema = z.object({
   enabled: z.boolean().default(true),
 });
 export type CadenceInput = z.input<typeof CadenceInputSchema>;
+/** A cadence after its defaults are filled in: what the cadence commands carry. */
+export type CadenceFields = z.output<typeof CadenceInputSchema>;
 
 /** Why a run was triggered. A2–A5 add 'wake', 'file', 'hive-event', 'webhook' and 'maintenance'. */
 export const CadenceRunReasonSchema = z.enum(['schedule', 'catch-up', 'manual']);

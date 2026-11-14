@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { promisify } from 'node:util';
-import { type Brain, type BoardCard, type Goal, ConflictError, STOP_WORDS, SecretError, brainHealth } from '@insectoids/brain';
+import { type Brain, type BoardCard, type Cadence, type Goal, ConflictError, STOP_WORDS, SecretError, brainHealth } from '@insectoids/brain';
 import {
   approvalFor,
   auditSummary,
@@ -58,6 +58,7 @@ import {
   type WatchdogThresholds,
 } from '@insectoids/harness';
 import { LibraryKeeper, scanOf } from './library-keeper';
+import { CadenceKeeper } from './cadence-keeper';
 import {
   type ActivityView,
   type AgentView,
@@ -72,6 +73,7 @@ import {
   type LibrarySearchResult,
   type BrainDashboardView,
   type BudgetsView,
+  type CadenceRunView,
   BudgetsViewSchema,
   CasteSchema,
   type BrainEditRequest,
@@ -209,6 +211,11 @@ export interface HiveManagerOptions {
    * the real CLI is never started.
    */
   e2eReadyEngines?: readonly EngineId[];
+  /**
+   * Cadences (Phase 3 A1). `intervalUnitMs`: milliseconds per interval minute (e2e: INSECTOIDS_E2E_CADENCE_SECONDS=1
+   * passes 1 000). `recheckMs`: the longest wait between scheduler checks (default 60 s).
+   */
+  cadence?: { intervalUnitMs?: number; recheckMs?: number };
   now?: () => number;
   /** Seed for the Treasurer's learning router (tests). Default: the clock. */
   seed?: number;
@@ -351,6 +358,7 @@ export class HiveManager {
   #codeMapTimer: NodeJS.Timeout | null = null;
   /** The managers' brain side (C2): settings, the review clock, and whether a review runs now. */
   #managers: ManagerSettings;
+  readonly #cadences: CadenceKeeper;
   #hiveReviewing = false;
 
   constructor(o: HiveManagerOptions) {
@@ -370,6 +378,18 @@ export class HiveManager {
       note: (kind, text) => this.#note(kind, text),
       now: () => this.#now(),
       keep: new Set(Object.values(ROLE_SKILLS).flat()),
+    });
+    this.#cadences = new CadenceKeeper({
+      brain: o.brain,
+      now: () => this.#now(),
+      shelf: () => this.#project?.view.shelf ?? null,
+      blocked: () => this.#cadenceBlocked(),
+      submit: (c) => this.#submitCadenceGoal(c),
+      note: (text) => this.#note('cadence', text),
+      changed: () => this.#changed('cadence'),
+      ...(o.cadence?.intervalUnitMs ? { intervalUnitMs: o.cadence.intervalUnitMs } : {}),
+      ...(o.cadence?.recheckMs ? { recheckMs: o.cadence.recheckMs } : {}),
+      ...(o.log ? { log: o.log } : {}),
     });
     // The Treasurer (Phase 2 A5): limits steer the router, outcomes teach it.
     this.#engines.setLimitState((id) => this.#limitState(id));
@@ -807,6 +827,7 @@ export class HiveManager {
 
   async dispose(): Promise<void> {
     this.#disposed = true;
+    this.#cadences.stop();
     if (this.#engineTimer) clearTimeout(this.#engineTimer);
     if (this.#tidyTimer) clearInterval(this.#tidyTimer);
     if (this.#outTimer) clearTimeout(this.#outTimer);
@@ -925,6 +946,21 @@ export class HiveManager {
       this.#maybeResumeAfterLimit();
       return;
     }
+    // Cadences (Phase 3 A1): they belong to the open project.
+    switch (cmd.type) {
+      case 'createCadence':
+        this.#cadences.create(cmd.cadence);
+        return;
+      case 'updateCadence':
+        this.#cadences.update(cmd.id, cmd.cadence);
+        return;
+      case 'setCadenceEnabled':
+        return this.#cadences.setEnabled(cmd.id, cmd.enabled);
+      case 'deleteCadence':
+        return this.#cadences.delete(cmd.id);
+      case 'runCadenceNow':
+        return this.#cadences.runNow(cmd.id);
+    }
     const p = this.#mustProject();
     switch (cmd.type) {
       case 'submitGoal': {
@@ -987,6 +1023,38 @@ export class HiveManager {
     this.#paused = false;
     this.#pausedReason = null;
     this.#project?.hive.resume();
+    // A cadence run owed while paused runs once now (05-D5).
+    queueMicrotask(() => void this.#cadences.check());
+  }
+
+  /** Why a cadence run can't start now, in words, or null. */
+  #cadenceBlocked(): string | null {
+    if (!this.#project) return 'No project is open.';
+    if (this.#paused) return `The hive is paused (${this.#pausedReason ?? 'paused'}).`;
+    if (this.#project.hive.paused) return 'The hive is paused.';
+    return null;
+  }
+
+  /** A cadence run becomes a goal through the same path as the user's own goals (05-D1); resolves to its id. */
+  async #submitCadenceGoal(c: Cadence): Promise<string> {
+    const p = this.#mustProject();
+    if (!this.#engines.defaultEngine()) {
+      const view = this.#engineView();
+      throw new Error(`${view.name} is not ready: ${view.message}`);
+    }
+    const before = new Set(this.#o.brain.goals.list().filter((g) => g.cadenceId === c.id).map((g) => g.id));
+    // The goal is created at once; planning carries on in the background, as with the submitGoal command.
+    this.#track(
+      p.hive.submitGoal(c.goal, { title: c.name, budgetTokens: c.budgetTokens, cadenceId: c.id, cadenceName: c.name, autonomy: c.autonomy }).catch((err: unknown) => {
+        if (this.#disposed) return;
+        this.#note('error', `The Queen could not plan the cadence run "${c.name}": ${err instanceof Error ? err.message : String(err)}`);
+        this.#changed('plan-failed');
+      }),
+    );
+    await Promise.resolve();
+    const goal = this.#o.brain.goals.list().find((g) => g.cadenceId === c.id && !before.has(g.id));
+    if (!goal) throw new Error('The goal was not created.');
+    return goal.id;
   }
 
   // ---- project ---------------------------------------------------------------------------------
@@ -1062,6 +1130,8 @@ export class HiveManager {
     for (const g of this.#goals()) await this.#refreshUndo(this.#project, g.id);
     this.#note('project', `Project: ${view.name} (${view.branch ?? 'detached HEAD'}).`);
     this.#codeMap?.setProject(root, view.shelf);
+    // Its cadences: anything due while it was closed (or the app was) catches up once (05-D5).
+    void this.#cadences.check();
   }
 
   async #closeProject(): Promise<void> {
@@ -1222,6 +1292,7 @@ export class HiveManager {
       incidents: this.#incidentViews(goalIds),
       managers: this.#managersView(goalIds),
       hive: { paused: this.#paused, pausedReason: this.#pausedReason, insectCap: this.#limits.insectCap, working: this.#working() },
+      cadences: this.#cadences.views(),
       goals: goals.map((g) => this.#goalView(g)),
       cards,
       approvals: [...waiting, ...decided].map(
@@ -1255,6 +1326,7 @@ export class HiveManager {
       spentTokens: g.spentTokens,
       spentUsd: g.spentUsd,
       merge: this.#project?.hive.mergeState(g.id) ?? 'not-merged',
+      cadenceId: g.cadenceId,
       createdAt: g.createdAt,
       updatedAt: g.updatedAt,
     };
@@ -1317,6 +1389,13 @@ export class HiveManager {
    * The Budgets screen (Phase 2 C4; 02-D7, D9; 04-D7). Goals are the open project's; days, roles, routing and
    * what the Treasurer learned span every project, because subscriptions are shared by all of them.
    */
+  /** A cadence's run history, newest first (Phase 3 A1). Runs of a deleted cadence stay readable. */
+  cadenceRuns(req: { cadenceId: string; limit?: number }): CadenceRunView[] {
+    const c = this.#o.brain.cadences.get(req.cadenceId);
+    if (c && c.shelf !== this.#project?.view.shelf) return [];
+    return this.#cadences.runs(req.cadenceId, req.limit ?? 50);
+  }
+
   budgets(): BudgetsView {
     const { brain } = this.#o;
     const now = this.#now();

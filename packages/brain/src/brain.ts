@@ -7,6 +7,7 @@ import { LibraryStore } from './library';
 import { ForemanLog, IncidentStore } from './managers';
 import { transaction } from './db';
 import { GoalStore } from './goals';
+import { CadenceStore } from './cadences';
 import { ConflictError, SecretError, TrustError } from './errors';
 import { importance, rankScore } from './importance';
 import { OutcomeStore } from './outcomes';
@@ -435,6 +436,14 @@ export class Brain {
   get outcomes(): OutcomeStore {
     this.#outcomes ??= new OutcomeStore(this.#db, this.#now);
     return this.#outcomes;
+  }
+
+  #cadences: CadenceStore | undefined;
+
+  /** Cadences and their run log (Cadence 05; Phase 3 A1). */
+  get cadences(): CadenceStore {
+    this.#cadences ??= new CadenceStore(this.#db, this.#now, this.#newId);
+    return this.#cadences;
   }
 
   get goals(): GoalStore {

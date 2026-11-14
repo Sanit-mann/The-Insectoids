@@ -60,6 +60,8 @@ export type HostMethod =
   | 'libraryItem'
   // Budgets screen (Phase 2 C4), read-only.
   | 'budgets'
+  // Cadence run history (Phase 3 A1), read-only.
+  | 'cadenceRuns'
   // Engine install (C4): main reads the engine's card (its official install command) from the host.
   // 'e2eEngineInstalled' works only when the host runs under INSECTOIDS_E2E=1.
   | 'engineCard'

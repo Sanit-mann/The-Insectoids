@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { Caste } from '@insectoids/shared';
+import type { CadenceAutonomy, Caste } from '@insectoids/shared';
 import { type ApprovalItem, type BoardCard, type Brain, type Goal, cardReadKey } from '@insectoids/brain';
 import type { Workspace } from '@insectoids/workspace';
 import type { ClaudeEvent } from '../claude/stream';
@@ -239,9 +239,29 @@ export class Hive {
   }
 
   /** The user gives the Queen a goal. She plans it; a big plan waits for approval (Hive 02-D11). */
-  async submitGoal(text: string, opts: { title?: string; budgetTokens?: number } = {}): Promise<Goal> {
+  async submitGoal(
+    text: string,
+    opts: {
+      title?: string;
+      budgetTokens?: number;
+      /** The cadence this run comes from (Phase 3 A1): recorded on the goal and named in the plan approval. */
+      cadenceId?: string;
+      cadenceName?: string;
+      /**
+       * How much a cadence run may do without the user (05-D6): 'ask' = every plan waits; 'small-plans' = the
+       * normal rule; 'run' = the plan starts on its own. The Careful preset (approveEveryPlan) still wins.
+       */
+      autonomy?: CadenceAutonomy;
+    } = {},
+  ): Promise<Goal> {
     const { brain } = this.#o;
-    const goal = brain.goals.create({ title: opts.title ?? clip(text.split('\n')[0]!, 60), text, shelf: this.#o.shelf, budgetTokens: opts.budgetTokens ?? this.#o.defaultBudgetTokens! });
+    const goal = brain.goals.create({
+      title: opts.title ?? clip(text.split('\n')[0]!, 60),
+      text,
+      shelf: this.#o.shelf,
+      budgetTokens: opts.budgetTokens ?? this.#o.defaultBudgetTokens!,
+      ...(opts.cadenceId ? { cadenceId: opts.cadenceId } : {}),
+    });
     brain.write({ kind: 'task', shelf: this.#o.shelf, title: `Goal: ${goal.title}`, body: text, source: goal.id }, { type: 'user' });
 
     const plan = await this.#plan(goal);
@@ -254,16 +274,25 @@ export class Hive {
     this.#emit({ type: 'goal-planned', goalId: goal.id, message: `${plan.waves.length} wave(s), ${plan.waves.flatMap((w) => w.cards).length} card(s): ${plan.headline}` });
 
     const big = plan.waves.length > 1;
-    if (big || this.#o.approveEveryPlan) {
+    const autonomy = opts.autonomy ?? 'small-plans';
+    // The stricter rule wins: the user's Careful preset, the cadence's own level, then the big-plan rule.
+    const why = this.#o.approveEveryPlan
+      ? 'Your safety preset (Careful) asks you to approve every plan.'
+      : autonomy === 'ask'
+        ? `This run of the cadence "${opts.cadenceName ?? 'unnamed'}" is set to ask before every plan.`
+        : autonomy === 'small-plans' && big
+          ? opts.cadenceId
+            ? `This run of the cadence "${opts.cadenceName ?? 'unnamed'}" planned more than one wave, so it counts as big (Hive D11).`
+            : 'The plan has more than one wave, so it counts as big (Hive D11).'
+          : null;
+    if (why) {
       brain.goals.setStatus(goal.id, 'awaiting_approval');
       this.#ask({
         goalId: goal.id,
         kind: 'plan',
         title: `Approve the plan for "${goal.title}"`,
         from: 'Queen',
-        whyItNeedsYou: big
-          ? 'The plan has more than one wave, so it counts as big (Hive D11).'
-          : 'Your safety preset (Careful) asks you to approve every plan.',
+        whyItNeedsYou: why,
         ifYouSayYes: 'Wave 1 is posted to the taskboard and insects start working in separate copies of your project.',
         payload: { action: 'start-goal', goalId: goal.id },
       });

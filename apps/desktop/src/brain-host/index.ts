@@ -119,6 +119,8 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
       ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_READY_ENGINES']
         ? { e2eReadyEngines: e2eReadyEngines(process.env['INSECTOIDS_E2E_READY_ENGINES']) }
         : {}),
+      // e2e only (Phase 3 A1): interval minutes count as seconds, so a 15-minute cadence fires after 15 s.
+      ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_CADENCE_SECONDS'] === '1' ? { cadence: { intervalUnitMs: 1_000, recheckMs: 2_000 } } : {}),
       // e2e only (B3): the demo Inspector fails C-01 once, so a lesson is learned.
       ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_INSPECTOR_FAILS_FIRST'] === '1' ? { demoInspectorFailsFirst: true } : {}),
     });
@@ -188,6 +190,9 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
       return hive.brainDashboard();
     case 'budgets':
       return hive.budgets();
+    case 'cadenceRuns':
+      // Validated in main against CadenceRunsRequestSchema.
+      return hive.cadenceRuns(params as Parameters<HiveManager['cadenceRuns']>[0]);
     case 'engineCard':
       return hive.engineCard(String((params as { id?: unknown })?.id ?? ''));
     case 'e2eEngineInstalled': {

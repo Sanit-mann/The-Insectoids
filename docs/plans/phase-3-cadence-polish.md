@@ -89,3 +89,34 @@ Three milestones, each ending in something the user can try.
 ## Progress
 
 - **Started 2026-11-14:** branch `phase-3-cadence-polish` created from `main` at v0.0.2. This plan was written from the roadmap and the Cadence spec.
+- **A1 Schedules: done (2026-11-14).** Built by two parallel workers (backend; Cadence screen and e2e) against a shared contract (`packages/shared/src/cadence-api.ts`). Unit tests: 950 pass, with no unhandled errors. e2e: 146 passed, 3 skipped, in two full runs. Lint and typecheck are clean. No real engine runs.
+  - **What a cadence is:** a name, when (every N minutes or hours, 15 minutes at least; or weekly on chosen days at a local time), a goal for the Queen, a token budget per run, and an autonomy level. Each run goes through `submitGoal` like the user's own goals, and the goal remembers its `cadenceId`.
+  - **Autonomy:**
+    - **Ask me:** every plan waits.
+    - **Small plans run:** the default; the hive's usual rule, where multi-wave plans wait.
+    - **Run on its own:** plans start without asking.
+
+    The user's Careful preset still wins, since the stricter rule applies. Merges, risky actions and new dependencies wait at every level. A waiting plan's approval names the cadence.
+  - **Schedule logic** (`packages/harness/src/cadence/`):
+    - **Local time:** weekly times use local wall-clock time, so a daylight-saving change never shifts them. A spring-forward time that doesn't exist runs at the first minute after the jump; a fall-back time that happens twice runs once.
+    - **Missed runs:** any number collapse into one catch-up.
+    - **Tests:** a fake clock in New York time, covering DST, month and year ends. Setting TZ at runtime works on Windows with Node 24.
+  - **Scheduler** (`apps/desktop/src/brain-host/cadence-keeper.ts`, in the Brain host so it runs with the window closed): one timer for the soonest run, plus a check every 60 s.
+    - **Previous run still going:** recorded as skipped (no pile-up).
+    - **Paused hive:** recorded as deferred; it runs once on resume.
+    - **Another project open:** that cadence waits and runs once as a catch-up when its project opens.
+    - **App was closed:** the missed time runs once as a catch-up at start.
+    - **Run now:** refuses with a reason while paused or busy.
+
+    Every run gets a Queen activity line and a trigger-log entry.
+  - **Storage:** Brain migration v13 adds the `cadences` and `cadence_runs` tables and `goals.cadence_id`. Deleting a cadence keeps its run history.
+  - **UI:** the Cadence screen (it was a placeholder):
+    - **List:** the schedule in words, the next run ("next: Mon 09:00, in 45 hours"), "Waiting to run", the autonomy, the budget, and the last run as icon plus word. Each row has an on/off switch, Run now, Runs and Edit.
+    - **Form:** problems shown in words; only valid commands are sent.
+    - **History panel:** links to the goal.
+    - **Hold to delete.**
+    - **"From cadence" marker:** on goals in Queen and Taskboard.
+    - **Pieces:** Kokonut UI `empty-state`, `hold-button` and `inline-alert`; shadcn `button`; the project's own `Switch`; hand-made radio groups and day toggles.
+  - **e2e:** `cadence.spec.ts` (8 tests), including a cadence that fires on its own. Under e2e only, `INSECTOIDS_E2E_CADENCE_SECONDS=1` counts interval minutes as seconds.
+  - **Fix after review:** the time field said "24-hour", but Windows shows the native time picker in 12-hour form, so the label is now "Time (your local time)".
+  - **Open question:** a goal that waits for merge approval still counts as running, so its cadence skips later runs until the user approves or cancels the merge. The skip line says so. This is safe (unmerged work doesn't pile up), but a weekly report would need its merge approved each week. Revisit with the digest (B1).

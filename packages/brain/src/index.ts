@@ -11,3 +11,4 @@ export { HEALTH_WEIGHTS, brainHealth } from './health';
 export * from './codemap';
 export * from './library';
 export * from './managers';
+export * from './cadences';

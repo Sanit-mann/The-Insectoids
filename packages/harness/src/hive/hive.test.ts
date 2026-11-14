@@ -166,6 +166,37 @@ describe('big plans and waves (Hive 02-D5, D11)', () => {
     expect(ask.whyItNeedsYou).toMatch(/Careful/);
     expect(engine.calls).toHaveLength(1);
   });
+});
+
+describe('cadence runs and their autonomy (Cadence 05-D6; Phase 3 A1)', () => {
+  const oneWave = () => new FakeEngine((req) => (req.role === 'queen' ? planReply([[card('C-01', 'coder')]]) : { text: 'STATUS: DONE' }));
+  const twoWaves = () => new FakeEngine((req) => (req.role === 'queen' ? planReply([[card('C-01', 'coder')], [card('C-02', 'coder')]]) : { text: 'STATUS: DONE' }));
+  const run = { cadenceId: 'CAD-1', cadenceName: 'Weekly report' };
+
+  it("'ask': even a one-wave plan waits, and the approval names the cadence; the goal remembers it", async () => {
+    const goal = await makeHive(oneWave()).submitGoal('Report', { ...run, autonomy: 'ask', budgetTokens: 12_345 });
+    expect(goal).toMatchObject({ status: 'awaiting_approval', cadenceId: 'CAD-1', budgetTokens: 12_345 });
+    expect(brain.approvals.list({ status: 'waiting' })[0]!.whyItNeedsYou).toMatch(/cadence "Weekly report" is set to ask before every plan/);
+  });
+
+  it("'small-plans': a one-wave plan starts, a bigger one waits naming the cadence", async () => {
+    expect((await makeHive(oneWave()).submitGoal('Report', { ...run, autonomy: 'small-plans' })).status).toBe('running');
+    const big = await makeHive(twoWaves()).submitGoal('Report', { ...run, autonomy: 'small-plans' });
+    expect(big.status).toBe('awaiting_approval');
+    expect(brain.approvals.list({ status: 'waiting' })[0]!.whyItNeedsYou).toMatch(/cadence "Weekly report" planned more than one wave/);
+  });
+
+  it("'run': even a big plan starts on its own", async () => {
+    const goal = await makeHive(twoWaves()).submitGoal('Report', { ...run, autonomy: 'run' });
+    expect(goal.status).toBe('running');
+    expect(brain.approvals.list({ status: 'waiting' }).filter((a) => a.kind === 'plan')).toHaveLength(0);
+  });
+
+  it("the Careful preset still wins over 'run'", async () => {
+    const goal = await makeHive(oneWave(), { approveEveryPlan: true }).submitGoal('Report', { ...run, autonomy: 'run' });
+    expect(goal.status).toBe('awaiting_approval');
+    expect(brain.approvals.list({ status: 'waiting' })[0]!.whyItNeedsYou).toMatch(/Careful/);
+  });
 
   it('configure() changes the limits for the next goal and dispatch', async () => {
     const engine = new FakeEngine((req) => (req.role === 'queen' ? planReply([[card('C-01', 'coder')]]) : { text: 'STATUS: DONE' }));

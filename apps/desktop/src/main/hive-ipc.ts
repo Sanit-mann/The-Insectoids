@@ -10,6 +10,8 @@ import {
   BrainSearchRequestSchema,
   CasteViewSchema,
   BudgetsViewSchema,
+  CadenceRunViewSchema,
+  CadenceRunsRequestSchema,
   EngineCardSchema,
   EngineIdSchema,
   EngineInstallResultSchema,
@@ -151,6 +153,9 @@ export function registerHiveIpc(d: Deps): void {
 
   // C4: the Budgets screen (read-only).
   handle(HIVE_IPC.budgets, async () => BudgetsViewSchema.parse(await host().call('budgets')));
+
+  // Phase 3 A1: a cadence's run history (read-only).
+  handle(HIVE_IPC.cadenceRuns, async (arg) => CadenceRunViewSchema.array().parse(await host().call('cadenceRuns', CadenceRunsRequestSchema.parse(arg))));
 
   // C4: one-click engine install with consent (04-D6). The command comes from the engine's adapter (via its
   // card in the host), never from the renderer. Under e2e no real installer ever runs.

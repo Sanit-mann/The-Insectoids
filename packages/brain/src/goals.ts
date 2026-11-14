@@ -23,6 +23,8 @@ export interface Goal {
   budgetTokens: number | null;
   spentTokens: number;
   spentUsd: number;
+  /** The cadence that started it (Phase 3 A1), or null when the user gave it. */
+  cadenceId: string | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -38,6 +40,7 @@ interface GoalRow {
   budget_tokens: number | null;
   spent_tokens: number;
   spent_usd: number;
+  cadence_id: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -53,6 +56,7 @@ const toGoal = (r: GoalRow): Goal => ({
   budgetTokens: r.budget_tokens,
   spentTokens: r.spent_tokens,
   spentUsd: r.spent_usd,
+  cadenceId: r.cadence_id ?? null,
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -64,12 +68,12 @@ export class GoalStore {
     private readonly newId: () => string,
   ) {}
 
-  create(input: { id?: string; title: string; text: string; shelf: string; budgetTokens?: number }): Goal {
+  create(input: { id?: string; title: string; text: string; shelf: string; budgetTokens?: number; cadenceId?: string }): Goal {
     const id = input.id ?? `G-${this.newId()}`;
     const at = this.now();
     this.db
-      .prepare(`INSERT INTO goals (id, title, text, shelf, status, budget_tokens, created_at, updated_at) VALUES (?, ?, ?, ?, 'planning', ?, ?, ?)`)
-      .run(id, input.title, input.text, input.shelf, input.budgetTokens ?? null, at, at);
+      .prepare(`INSERT INTO goals (id, title, text, shelf, status, budget_tokens, cadence_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'planning', ?, ?, ?, ?)`)
+      .run(id, input.title, input.text, input.shelf, input.budgetTokens ?? null, input.cadenceId ?? null, at, at);
     return this.#must(id);
   }
 
