@@ -122,3 +122,42 @@ describe('the user library (learned and imported items)', () => {
     expect(slug('***')).toBe('');
   });
 });
+
+describe('repeated work in real briefs (C6 demo regression)', () => {
+  // The three doc cards the real Phase 2 demo produced (2026-11-14). Their briefs describe each function in detail,
+  // so a plain Jaccard of the whole text was 0.38 and no proposal fired; the titles show it's the same work.
+  const real = [
+    {
+      title: 'Write usage example for wordCount',
+      brief:
+        "Create docs/examples/wordcount.md: a short usage example for wordCount(text) from src/index.js (it counts runs of non-space characters). Audience: developers using tiny-text. Content: a one-line description, a fenced js block with `import { wordCount } from '../../src/index.js';` (or the package name 'tiny-text'), and 2 calls with their results as comments. These must match the real behavior: wordCount('one two  three') // 3 and wordCount('   ') // 0. Under 30 lines. Do not edit any other file.",
+    },
+    {
+      title: 'Write usage example for capitalize',
+      brief:
+        "Create docs/examples/capitalize.md: a short usage example for capitalize(text) from src/index.js (it upper-cases the first letter and leaves the rest as it is). Content: a one-line description and a fenced js block with an import and 2-3 calls with results as comments, e.g. capitalize('hello world') // 'Hello world' and capitalize('hELLO') // 'HELLO' (this shows the rest is unchanged). Check the results against the real function (`node -e` with a dynamic import is fine). Under 30 lines. Do not edit any other file.",
+    },
+    {
+      title: 'Write usage example for truncate',
+      brief:
+        "Create docs/examples/truncate.md: a short usage example for truncate(text, n) from src/index.js. It returns the text unchanged when it has at most n characters, otherwise the first n - 1 characters followed by '…', so the result is exactly n characters long. Content: a one-line description and a fenced js block with an import and calls with results as comments, e.g. truncate('hello', 10) // 'hello' and truncate('hello world', 6) // 'hello…'. Mention that the ellipsis is the single character … and counts toward n. Check the results against the real function. Under 30 lines. Do not edit any other file.",
+    },
+  ];
+  const card = (c: { title: string; brief: string }, i: number, caste = 'documenter'): DoneCard => ({ id: `C-${i}`, caste, title: c.title, brief: c.brief, acceptance: [], result: null, at: i });
+
+  it('the three usage-example cards are one cluster of repeated work', () => {
+    const work = findRepeatedWork(real.map((c, i) => card(c, i)));
+    expect(work).toHaveLength(1);
+    expect(work[0]!.cards).toHaveLength(3);
+    expect(work[0]!.words).toEqual(expect.arrayContaining(['usage', 'example', 'docs']));
+  });
+
+  it('similar titles alone are not enough: unrelated work with a similar title stays apart', () => {
+    const other = [
+      { title: 'Write usage example for wordCount', brief: real[0]!.brief },
+      { title: 'Write usage report for billing', brief: 'Query the invoices table and summarise monthly totals per customer in a CSV for finance.' },
+      { title: 'Write usage report for storage', brief: 'Measure disk use per tenant from the metrics API and chart the weekly growth for operations.' },
+    ];
+    expect(findRepeatedWork(other.map((c, i) => card(c, i)))).toHaveLength(0);
+  });
+});

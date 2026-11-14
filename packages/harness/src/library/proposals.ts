@@ -52,6 +52,31 @@ const jaccard = (a: ReadonlySet<string>, b: ReadonlySet<string>): number => {
   return union ? shared / union : 0;
 };
 
+/** Shared words over the smaller set: how much of the shorter card the other one repeats. */
+const overlap = (a: ReadonlySet<string>, b: ReadonlySet<string>): number => {
+  let shared = 0;
+  for (const w of a) if (b.has(w)) shared++;
+  const smaller = Math.min(a.size, b.size);
+  return smaller ? shared / smaller : 0;
+};
+
+const titleWords = (title: string): Set<string> => workWords({ title, brief: '' });
+
+/**
+ * Two cards are the same kind of work when their text is similar (Jaccard), or when their titles are similar and
+ * most of the shorter card's words appear in the other. Real briefs describe each case in detail ("Write usage
+ * example for wordCount" vs "… for truncate"), which keeps a plain Jaccard of the whole text low (C6 demo: 0.38)
+ * even though the work is plainly the same.
+ */
+export function sameWork(
+  a: { words: ReadonlySet<string>; title: ReadonlySet<string> },
+  b: { words: ReadonlySet<string>; title: ReadonlySet<string> },
+  minSim = MIN_SIMILARITY,
+): boolean {
+  if (jaccard(a.words, b.words) >= minSim) return true;
+  return a.title.size >= 2 && b.title.size >= 2 && jaccard(a.title, b.title) >= minSim && overlap(a.words, b.words) >= minSim;
+}
+
 /**
  * Groups of repeated successful work, oldest card first. Each card joins the first cluster (same caste)
  * whose first card it resembles enough; a cluster counts once it has `minCards` cards that still share at
@@ -60,16 +85,17 @@ const jaccard = (a: ReadonlySet<string>, b: ReadonlySet<string>): number => {
 export function findRepeatedWork(cards: readonly DoneCard[], o: { minCards?: number; minSimilarity?: number; skip?: ReadonlySet<string> } = {}): RepeatedWork[] {
   const minCards = o.minCards ?? MIN_REPEATS;
   const minSim = o.minSimilarity ?? MIN_SIMILARITY;
-  const groups: Array<{ caste: string; seed: Set<string>; shared: Set<string>; cards: DoneCard[] }> = [];
+  const groups: Array<{ caste: string; seed: Set<string>; seedTitle: Set<string>; shared: Set<string>; cards: DoneCard[] }> = [];
   for (const card of [...cards].sort((a, b) => a.at - b.at || a.id.localeCompare(b.id))) {
     if (o.skip?.has(card.id)) continue;
     const words = workWords(card);
     if (words.size < 2) continue;
-    const g = groups.find((x) => x.caste === card.caste && jaccard(x.seed, words) >= minSim);
+    const title = titleWords(card.title);
+    const g = groups.find((x) => x.caste === card.caste && sameWork({ words: x.seed, title: x.seedTitle }, { words, title }, minSim));
     if (g) {
       g.cards.push(card);
       g.shared = new Set([...g.shared].filter((w) => words.has(w)));
-    } else groups.push({ caste: card.caste, seed: words, shared: new Set(words), cards: [card] });
+    } else groups.push({ caste: card.caste, seed: words, seedTitle: title, shared: new Set(words), cards: [card] });
   }
   return groups
     .filter((g) => g.cards.length >= minCards && g.shared.size >= 2)
