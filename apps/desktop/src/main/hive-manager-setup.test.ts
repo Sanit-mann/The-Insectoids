@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -117,7 +117,8 @@ describe('e2e ready engines (C5, "first run with two engines")', () => {
       const v = HiveSnapshotSchema.parse(m.snapshot());
       return v.cards.length === 1 && v.cards[0]!.status === 'done' ? v : null;
     });
-    expect(s.project?.path).toBe(other);
+    // The app stores the real path (CI temp folders have other names for it: RUNNER~1 on Windows, /private/var on macOS).
+    expect(realpathSync.native(s.project!.path)).toBe(realpathSync.native(other));
     // A pause the user chose still carries over to the next project.
     await m.command({ type: 'pause', reason: 'Lunch.' });
     expect(await m.command({ type: 'setProject', path: repo })).toEqual({ ok: true });

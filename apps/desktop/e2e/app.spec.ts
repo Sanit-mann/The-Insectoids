@@ -60,7 +60,7 @@ test('the Brain runs in its own process and reports ready', async () => {
 });
 
 test('the renderer reaches the main process through the validated bridge', async () => {
-  await expect(win.getByText(/^v0\.0\.1 · Electron \d+\./)).toBeVisible();
+  await expect(win.getByText(/^v\d+\.\d+\.\d+ · Electron \d+\./)).toBeVisible();
 });
 
 test('the renderer has no Node access', async () => {

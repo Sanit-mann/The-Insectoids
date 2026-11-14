@@ -23,7 +23,7 @@ test('OpenCode is listed as a real engine with its install, provider and privacy
     name: 'OpenCode',
     availableIn: null,
     reportsCost: true,
-    install: { command: 'npm install -g @opencode/cli@2.2.1' },
+    install: { command: 'npm install -g @opencode/cli@2.2.6' },
   });
   expect(card?.state).not.toBe('unsupported');
   expect(card?.guard === 'policy-and-tools' || card?.guard === 'read-only').toBe(true);
