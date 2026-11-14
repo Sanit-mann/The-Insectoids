@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { holdUntilDone } from './support/hold';
-import { type LaunchedApp, launchApp } from './support/launch';
+import { type LaunchedApp, NO_KEY_STORE, launchApp, noKeyStoreOnLinux } from './support/launch';
 
 /**
  * Phase 2 services (Connections 04-D5; Phase 2 C4): Notion, Linear and Slack built in and off by default;
@@ -40,6 +40,7 @@ test('Notion, Linear and Slack are built in, off by default, and say changes nee
 
 test('the Jira template fills the form, and a Jira service can be saved with a key and removed', async () => {
   const { win } = launched;
+  test.skip(await noKeyStoreOnLinux(win), NO_KEY_STORE);
 
   // A fake key in the Vault, written as email:token.
   await win.getByRole('tab', { name: /^Vault/ }).click();

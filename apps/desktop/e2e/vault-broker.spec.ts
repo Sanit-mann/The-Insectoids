@@ -1,7 +1,7 @@
 import { type IncomingHttpHeaders, type Server, createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { expect, test } from '@playwright/test';
-import { type AppWindow, type LaunchedApp, launchApp } from './support/launch';
+import { type AppWindow, type LaunchedApp, NO_KEY_STORE, launchApp, noKeyStoreOnLinux } from './support/launch';
 
 /**
  * The Vault and the secret broker through the real app (Phase 2 A3), with a fake GitHub on 127.0.0.1
@@ -33,6 +33,7 @@ test.afterAll(async () => {
 
 test('a key goes into the Vault once, is used by the broker, and never comes back', async () => {
   const { win } = launched;
+  test.skip(await noKeyStoreOnLinux(win), NO_KEY_STORE);
   expect(await win.evaluate(() => (globalThis as unknown as AppWindow).insectoids.vault.status())).toMatchObject({ available: true });
 
   const added = await win.evaluate((value) => (globalThis as unknown as AppWindow).insectoids.vault.add({ label: 'GitHub token', value }), KEY);

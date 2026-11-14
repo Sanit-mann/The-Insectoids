@@ -87,3 +87,13 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<LaunchedApp> 
 
 /** Run git in the e2e repo (e.g. to check what reached main). */
 export const repoGit = git;
+
+/**
+ * True only on Linux when the Vault has no OS key store (a bare CI runner). The Vault rightly refuses to keep keys
+ * it can't encrypt, so tests that store a key skip there; the Vault's unit tests cover it with a stand-in key store.
+ */
+export async function noKeyStoreOnLinux(win: Page): Promise<boolean> {
+  if (process.platform !== 'linux') return false;
+  return !(await win.evaluate(() => (globalThis as unknown as AppWindow).insectoids.vault.status())).available;
+}
+export const NO_KEY_STORE = 'This Linux machine has no OS key store, so the Vault (rightly) stores no keys.';

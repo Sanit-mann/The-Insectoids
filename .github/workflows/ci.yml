@@ -39,14 +39,7 @@ jobs:
 
       - name: End-to-end tests (Linux, virtual display)
         if: runner.os == 'Linux'
-        # The Vault only stores keys the OS can encrypt, and a bare runner has no key store, so start an unlocked
-        # GNOME keyring (a throwaway, CI-only password) on a private session bus for the tests.
-        env:
-          XDG_CURRENT_DESKTOP: GNOME
-        run: |
-          sudo apt-get update -q
-          sudo apt-get install -y -q gnome-keyring dbus-x11
-          dbus-run-session -- bash -c 'echo -n "ci-only" | gnome-keyring-daemon --unlock --components=secrets > /dev/null && xvfb-run --auto-servernum pnpm test:e2e'
+        run: xvfb-run --auto-servernum pnpm test:e2e
 
       - name: End-to-end tests
         if: runner.os != 'Linux'

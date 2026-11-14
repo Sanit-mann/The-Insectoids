@@ -1,5 +1,5 @@
 import { type Locator, type Page, expect, test } from '@playwright/test';
-import { type LaunchedApp, launchApp } from './support/launch';
+import { type LaunchedApp, NO_KEY_STORE, launchApp, noKeyStoreOnLinux } from './support/launch';
 import { holdUntilDone } from './support/hold';
 
 /**
@@ -38,6 +38,7 @@ const pageNeverShowsKey = async (win: Page): Promise<void> => {
 
 test('the Vault is available and adding a key never shows it again', async () => {
   const { win } = launched;
+  test.skip(await noKeyStoreOnLinux(win), NO_KEY_STORE);
   await tab(win, 'Vault').click();
   await expect(win.getByTestId('vault-tab')).toBeVisible();
   await expect(win.getByText("Keys can't be saved on this computer")).toHaveCount(0);
@@ -59,6 +60,7 @@ test('the Vault is available and adding a key never shows it again', async () =>
 
 test('a key links to GitHub, the service switches on, and the key cannot be removed while in use', async () => {
   const { win } = launched;
+  test.skip(await noKeyStoreOnLinux(win), NO_KEY_STORE);
   await tab(win, 'Services').click();
   const github = win.getByTestId('service-github');
   await expect(github).toBeVisible({ timeout: 10_000 });

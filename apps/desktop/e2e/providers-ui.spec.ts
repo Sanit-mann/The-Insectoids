@@ -1,5 +1,5 @@
 import { type Locator, type Page, expect, test } from '@playwright/test';
-import { type LaunchedApp, launchApp } from './support/launch';
+import { type LaunchedApp, NO_KEY_STORE, launchApp, noKeyStoreOnLinux } from './support/launch';
 import { holdUntilDone } from './support/hold';
 
 /**
@@ -103,6 +103,7 @@ test('an Ollama provider is local and has no key field; tiers, switch and remova
 
 test('an OpenRouter provider uses a Vault key, and the key never appears on the page', async () => {
   const { win } = launched;
+  test.skip(await noKeyStoreOnLinux(win), NO_KEY_STORE);
   // A fake key in the Vault first.
   await tab(win, 'Vault').click();
   const vault = win.getByTestId('vault-add');
