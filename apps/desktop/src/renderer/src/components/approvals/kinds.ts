@@ -9,7 +9,7 @@ export const KIND_META: Record<ApprovalKind, { label: string; plural: string; ic
   merge: { label: 'Merge', plural: 'Merges', icon: GitMerge },
   decision: { label: 'Decision', plural: 'Decisions', icon: Lightbulb },
   fact: { label: 'Fact', plural: 'Facts', icon: FileCheck2 },
-  schedule: { label: 'Schedule', plural: 'Schedules', icon: CalendarClock },
+  schedule: { label: 'Cadence proposal', plural: 'Cadence proposals', icon: CalendarClock },
   skill_proposal: { label: 'New skill from repeated work', plural: 'New skills', icon: Sparkles },
   skill_import: { label: 'Imported skill or agent', plural: 'Imports', icon: Download },
   skill_retirement: { label: 'Retire a skill', plural: 'Retirements', icon: Archive },
@@ -21,8 +21,8 @@ export const LIBRARY_KINDS: ReadonlySet<ApprovalKind> = new Set<ApprovalKind>(['
 
 export const KIND_ORDER: ApprovalKind[] = ['plan', 'risky_action', 'merge', 'decision', 'fact', 'schedule', 'skill_proposal', 'skill_import', 'skill_retirement', 'webhook'];
 
-/** Approvals from a webhook cadence (A4): they get an "Open Cadence" link. */
-export const CADENCE_KINDS: ReadonlySet<ApprovalKind> = new Set<ApprovalKind>(['webhook']);
+/** Approvals about cadences: webhook calls (A4) and cadence proposals (A5). They get an "Open Cadence" link. */
+export const CADENCE_KINDS: ReadonlySet<ApprovalKind> = new Set<ApprovalKind>(['webhook', 'schedule']);
 
 /** Approve or deny; throws with the hive's message so the caller can show it. */
 export async function decide(a: Pick<ApprovalView, 'id'>, approve: boolean): Promise<void> {

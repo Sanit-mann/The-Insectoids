@@ -327,6 +327,24 @@ export class Taskboard {
     });
   }
 
+  /**
+   * Stale task cleanup (Cadence 05-D7; Phase 3 A5): a card left open after its goal ended is closed as `failed`
+   * (the nearest end state; never deleted), not escalated, with the note in its history. Done and failed cards
+   * are left alone. Returns whether it closed the card.
+   */
+  close(id: string, by: string, note: string): boolean {
+    return transaction(this.db, () => {
+      const cur = this.#must(id);
+      if (cur.status === 'done' || cur.status === 'failed') return false;
+      const at = this.now();
+      this.db
+        .prepare(`UPDATE tasks SET status = 'failed', escalated = 0, held_reason = NULL, claimed_by = NULL, lease_expires_at = NULL, updated_at = ? WHERE id = ?`)
+        .run(at, id);
+      this.#event(id, cur.status, 'failed', by, note, at);
+      return true;
+    });
+  }
+
   /** How many times this card's lease ran out (the Foreman wakes on repeats). */
   leaseExpiries(id: string): number {
     const row = this.db.prepare(`SELECT COUNT(*) AS n FROM task_events WHERE task_id = ? AND note = 'lease expired'`).get(id) as { n: number };

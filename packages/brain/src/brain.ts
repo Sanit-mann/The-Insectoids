@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { statSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
 import type { RecordKind, Trust } from '@insectoids/shared';
 import { ApprovalStore } from './approvals';
@@ -981,6 +982,46 @@ export class Brain {
       }
     }
     return pairs;
+  }
+
+  /**
+   * Fold agent-only near-duplicates together (01-E5; Cadence 05-D7, Phase 3 A5 `consolidate`). For each pair
+   * `duplicatePairs` finds that no user wrote, edited or confirmed, the one read less (else the older) is archived
+   * "merged into <kept id>" and linked `merged_into`, like a fade: nothing is deleted and the user can bring it
+   * back. Records involving the user are never touched; those pairs wait for the user. Returns what was folded.
+   */
+  foldDuplicates(shelf: string): Array<{ id: string; title: string; into: string }> {
+    const pairs = this.duplicatePairs(shelf).filter((p) => !p.userInvolved);
+    if (!pairs.length) return [];
+    const editedByUser = this.#db.prepare("SELECT 1 FROM record_versions WHERE record_id = ? AND changed_by = 'user' LIMIT 1");
+    const folded: Array<{ id: string; title: string; into: string }> = [];
+    const gone = new Set<string>();
+    const actor = { type: 'agent', id: 'brain-tidy' } as const;
+    this.#tx(() => {
+      for (const { a, b } of pairs) {
+        if (gone.has(a.id) || gone.has(b.id)) continue;
+        if (editedByUser.get(a.id) || editedByUser.get(b.id)) continue;
+        const keepA = a.reads !== b.reads ? a.reads > b.reads : a.updatedAt !== b.updatedAt ? a.updatedAt > b.updatedAt : a.id < b.id;
+        const [keep, fold] = keepA ? [a, b] : [b, a];
+        const cur = this.#mustGet(fold.id);
+        if (cur.archived) continue;
+        this.#archiveRow(cur, actor, `merged into ${keep.id}`);
+        this.#db.prepare('INSERT OR IGNORE INTO links (from_id, to_id, rel, created_at) VALUES (?, ?, ?, ?)').run(fold.id, keep.id, 'merged_into', this.#now());
+        gone.add(fold.id);
+        folded.push({ id: fold.id, title: fold.title, into: keep.id });
+      }
+    });
+    return folded;
+  }
+
+  /**
+   * A consistent copy of the whole Brain in a new file (Memory 01-D8; Phase 3 A5 `backup`), with SQLite
+   * `VACUUM INTO`: safe while the Brain is in use, and the copy opens as a Brain of its own. The file must not
+   * exist yet. Returns its size in bytes.
+   */
+  backupTo(file: string): number {
+    this.#db.prepare('VACUUM INTO ?').run(file);
+    return statSync(file).size;
   }
 
   /** Counts for the health score (01-E12, B3): current records on a project shelf and global. */

@@ -179,3 +179,22 @@ Three milestones, each ending in something the user can try.
     - The rate limit is checked before the secret, so another program on this computer could use up a webhook's 30 calls a minute. A local program could do worse anyway.
     - A call while its project isn't open is logged every time (deferred, 409); main's rate limit is the only cap.
     - Webhook approvals have no goal, so they show whichever project is open, like the library's.
+- **A5 Maintenance and proposals: done (2026-11-14).** I wrote the contract (the `maintenance` when-shape with its own schedule, `MAINTENANCE_JOBS`, outcome `done`, `CadenceView.builtIn`, `backup-api.ts`, `CadenceProposalPayloadSchema`), then five parallel workers built the Brain host, backups (main and Settings), cadence proposals, the Cadence screen and the e2e spec. Unit tests: 1051 pass, 4 skipped. e2e: 166 passed, 3 skipped; the new maintenance spec passes in full. Lint and typecheck are clean.
+  - **Built-in jobs** (05-D7), on by default, on the Global shelf with fixed ids `maint-<job>`, so they run whichever project is open, or none, and while the hive is paused. They are code, not goals: no Queen plan, no tokens. Each logs `done` with what it did, or `failed`.
+    - **Brain health check** (every 6 hours): the health score and near-duplicate count.
+    - **Daily backup** (03:00): `VACUUM INTO` a new file in the backups folder; the newest 7 matching files stay, nothing else in the folder is touched.
+    - **Tidy the Brain** (daily): unused agent notes fade (only while idle on a schedule) and agent-only near-duplicates fold together, archived as "merged into" and reversible. Anything the user wrote, edited or confirmed is never touched.
+    - **Stale task cleanup** (daily): cards left open over a day after their goal was done or cancelled are closed with a note. Cards of stuck goals stay, since those can be re-planned. Nothing is deleted.
+    - **Skill review** (weekly): proposes retiring skills that keep failing or go unused.
+    - **Rules:** users can switch a job off, run it now or change its schedule; they can't create, rename or remove one. Deleting one switches it off, with a note.
+    - **The Librarian's 6-hour timer** now only wakes the LLM review; scoring, fading and retirements come from the jobs, so switching a job off really stops it. The start-up score stays, and Tidy now / Check now still work on demand.
+  - **Backups** (01-D8): local only. The folder is a setting in main (default `<userData>/backups`), sent to the host at every start and on change; a folder inside the Brain folder is refused.
+    - **Restore never overwrites:** the chosen copy goes to a new `<userData>/brain-restored-<stamp>/brain.db` and the Brain switches there through the Brain-folder path. The old Brain stays, so a restore can be undone by switching back. Refused while a goal is running.
+    - **Settings → Backups:** folder, status in words, Back up now, the list with Restore (with a confirm).
+  - **Cadence proposals** (05-D3): after a user goal, if much the same request was asked on 3+ occasions in that project in the last 90 days (asks within an hour count once), the Queen proposes a cadence in Approvals (kind `schedule`, now labelled "Cadence proposal"). The schedule is guessed from the gaps (daily, weekly at the usual time, or every N days). Yes creates it in that project (refused in words if it isn't open); no means it is never proposed again. Cadence-started goals never count, and a request that already has a cadence isn't proposed.
+  - **UI:** a Housekeeping section on the Cadence screen (shown even with no project open): each job's sentence, schedule, next and last run, a switch, Run now, Runs and Change schedule, and the note that jobs cost no tokens. The user's own list and form never show maintenance.
+  - **e2e:** `maintenance.spec.ts`: five jobs from the first start; delete switches off; no user-made jobs; schedule kept; backups keep 7; restore brings back the older Brain in a new folder and switching back undoes it; three similar goals make one proposal, a yes makes the cadence, a fourth ask makes no second one; the Housekeeping screen runs a backup and shows "Done". Existing cadence specs now ignore built-in jobs.
+  - **Notes:**
+    - Backup file names go down to the second, so two backups in the same second are refused, not overwritten.
+    - A scheduled backup waits up to 30 s at start for the host to learn the folder.
+    - Proposal approvals have no goal, so cancelling a goal doesn't withdraw a proposal.

@@ -1,5 +1,5 @@
 import type { CadenceRunReason } from '@insectoids/brain';
-import type { CadenceWhen } from '@insectoids/shared';
+import { type CadenceWhen, scheduleOf } from '@insectoids/shared';
 
 /**
  * When a cadence is due (Cadence 05-D2, D5; Phase 3 A1). Pure functions over epoch milliseconds; weekly times are
@@ -51,8 +51,8 @@ export function localInstant(year: number, month: number, day: number, h: number
  *   "miss" a run and never catch up.
  */
 export function nextRunAt(when: CadenceWhen, after: number, o: ScheduleOptions = {}): number | null {
-  if (when.type === 'file' || when.type === 'event' || when.type === 'webhook') return null;
-  return scheduledNext(when, after, o);
+  const s = scheduleOf(when);
+  return s ? scheduledNext(s, after, o) : null;
 }
 
 type Scheduled = Extract<CadenceWhen, { type: 'interval' | 'weekly' }>;
@@ -83,8 +83,10 @@ export interface DueCheck {
  * Is a cadence due at `now`? Any number of missed times collapse into one run ("catch up once", 05-D5); the
  * next time keeps the schedule's own rhythm (an interval stays on its phase; weekly goes to the next slot).
  */
-export function dueCheck(when: CadenceWhen, scheduledAt: number, now: number, o: ScheduleOptions = {}): DueCheck {
-  if (when.type === 'file' || when.type === 'event' || when.type === 'webhook') throw new Error('File, event and webhook cadences have no schedule.');
+export function dueCheck(whenIn: CadenceWhen, scheduledAt: number, now: number, o: ScheduleOptions = {}): DueCheck {
+  // A maintenance job (A5) runs on its inner schedule.
+  const when = scheduleOf(whenIn);
+  if (!when) throw new Error('File, event and webhook cadences have no schedule.');
   if (scheduledAt > now) return { due: false, occurrences: 0, nextRunAt: scheduledAt };
   if (when.type === 'interval') {
     const step = when.everyMinutes * (o.intervalUnitMs ?? MINUTE_MS);
@@ -122,6 +124,8 @@ const andList = (items: readonly string[]): string => (items.length <= 1 ? (item
  * was removed).
  */
 export function whenText(when: CadenceWhen, nameOf: (cadenceId: string) => string | null = () => null): string {
+  // A maintenance job (A5) reads as its schedule ("Every 6 hours"); its name says which job it is.
+  if (when.type === 'maintenance') return whenText(when.schedule, nameOf);
   if (when.type === 'webhook') {
     const trust = when.trust === 'strict' ? 'every call waits for you' : when.trust === 'allow-all' ? 'calls run on their own' : 'runs wait for you, notes are kept';
     return `When its webhook is called (${trust})`;

@@ -4,6 +4,7 @@ import type { SetupApi } from './setup-api';
 import type { ProvidersApi } from './providers-api';
 import type { VaultApi } from './vault-api';
 import type { WebhookApi } from './webhook-api';
+import type { BackupApi } from './backup-api';
 
 /**
  * Typed contract between the renderer and the main process.
@@ -41,4 +42,6 @@ export interface InsectoidsApi {
   providers: ProvidersApi;
   /** Webhook URLs and secrets (Phase 3 A4). */
   webhooks: WebhookApi;
+  /** Brain backups and restore (Phase 3 A5). */
+  backups: BackupApi;
 }

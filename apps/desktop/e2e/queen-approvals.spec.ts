@@ -81,7 +81,7 @@ test.describe('with a project', () => {
     await win.keyboard.press('ArrowDown');
     await expect(items.nth(1)).toBeFocused();
     await expect(items.nth(1)).toHaveAttribute('aria-current', 'true');
-    await win.getByRole('button', { name: /^Schedules/ }).click();
+    await win.getByRole('button', { name: /^Cadence proposals/ }).click();
     await expect(win.getByText('Nothing is waiting for you.')).toBeVisible();
   });
 });

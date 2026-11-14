@@ -9,9 +9,9 @@
 import { execFile } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, join } from 'node:path';
+import { basename, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
-import { type Brain, type BoardCard, type Cadence, type Goal, ConflictError, STOP_WORDS, SecretError, brainHealth } from '@insectoids/brain';
+import { type Brain, type BoardCard, type Cadence, type Goal, ConflictError, STOP_WORDS, SecretError, brainHealth, writeBackup } from '@insectoids/brain';
 import {
   approvalFor,
   auditSummary,
@@ -58,7 +58,8 @@ import {
   type WatchdogThresholds,
 } from '@insectoids/harness';
 import { LibraryKeeper, scanOf } from './library-keeper';
-import { CadenceKeeper } from './cadence-keeper';
+import { CadenceKeeper, isBuiltIn } from './cadence-keeper';
+import { CadenceProposer } from './cadence-proposals';
 import {
   type ActivityView,
   type AgentView,
@@ -99,7 +100,10 @@ import {
   type EngineCard,
   type EngineUsage,
   type IncidentView,
+  MAINTENANCE_SHELF,
+  type MaintenanceJob,
   type ManagersView,
+  maintenanceCadenceId,
   type WebhookCall,
   WebhookCallSchema,
   type WebhookReply,
@@ -220,6 +224,8 @@ export interface HiveManagerOptions {
    */
   /** Cadence clock (tests and the e2e hook): interval "minute", safety re-check, and how long file changes settle (A3). */
   cadence?: { intervalUnitMs?: number; recheckMs?: number; settleMs?: number };
+  /** Cadence proposals (Cadence 05-D3; Phase 3 A5): asks closer together than `retryWindowMs` count as one (e2e passes 0). */
+  cadenceProposals?: { retryWindowMs?: number };
   now?: () => number;
   /** Seed for the Treasurer's learning router (tests). Default: the clock. */
   seed?: number;
@@ -261,6 +267,8 @@ const DEFAULT_MANAGERS: ManagerSettings = { scoutBeforePlanning: true, reviewEve
 
 const DAY = 86_400_000;
 const LIBRARIAN = 'Librarian';
+/** How long a scheduled backup waits at start for main to say where backups go (Phase 3 A5). */
+const BACKUP_DIR_WAIT_MS = 30_000;
 
 interface ProjectState {
   view: ProjectView;
@@ -284,6 +292,10 @@ export function shelfFor(path: string): string {
     .replace(/[-.]+$/, '');
   return !slug || slug === 'global' ? `project-${slug || 'x'}`.slice(0, 64) : slug;
 }
+
+/** A file size in words: "2.1 MB", "640 KB" (Phase 3 A5 backups). */
+const sizeText = (bytes: number): string =>
+  bytes >= 1024 * 1024 ? `${(bytes / (1024 * 1024)).toFixed(1)} MB` : bytes >= 1024 ? `${Math.round(bytes / 1024)} KB` : `${bytes} bytes`;
 
 const short = (s: string, n = LINE_MAX): string => {
   const one = s.replace(/\s+/g, ' ').trim();
@@ -346,7 +358,7 @@ export class HiveManager {
   #limitHits: Partial<Record<EngineId, number>>;
   /** The Librarian (B3): its state, the last audit's health, and the review clock. */
   #libState: LibrarianView['state'] = 'idle';
-  #libMessage = 'The Librarian checks the Brain at start and every 6 hours.';
+  #libMessage = 'The Librarian checks the Brain at start and with the Brain health check job.';
   #health: BrainHealth | null = null;
   /** Card id → its latest attempt's library skills, while one snapshot is being built. */
   #cardSkills: Map<string, string[]> | null = null;
@@ -363,12 +375,20 @@ export class HiveManager {
   /** The managers' brain side (C2): settings, the review clock, and whether a review runs now. */
   #managers: ManagerSettings;
   readonly #cadences: CadenceKeeper;
+  /** Spots repeated goals and proposes a cadence for them (Cadence 05-D3; Phase 3 A5). */
+  readonly #proposer: CadenceProposer;
+  /** Where the `backup` job writes (main sets it with host RPC setBackupDir; Phase 3 A5). Null until then. */
+  #backupDir: string | null = null;
+  /** Resolves once main has said where backups go (a backup due right at start waits a little for it). */
+  #backupDirSet: Promise<void>;
+  #backupDirKnown: () => void = () => {};
   #hiveReviewing = false;
 
   constructor(o: HiveManagerOptions) {
     this.#o = o;
     this.#now = o.now ?? Date.now;
     this.#limits = { ...(o.limits ?? DEFAULT_LIMITS) };
+    this.#backupDirSet = new Promise((resolve) => (this.#backupDirKnown = resolve));
     const settings = this.#readSettings();
     this.#engines = new EngineRegistry(this.#adapters(), settings.engines ?? {});
     this.#engineLimits = settings.limits ?? {};
@@ -389,6 +409,8 @@ export class HiveManager {
       shelf: () => this.#project?.view.shelf ?? null,
       blocked: () => this.#cadenceBlocked(),
       submit: (c, _reason, trigger) => this.#submitCadenceGoal(c, trigger),
+      // Built-in maintenance jobs (Cadence 05-D7; Phase 3 A5): code, not goals.
+      maintain: (job, mo) => this.#maintain(job, mo.manual),
       root: () => this.#project?.view.path ?? null,
       // The app's own data (worktrees, settings) is never watched, even if it lives inside a project.
       ignore: () => [o.userDataDir],
@@ -397,6 +419,20 @@ export class HiveManager {
       ...(o.cadence?.intervalUnitMs ? { intervalUnitMs: o.cadence.intervalUnitMs } : {}),
       ...(o.cadence?.recheckMs ? { recheckMs: o.cadence.recheckMs } : {}),
       ...(o.cadence?.settleMs !== undefined ? { settleMs: o.cadence.settleMs } : {}),
+      ...(o.log ? { log: o.log } : {}),
+    });
+    // The built-in jobs exist from the first start on (A5); a missing one is made switched on.
+    this.#cadences.seedMaintenance();
+    this.#proposer = new CadenceProposer({
+      brain: o.brain,
+      now: () => this.#now(),
+      createCadence: (input, shelf) => {
+        if (shelf !== this.#project?.view.shelf) throw new Error('Open the project first, then say yes again.');
+        this.#cadences.create(input);
+      },
+      note: (text) => this.#note('cadence', text),
+      changed: () => this.#changed('cadence'),
+      ...(o.cadenceProposals?.retryWindowMs !== undefined ? { retryWindowMs: o.cadenceProposals.retryWindowMs } : {}),
       ...(o.log ? { log: o.log } : {}),
     });
     // The Treasurer (Phase 2 A5): limits steer the router, outcomes teach it.
@@ -519,18 +555,22 @@ export class HiveManager {
     // ahead, auditing after it would fade the records the seed just wrote.
     this.#startLibrarian();
     if (opened && this.#o.seedBrainForE2E) this.#seedBrain();
+    // Built-in jobs run with or without a project (A5): start the scheduler even when none is open.
+    if (!opened) void this.#cadences.check();
   }
 
   // ---- the Librarian (B2 upkeep moved under it in B3) ---------------------------------------------
 
+  /**
+   * The Librarian's reflexes. Since Phase 3 A5 (Cadence 05-D7) the periodic fading, scoring and retirement checks
+   * are built-in maintenance jobs (switching one off really stops it); what stays here is the start-up check (so
+   * the dashboard has a health score at once, fading only if "Tidy the Brain" is on) and the timer that wakes the
+   * LLM review when it is due.
+   */
   #startLibrarian(): void {
-    // Its reflexes: an audit at start, then every 6 h (fading only while idle: a busy hive is reading the Brain).
-    this.#audit(false);
+    this.#audit({ fade: this.#jobOn('consolidate') ? 'idle' : 'never', retirements: false });
     const every = this.#o.tidy?.intervalMs ?? 6 * 60 * 60_000;
-    this.#tidyTimer = setInterval(() => {
-      this.#audit(false);
-      this.#maybeReview();
-    }, every);
+    this.#tidyTimer = setInterval(() => this.#maybeReview(), every);
     this.#tidyTimer.unref?.();
   }
 
@@ -538,33 +578,56 @@ export class HiveManager {
     return this.#working() === 0 && this.#o.brain.goals.list('running').length === 0;
   }
 
+  /** Whether a built-in maintenance job is switched on (A5). */
+  #jobOn(job: MaintenanceJob): boolean {
+    return this.#o.brain.cadences.get(maintenanceCadenceId(job))?.enabled ?? false;
+  }
+
+  /** The decay clock (B2): e2e may move it ahead to test fading without waiting. */
+  #decayNow(): number {
+    return this.#now() + (this.#o.tidy?.clockShiftDays ?? 0) * DAY;
+  }
+
+  /** Fades unused agent notes (B2 decay) and says which; `force` fades even while the hive is busy. Returns how many. */
+  #fade(force: boolean): number {
+    if (!force && !this.#idle()) return 0;
+    const faded = this.#o.brain.fade({ now: this.#decayNow() });
+    for (const f of faded.slice(0, 10)) {
+      this.#record('brain-tidy', `Faded into the archive: "${f.title}" (unused for ${f.days} days). You can bring it back from the Brain screen.`, {});
+    }
+    if (faded.length > 10) this.#record('brain-tidy', `…and ${faded.length - 10} more faded into the archive.`, {});
+    return faded.length;
+  }
+
+  /** Scores the Brain's health on the open project's shelf (or Global) and counts near-duplicates only the user can merge. */
+  #scoreHealth(): { health: BrainHealth; duplicates: number } {
+    const { brain } = this.#o;
+    const shelf = this.#project?.view.shelf ?? MAINTENANCE_SHELF;
+    const duplicates = brain.duplicatePairs(shelf).filter((p) => p.userInvolved).length;
+    this.#lastAuditAt = this.#now();
+    this.#health = brainHealth(brain.healthCounts(shelf, this.#decayNow()), duplicates, this.#lastAuditAt);
+    this.#libMessage = `Checked the Brain: ${this.#health.score}/100. ${this.#health.message}`;
+    return { health: this.#health, duplicates };
+  }
+
   /**
-   * The Librarian's free audit (code only): fade unused agent notes (B2 decay), then score the Brain's
-   * health and count the near-duplicates only the user can merge. Returns how many notes faded.
+   * The Librarian's free audit (code only): maybe fade unused agent notes, then score the Brain's health and
+   * maybe check skills for retiring (03-D6). The user's "Tidy now" and "Check now" fade even while busy
+   * (`force`). Returns how many notes faded.
    */
-  #audit(force: boolean): number {
+  #audit(o: { fade: 'force' | 'idle' | 'never'; retirements: boolean }): number {
     if (this.#libState === 'idle') this.#libState = 'auditing';
     try {
-      const shift = (this.#o.tidy?.clockShiftDays ?? 0) * DAY;
-      const now = this.#now() + shift;
-      const { brain } = this.#o;
-      const faded = force || this.#idle() ? brain.fade({ now }) : [];
-      for (const f of faded.slice(0, 10)) {
-        this.#record('brain-tidy', `Faded into the archive: "${f.title}" (unused for ${f.days} days). You can bring it back from the Brain screen.`, {});
+      const faded = o.fade === 'never' ? 0 : this.#fade(o.fade === 'force');
+      this.#scoreHealth();
+      if (o.retirements) {
+        try {
+          this.#keeper.proposeRetirements();
+        } catch (err) {
+          this.#o.log?.(`Retirement check failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
       }
-      if (faded.length > 10) this.#record('brain-tidy', `…and ${faded.length - 10} more faded into the archive.`, {});
-      const shelf = this.#project?.view.shelf ?? 'global';
-      const duplicates = brain.duplicatePairs(shelf).filter((p) => p.userInvolved).length;
-      this.#lastAuditAt = this.#now();
-      this.#health = brainHealth(brain.healthCounts(shelf, now), duplicates, this.#lastAuditAt);
-      this.#libMessage = `Checked the Brain: ${this.#health.score}/100. ${this.#health.message}`;
-      // C3 (03-D6): skills that keep failing, or learned and imported ones gone unused, are proposed for retiring.
-      try {
-        this.#keeper.proposeRetirements();
-      } catch (err) {
-        this.#o.log?.(`Retirement check failed: ${err instanceof Error ? err.message : String(err)}`);
-      }
-      return faded.length;
+      return faded;
     } catch (err) {
       this.#libMessage = `The Librarian could not check the Brain: ${err instanceof Error ? err.message : String(err)}`;
       return 0;
@@ -572,6 +635,81 @@ export class HiveManager {
       this.#libState = this.#libState === 'auditing' ? 'idle' : this.#libState;
       this.#changed('librarian');
     }
+  }
+
+  // ---- built-in maintenance jobs (Cadence 05-D7; Phase 3 A5) -------------------------------------
+
+  /** Where the `backup` job writes; main sends it at every host start and when the user changes it. */
+  setBackupDir(dir: string): void {
+    if (typeof dir !== 'string' || !dir.trim() || dir.length > 1_000 || dir.includes('\0')) throw new Error('That is not a folder path.');
+    if (!isAbsolute(dir)) throw new Error('The backups folder must be a full path.');
+    this.#backupDir = dir;
+    this.#backupDirKnown();
+  }
+
+  /**
+   * One built-in job, as plain code (no Queen, no tokens). Resolves to what it did, in words; throws with why it
+   * couldn't. The cadence keeper logs either in the job's run history and runs one job at a time.
+   */
+  async #maintain(job: MaintenanceJob, manual: boolean): Promise<string> {
+    const plural = (n: number, one: string, many = `${one}s`): string => `${n} ${n === 1 ? one : many}`;
+    switch (job) {
+      case 'brain-audit': {
+        const { health, duplicates } = this.#scoreHealth();
+        this.#changed('librarian');
+        const dupes = duplicates ? ` ${plural(duplicates, 'near-duplicate')} ${duplicates === 1 ? 'waits' : 'wait'} for you.` : '';
+        return `Brain health ${health.score ?? '?'}/100. ${health.message}${dupes}`;
+      }
+      case 'consolidate': {
+        // Fading only while idle (a busy hive is reading the Brain), unless the user ran it now.
+        const busy = !manual && !this.#idle();
+        const faded = this.#fade(manual);
+        const shelves = [...new Set([this.#project?.view.shelf, MAINTENANCE_SHELF].filter((s): s is string => Boolean(s)))];
+        const folded = shelves.flatMap((s) => this.#o.brain.foldDuplicates(s));
+        for (const f of folded.slice(0, 10)) {
+          this.#record('brain-tidy', `Folded a duplicate note into another: "${f.title}". You can bring it back from the Brain screen.`, {});
+        }
+        if (folded.length > 10) this.#record('brain-tidy', `…and ${folded.length - 10} more duplicates folded.`, {});
+        if (faded || folded.length) this.#scoreHealth();
+        const fadedText = busy ? 'Nothing faded: agents were working (it fades only while the hive is idle).' : `Faded ${plural(faded, 'unused agent note')}.`;
+        return `${fadedText} Folded ${plural(folded.length, 'agent-only near-duplicate')}.`;
+      }
+      case 'stale-tasks':
+        return this.#closeStaleCards();
+      case 'skill-review': {
+        const n = this.#keeper.proposeRetirements();
+        return n ? `Proposed retiring ${plural(n, 'skill')}; ${n === 1 ? 'it waits' : 'they wait'} for you in Approvals.` : 'No skills to retire.';
+      }
+      case 'backup': {
+        // Right at start a due backup may come before main has said where backups go: wait a little for it.
+        if (!this.#backupDir && !manual) await Promise.race([this.#backupDirSet, new Promise((r) => setTimeout(r, BACKUP_DIR_WAIT_MS).unref?.())]);
+        const dir = this.#backupDir;
+        if (!dir) throw new Error('No backups folder yet.');
+        const w = writeBackup(this.#o.brain, dir, this.#now());
+        const removed = w.removed.length ? ` Removed ${plural(w.removed.length, 'older copy', 'older copies')}.` : '';
+        return `Backed up the Brain (${sizeText(w.sizeBytes)}). ${plural(w.kept, 'copy', 'copies')} kept.${removed}`;
+      }
+    }
+  }
+
+  /**
+   * Stale task cleanup: cards still open whose goal ended (done or cancelled; a stuck goal can still be re-planned, so its cards stay) over a day ago, or whose goal
+   * is gone, are closed as failed with a note. Never deleted; done and failed cards are left alone.
+   */
+  #closeStaleCards(): string {
+    const { brain } = this.#o;
+    const cutoff = this.#now() - DAY;
+    const goals = new Map(brain.goals.list().map((g) => [g.id, g]));
+    let closed = 0;
+    for (const card of brain.taskboard.list()) {
+      if (card.status === 'done' || card.status === 'failed') continue;
+      const g = goals.get(card.goalId);
+      const ended = g ? (g.status === 'done' || g.status === 'cancelled') && g.updatedAt < cutoff : card.updatedAt < cutoff;
+      if (!ended) continue;
+      if (brain.taskboard.close(card.id, 'stale-tasks', g ? 'Closed by stale task cleanup: its goal ended.' : 'Closed by stale task cleanup: its goal is gone.')) closed++;
+    }
+    if (closed) this.#changed('cards');
+    return closed ? `Closed ${closed} stale card${closed === 1 ? '' : 's'} left open after ${closed === 1 ? 'its' : 'their'} goal ended.` : 'No stale cards.';
   }
 
   /** Why the LLM review can't run now, or null when it can. */
@@ -862,6 +1000,8 @@ export class HiveManager {
     if ((cmd.type === 'approve' || cmd.type === 'deny') && this.#keeper.owns(cmd.approvalId)) return this.#keeper.decide(cmd.approvalId, cmd.type === 'approve');
     // Webhook calls waiting in Approvals (Cadence 05-D4; Phase 3 A4): the cadence keeper decides them.
     if ((cmd.type === 'approve' || cmd.type === 'deny') && this.#cadences.owns(cmd.approvalId)) return this.#cadences.decide(cmd.approvalId, cmd.type === 'approve');
+    // Cadence proposals (Cadence 05-D3; Phase 3 A5): a yes makes the cadence, a no means never again.
+    if ((cmd.type === 'approve' || cmd.type === 'deny') && this.#proposer.owns(cmd.approvalId)) return this.#proposer.decide(cmd.approvalId, cmd.type === 'approve');
     if (cmd.type === 'retireLibraryItem') return this.#keeper.retire(cmd.name);
     if (cmd.type === 'restoreLibraryItem') return this.#keeper.restore(cmd.name);
     if (cmd.type === 'setProject') return this.#setProject(cmd.path);
@@ -876,7 +1016,7 @@ export class HiveManager {
       return;
     }
     if (cmd.type === 'tidyBrain') {
-      if (!this.#audit(true)) this.#note('brain-tidy', 'The Brain is tidy: nothing to fade.');
+      if (!this.#audit({ fade: 'force', retirements: true })) this.#note('brain-tidy', 'The Brain is tidy: nothing to fade.');
       return;
     }
     if (cmd.type === 'setManagers') {
@@ -899,7 +1039,7 @@ export class HiveManager {
     }
     if (cmd.type === 'runLibrarian') {
       // The free audit always runs (fading too: the user asked); the LLM review only when it may.
-      this.#audit(true);
+      this.#audit({ fade: 'force', retirements: true });
       if (!cmd.review) return;
       const blocked = this.#reviewBlocked();
       if (blocked) throw new Error(`The Librarian can't review now: ${blocked}`);
@@ -978,6 +1118,7 @@ export class HiveManager {
           const view = this.#engineView();
           throw new Error(`${view.name} is not ready: ${view.message}`);
         }
+        const before = new Set(this.#o.brain.goals.list().map((g) => g.id));
         // Planning can take minutes with a real engine: start it and return. The goal shows up at once.
         this.#track(
           p.hive.submitGoal(cmd.text, cmd.budgetTokens ? { budgetTokens: cmd.budgetTokens } : {}).catch((err: unknown) => {
@@ -988,6 +1129,15 @@ export class HiveManager {
         );
         // Let the synchronous part (goal created) run before the UI re-reads.
         await Promise.resolve();
+        // The user's own goal (never a cadence's): a request asked often enough may become a cadence proposal (05-D3).
+        const mine = this.#o.brain.goals.list().find((g) => !before.has(g.id) && g.cadenceId === null && g.shelf === p.view.shelf);
+        if (mine) {
+          try {
+            this.#proposer.goalSubmitted(mine.id);
+          } catch (err) {
+            this.#o.log?.(`[cadence] proposal check failed: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
         return;
       }
       case 'approve':
@@ -1073,8 +1223,8 @@ export class HiveManager {
     if (this.#project && this.#working() > 0) throw new Error('Agents are working. Pause the hive and wait for them to stop before switching projects.');
     await this.#openProject(path);
     if (!this.#o.project) this.#writeSettings({ projectPath: this.#project!.view.path });
-    // A new shelf: score its health at once (read-only apart from the usual fading of idle agent notes).
-    this.#audit(false);
+    // A new shelf: score its health at once (read-only; fading is the "Tidy the Brain" job's, Phase 3 A5).
+    this.#audit({ fade: 'never', retirements: false });
   }
 
   async #openProject(path: string): Promise<void> {
@@ -1415,7 +1565,8 @@ export class HiveManager {
   /** A cadence's run history, newest first (Phase 3 A1). Runs of a deleted cadence stay readable. */
   cadenceRuns(req: { cadenceId: string; limit?: number }): CadenceRunView[] {
     const c = this.#o.brain.cadences.get(req.cadenceId);
-    if (c && c.shelf !== this.#project?.view.shelf) return [];
+    // A built-in job's history (A5) is readable with or without a project.
+    if (c && !isBuiltIn(c) && c.shelf !== this.#project?.view.shelf) return [];
     return this.#cadences.runs(req.cadenceId, req.limit ?? 50);
   }
 

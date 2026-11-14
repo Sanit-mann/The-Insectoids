@@ -190,3 +190,12 @@ describe('file and event cadences (A3)', () => {
     expect(whenText({ type: 'webhook', trust: 'allow-all' })).toBe('When its webhook is called (calls run on their own)');
   });
 });
+
+describe('maintenance jobs (A5) run on their inner schedule', () => {
+  const job = { type: 'maintenance', job: 'backup', schedule: { type: 'interval', everyMinutes: 60 } } as const;
+  it('has a next time, a due check and words like a schedule', () => {
+    expect(nextRunAt(job, 0)).toBe(3_600_000);
+    expect(dueCheck(job, 3_600_000, 3 * 3_600_000 + 1)).toMatchObject({ due: true, occurrences: 3 });
+    expect(whenText(job)).toBe('Every hour');
+  });
+});

@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { MeaningSearchSettings } from '@/components/brain/MeaningSearch';
 import { Switch } from '@/components/connections/Switch';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
+import { BackupsSetting } from '@/components/settings/Backups';
 import { BrainFolder, Checklist, PresetCards } from '@/components/setup/parts';
 import { Button } from '@/components/ui/button';
 import { loadSetup, refreshSetup, setupActions, useSetup } from '@/lib/setup-store';
@@ -85,6 +86,10 @@ export function SettingsScreen() {
         title="Brain folder"
       >
         <BrainFolder showNote={false} state={state} />
+      </Section>
+
+      <Section description="A copy of the Brain on this computer, every day. Nothing is uploaded." id="settings-backups" title="Backups">
+        <BackupsSetting />
       </Section>
 
       <Section

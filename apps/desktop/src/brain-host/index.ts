@@ -122,6 +122,10 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
         : {}),
       // e2e only (Phase 3 A1): interval minutes count as seconds, so a 15-minute cadence fires after 15 s.
       ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_CADENCE_SECONDS'] === '1' ? { cadence: { intervalUnitMs: 1_000, recheckMs: 2_000, settleMs: 1_000 } } : {}),
+      // e2e only (Phase 3 A5): asks closer together than this many ms count as one occasion for cadence proposals.
+      ...(process.env['INSECTOIDS_E2E'] === '1' && /^\d+$/.test(process.env['INSECTOIDS_E2E_PROPOSAL_RETRY_MS'] ?? '')
+        ? { cadenceProposals: { retryWindowMs: Number(process.env['INSECTOIDS_E2E_PROPOSAL_RETRY_MS']) } }
+        : {}),
       // e2e only (B3): the demo Inspector fails C-01 once, so a lesson is learned.
       ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_INSPECTOR_FAILS_FIRST'] === '1' ? { demoInspectorFailsFirst: true } : {}),
     });
@@ -200,6 +204,13 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
     case 'webhookCall':
       // Validated in main against WebhookCallSchema, and again here (the call carries outside content).
       return hive.webhookCall(WebhookCallSchema.parse(params));
+    case 'setBackupDir': {
+      // Phase 3 A5: checked again in the HiveManager (a non-empty full path).
+      const dir = (params as { dir?: unknown } | null)?.dir;
+      if (typeof dir !== 'string') throw new Error('setBackupDir needs a dir.');
+      hive.setBackupDir(dir);
+      return null;
+    }
     case 'engineCard':
       return hive.engineCard(String((params as { id?: unknown })?.id ?? ''));
     case 'e2eEngineInstalled': {

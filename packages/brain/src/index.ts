@@ -12,3 +12,4 @@ export * from './codemap';
 export * from './library';
 export * from './managers';
 export * from './cadences';
+export * from './backup';

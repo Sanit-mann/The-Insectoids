@@ -64,7 +64,12 @@ export const OUTCOME: Record<CadenceRunView['outcome'], { label: string; icon: L
   noted: { label: 'Note saved', icon: NotebookPen, className: 'text-st-done' },
   refused: { label: 'Refused', icon: ShieldX, className: 'text-st-blocked' },
   declined: { label: 'You said no', icon: Ban, className: 'text-muted' },
+  /** A built-in maintenance job ran (A5); its message says what it did. */
+  done: { label: 'Done', icon: CheckCircle2, className: 'text-st-done' },
 };
+
+/** The note under Housekeeping (A5, Cadence 05-D7). */
+export const HOUSEKEEPING_NOTE = "Built-in jobs run without AI and cost no tokens. You can switch them off; they can't be removed.";
 
 export const PENDING_ICON = Hourglass;
 export const DONE_ICON = CheckCircle2;

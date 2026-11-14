@@ -224,7 +224,8 @@ describe('schedules (Cadence 05; Phase 3 A1)', () => {
     });
     await new Promise((r) => setTimeout(r, 300));
     expect(goalsOf(c.id)).toHaveLength(0);
-    expect(snap(m).cadences).toHaveLength(0);
+    // Built-in maintenance jobs (A5) are always listed; the project's own are not.
+    expect(snap(m).cadences.filter((c) => !c.builtIn)).toHaveLength(0);
     await ok(m, { type: 'setProject', path: other });
     const goal = await until('it runs once its project is open', () => goalsOf(c.id)[0]);
     expect(goal.shelf).toBe(otherShelf);
@@ -248,7 +249,8 @@ describe('schedules (Cadence 05; Phase 3 A1)', () => {
     expect(snap(m).cadences[0]).toMatchObject({ name: 'Renamed', enabled: true, whenText: 'Every 15 minutes' });
 
     await ok(m, { type: 'deleteCadence', id });
-    expect(snap(m).cadences).toHaveLength(0);
+    // Built-in maintenance jobs (A5) are always listed; the project's own are not.
+    expect(snap(m).cadences.filter((c) => !c.builtIn)).toHaveLength(0);
     expect(m.cadenceRuns({ cadenceId: id }).length).toBeGreaterThan(0);
     expect(await m.command({ type: 'deleteCadence', id })).toMatchObject({ ok: false, error: expect.stringMatching(/No such cadence/) });
   });

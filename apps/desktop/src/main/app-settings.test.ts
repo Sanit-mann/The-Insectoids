@@ -33,6 +33,17 @@ describe('app.json', () => {
     expect(parseAppSettings(null)).toEqual({ preset: 'balanced', onboarding: {} });
   });
 
+  it('keeps the backups folder only as a full path (A5), and defaults to <userData>/backups', () => {
+    const s = new AppSettingsStore(dir);
+    expect(s.backupDir).toBe(join(dir, 'backups'));
+    expect(s.defaultBackupDir).toBe(join(dir, 'backups'));
+    s.update((v) => ({ ...v, backupDir: join(dir, 'elsewhere') }));
+    expect(new AppSettingsStore(dir).backupDir).toBe(join(dir, 'elsewhere'));
+    expect(parseAppSettings({ backupDir: 'relative/backups' })).not.toHaveProperty('backupDir');
+    expect(parseAppSettings({ backupDir: '' })).not.toHaveProperty('backupDir');
+    expect(parseAppSettings({ backupDir: 7 })).not.toHaveProperty('backupDir');
+  });
+
   it('keeps the keep-awake switch only when it is really on (A2)', () => {
     expect(parseAppSettings({ keepAwake: true })).toMatchObject({ keepAwake: true });
     expect(parseAppSettings({ keepAwake: 'yes' })).not.toHaveProperty('keepAwake');

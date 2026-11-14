@@ -66,15 +66,68 @@ export const FILE_SETTLE_MS = 5_000;
 /** At most this many files are listed in the run's goal (the rest are counted). */
 export const MAX_LISTED_FILES = 20;
 
+/** Every N minutes, counted from the last scheduled run (not from when the run finished). */
+const IntervalWhenSchema = z.object({ type: z.literal('interval'), everyMinutes: z.number().int().min(MIN_INTERVAL_MINUTES).max(MAX_INTERVAL_MINUTES) });
+/**
+ * On these weekdays at this local time ("Mon and Thu 09:00"). Always the user's local wall-clock time, so a
+ * daylight-saving change never shifts it. A time that doesn't exist on a spring-forward day runs at the
+ * first valid minute after it; a time that happens twice on a fall-back day runs once.
+ */
+const WeeklyWhenSchema = z.object({ type: z.literal('weekly'), days: z.array(WeekdaySchema).min(1).max(7), time: LocalTimeSchema });
+/** A schedule on its own (interval or weekly): what a maintenance job runs on (A5). */
+export const ScheduleWhenSchema = z.discriminatedUnion('type', [IntervalWhenSchema, WeeklyWhenSchema]);
+export type ScheduleWhen = z.infer<typeof ScheduleWhenSchema>;
+
+/**
+ * The hive's own housekeeping (Cadence 05-D7; Phase 3 A5), built in and on by default. They are code, not goals:
+ * no tokens, no Queen plan. Each runs on its own schedule and logs what it did in its run history.
+ * - `brain-audit`: the Brain health check and audit (01-E12): the health score, conflicts and near-duplicates.
+ * - `backup`: a local copy of the Brain (01-D8) in the backups folder; the newest BACKUP_KEEP copies stay.
+ * - `consolidate`: unused agent notes fade into the archive (01-E7) and agent-only near-duplicates fold
+ *   together (01-E5). Anything the user wrote or confirmed is never changed; those duplicates wait for the user.
+ * - `stale-tasks`: taskboard cards left open after their goal ended are closed, with a note. Never deletes.
+ * - `skill-review`: skills that keep failing, or learned/imported ones gone unused, are proposed for retiring
+ *   in Approvals (03-D6).
+ * Built-in jobs can't be removed: deleting one switches it off instead (05-D7: "comes back switched off").
+ */
+export const MaintenanceJobSchema = z.enum(['brain-audit', 'backup', 'consolidate', 'stale-tasks', 'skill-review']);
+export type MaintenanceJob = z.infer<typeof MaintenanceJobSchema>;
+/** Built-in jobs live on the Global shelf with a fixed id, so they run whichever project is open (or none). */
+export const MAINTENANCE_SHELF = 'global';
+export const maintenanceCadenceId = (job: MaintenanceJob): string => `maint-${job}`;
+/** Each job's name, what it does in one sentence, and its default schedule. */
+export const MAINTENANCE_JOBS: Record<MaintenanceJob, { name: string; sentence: string; schedule: ScheduleWhen }> = {
+  'brain-audit': {
+    name: 'Brain health check',
+    sentence: "Scores the Brain's health and counts what needs you: stale notes, conflicts and near-duplicates.",
+    schedule: { type: 'interval', everyMinutes: 6 * 60 },
+  },
+  backup: {
+    name: 'Daily backup',
+    sentence: 'Copies the Brain to the backups folder on this computer. The newest 7 copies are kept.',
+    schedule: { type: 'weekly', days: [0, 1, 2, 3, 4, 5, 6], time: '03:00' },
+  },
+  consolidate: {
+    name: 'Tidy the Brain',
+    sentence: 'Fades agent notes nobody used for a long time and folds agent-only near-duplicates together. Your own notes are never changed.',
+    schedule: { type: 'interval', everyMinutes: 24 * 60 },
+  },
+  'stale-tasks': {
+    name: 'Stale task cleanup',
+    sentence: 'Closes taskboard cards left open after their goal ended. Nothing is deleted.',
+    schedule: { type: 'interval', everyMinutes: 24 * 60 },
+  },
+  'skill-review': {
+    name: 'Skill review',
+    sentence: 'Proposes retiring skills that keep failing or go unused. Nothing changes until you say yes.',
+    schedule: { type: 'interval', everyMinutes: 7 * 24 * 60 },
+  },
+};
+export const MAINTENANCE_JOB_ORDER: readonly MaintenanceJob[] = ['brain-audit', 'backup', 'consolidate', 'stale-tasks', 'skill-review'];
+
 export const CadenceWhenSchema = z.discriminatedUnion('type', [
-  /** Every N minutes, counted from the last scheduled run (not from when the run finished). */
-  z.object({ type: z.literal('interval'), everyMinutes: z.number().int().min(MIN_INTERVAL_MINUTES).max(MAX_INTERVAL_MINUTES) }),
-  /**
-   * On these weekdays at this local time ("Mon and Thu 09:00"). Always the user's local wall-clock time, so a
-   * daylight-saving change never shifts it. A time that doesn't exist on a spring-forward day runs at the
-   * first valid minute after it; a time that happens twice on a fall-back day runs once.
-   */
-  z.object({ type: z.literal('weekly'), days: z.array(WeekdaySchema).min(1).max(7), time: LocalTimeSchema }),
+  IntervalWhenSchema,
+  WeeklyWhenSchema,
   /**
    * When files are added or changed in a folder of the project (A3). `folder` is relative to the project root
    * (forward slashes, no `..`, never `.git`); `pattern` optionally limits it to matching file names (`*.md`,
@@ -98,10 +151,18 @@ export const CadenceWhenSchema = z.discriminatedUnion('type', [
    * computer only (127.0.0.1); reaching it from the internet needs a tunnel the user runs.
    */
   z.object({ type: z.literal('webhook'), trust: WebhookTrustSchema.default(DEFAULT_WEBHOOK_TRUST) }),
+  /**
+   * A built-in housekeeping job (A5) on its own schedule. Only the hive makes these (one per job, fixed id
+   * `maint-<job>`, Global shelf); the user can switch them off, run them now, or change their schedule.
+   */
+  z.object({ type: z.literal('maintenance'), job: MaintenanceJobSchema, schedule: ScheduleWhenSchema }),
 ]);
 export type CadenceWhen = z.infer<typeof CadenceWhenSchema>;
-/** Schedules have a next time; file and event cadences wait for something to happen. */
-export const isScheduled = (w: CadenceWhen): boolean => w.type === 'interval' || w.type === 'weekly';
+/** Schedules (and maintenance jobs, on theirs) have a next time; file, event and webhook cadences wait for something to happen. */
+export const isScheduled = (w: CadenceWhen): boolean => w.type === 'interval' || w.type === 'weekly' || w.type === 'maintenance';
+/** The schedule a scheduled cadence runs on (a maintenance job's inner one), else null. */
+export const scheduleOf = (w: CadenceWhen): ScheduleWhen | null =>
+  w.type === 'interval' || w.type === 'weekly' ? w : w.type === 'maintenance' ? w.schedule : null;
 
 /**
  * How much a run may do without the user (05-D6), in plain words:
@@ -144,9 +205,11 @@ export const CadenceRunReasonSchema = z.enum(['schedule', 'catch-up', 'wake', 'm
  * - `waiting` (A4): a webhook call waits for the user in Approvals;
  * - `noted` (A4): a webhook note was saved in the Brain (nothing ran);
  * - `refused` (A4): a webhook call was turned away (bad or missing secret, too big, too many calls, switched off);
- * - `declined` (A4): the user said no to a webhook call in Approvals.
+ * - `declined` (A4): the user said no to a webhook call in Approvals;
+ * - `done` (A5): a maintenance job ran; the message says what it did ("Backed up the Brain (2.1 MB).").
+ * Maintenance jobs use the schedule reasons: schedule, catch-up, wake and manual.
  */
-export const CadenceRunOutcomeSchema = z.enum(['started', 'skipped', 'deferred', 'failed', 'waiting', 'noted', 'refused', 'declined']);
+export const CadenceRunOutcomeSchema = z.enum(['started', 'skipped', 'deferred', 'failed', 'waiting', 'noted', 'refused', 'declined', 'done']);
 
 export const CadenceRunViewSchema = z.object({
   id: Id,
@@ -176,6 +239,8 @@ export const CadenceViewSchema = z.object({
   nextRunAt: z.number().nullable(),
   /** Set when a run is waiting to happen once it can (paused hive, another project open, app was closed). */
   pending: z.boolean(),
+  /** A built-in maintenance job (A5): it can be switched off, run now or rescheduled, but not renamed or removed. */
+  builtIn: z.boolean().default(false),
   lastRun: CadenceRunViewSchema.nullable(),
   createdAt: z.number(),
   updatedAt: z.number(),
@@ -195,3 +260,22 @@ export const CadenceCommandSchemas = [
 
 export const CadenceRunsRequestSchema = z.object({ cadenceId: Id, limit: z.number().int().min(1).max(200).default(50) });
 export type CadenceRunsRequest = z.input<typeof CadenceRunsRequestSchema>;
+
+/**
+ * Cadence proposals (05-D3; Phase 3 A5): when the user asks for much the same goal CADENCE_PROPOSAL_MIN_REPEATS
+ * or more times, the Queen proposes a cadence in Approvals (kind `schedule`). Nothing is made until the user says
+ * yes; a no means the same request is never proposed again. Goals a cadence started never count.
+ */
+export const CADENCE_PROPOSAL_MIN_REPEATS = 3;
+export const CadenceProposalPayloadSchema = z.object({
+  action: z.literal('cadence-proposal'),
+  /** Identifies the repeated request, so it is proposed only once. */
+  key: z.string().min(1).max(500),
+  /** The cadence a yes creates, switched on, in the project the goals were in. */
+  cadence: CadenceInputSchema,
+  /** The project shelf the goals were in. */
+  shelf: z.string().min(1),
+  /** The goals it was spotted in, oldest first. */
+  goalIds: z.array(z.string()).min(1).max(50),
+});
+export type CadenceProposalPayload = z.infer<typeof CadenceProposalPayloadSchema>;

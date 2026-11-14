@@ -78,7 +78,9 @@ async function until<T>(what: string, read: () => T | undefined | null | false, 
 const lesson = (title: string) => brain.learn({ shelf: 'site', title, body: `Card: x\nWhat the Inspector found: ${title}` }, lib).id;
 
 describe('the Librarian in the host (B3)', () => {
-  it('audits at start and on its timer: the snapshot carries a health score', async () => {
+  // Phase 3 A5: periodic scoring moved from the Librarian's timer to the built-in "Brain health check" job, so the
+  // second audit comes from that job (run now here; its schedule is 6 hours).
+  it('audits at start and with the Brain health check job: the snapshot carries a health score', async () => {
     const m = make({ intervalMs: 40 });
     expect(snap(m).brainHealth.score).toBeNull();
     await m.init();
@@ -87,7 +89,10 @@ describe('the Librarian in the host (B3)', () => {
     expect(first.librarian).toMatchObject({ state: 'idle', lastReviewAt: null, proposalsWaiting: 0 });
     expect(first.librarian.nextReview).toMatch(/finished cards or in 7 days/);
     const at = first.brainHealth.lastAuditAt!;
-    await until('a second audit', () => (snap(m).brainHealth.lastAuditAt ?? 0) > at);
+    await new Promise((r) => setTimeout(r, 5));
+    expect(await m.command({ type: 'runCadenceNow', id: 'maint-brain-audit' })).toEqual({ ok: true });
+    expect(snap(m).brainHealth.lastAuditAt).toBeGreaterThan(at);
+    expect(m.cadenceRuns({ cadenceId: 'maint-brain-audit' })[0]).toMatchObject({ reason: 'manual', outcome: 'done', message: expect.stringMatching(/^Brain health 100\/100\./) });
   });
 
   it('the start audit runs before the e2e seed: with the decay clock 90 days ahead, seeded records stay', async () => {

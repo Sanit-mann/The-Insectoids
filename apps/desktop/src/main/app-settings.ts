@@ -21,6 +21,8 @@ export interface AppSettings {
   webhookSecrets?: Record<string, string>;
   /** The webhook listener's port on 127.0.0.1 (A4). Absent = DEFAULT_WEBHOOK_PORT. */
   webhookPort?: number;
+  /** Where the daily Brain backups go (Memory 01-D8; Phase 3 A5). Absent = the default (<userData>/backups). */
+  backupDir?: string;
 }
 
 /** Keeps every valid field and drops the rest, so one bad value never resets the whole file. */
@@ -33,6 +35,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
   const prev = o['previousProject'];
   const sample = parseSample(o['sample']);
   const webhookSecrets = parseWebhookSecrets(o['webhookSecrets']);
+  const backupDir = o['backupDir'];
   return {
     ...(typeof brainDir === 'string' && brainDir.length > 0 ? { brainDir } : {}),
     preset: preset.success ? preset.data : 'balanced',
@@ -42,6 +45,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
     ...(o['keepAwake'] === true ? { keepAwake: true } : {}),
     ...(webhookSecrets ? { webhookSecrets } : {}),
     ...(isPort(o['webhookPort']) ? { webhookPort: o['webhookPort'] } : {}),
+    ...(typeof backupDir === 'string' && backupDir.length > 0 && isAbsolute(backupDir) ? { backupDir } : {}),
   };
 }
 
@@ -73,11 +77,13 @@ const DEFAULTS: AppSettings = { preset: 'balanced', onboarding: {} };
 export class AppSettingsStore {
   readonly file: string;
   readonly defaultBrainDir: string;
+  readonly defaultBackupDir: string;
   #value: AppSettings;
 
   constructor(userDataDir: string) {
     this.file = join(userDataDir, 'app.json');
     this.defaultBrainDir = join(userDataDir, 'brain');
+    this.defaultBackupDir = join(userDataDir, 'backups');
     this.#value = this.#read();
   }
 
@@ -87,6 +93,11 @@ export class AppSettingsStore {
 
   get brainDir(): string {
     return this.#value.brainDir ?? this.defaultBrainDir;
+  }
+
+  /** Where the next Brain backup goes (A5). */
+  get backupDir(): string {
+    return this.#value.backupDir ?? this.defaultBackupDir;
   }
 
   get preset(): Preset {

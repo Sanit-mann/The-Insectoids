@@ -10,7 +10,13 @@ import {
   type CadenceView,
   FILE_SETTLE_MS,
   type HiveEventTrigger,
+  MAINTENANCE_JOBS,
+  MAINTENANCE_JOB_ORDER,
+  MAINTENANCE_SHELF,
   MAX_LISTED_FILES,
+  ScheduleWhenSchema,
+  type MaintenanceJob,
+  maintenanceCadenceId,
   type WebhookCall,
   type WebhookReply,
   isScheduled,
@@ -37,6 +43,12 @@ import {
  * and otherwise wait in Approvals, which this keeper decides itself (`owns`/`decide`). Every call is logged in
  * the run history; refusals at most once a minute per webhook. What the caller sent is outside content: the
  * run's goal fences it off as data, and it never changes the title, budget or autonomy.
+ *
+ * Maintenance jobs (Cadence 05-D7; Phase 3 A5) are built-in cadences on the Global shelf with fixed ids
+ * (`maint-<job>`), made on start (`seedMaintenance`). They run whichever project is open, or none, and while the
+ * hive is paused (they aren't hive work). They are code, not goals: when due (or on "Run now") the keeper calls
+ * the host's `maintain`, one job at a time, and logs `done` with what it did (or `failed` with why). The user can
+ * switch one off, run it now or change its schedule; not rename or remove it (deleting switches it off).
  */
 export interface CadenceKeeperDeps {
   brain: Brain;
@@ -50,6 +62,11 @@ export interface CadenceKeeperDeps {
    * `trigger` (file and event cadences) is what happened, in words, added to the goal.
    */
   submit: (c: Cadence, reason: CadenceRunReason, trigger?: string) => Promise<string>;
+  /**
+   * Runs a built-in maintenance job (A5) and resolves to what it did, in plain words; throws with why it couldn't.
+   * `manual` is the user's "Run now". Absent: the jobs are listed but fail with a note.
+   */
+  maintain?: (job: MaintenanceJob, o: { manual: boolean }) => Promise<string>;
   /** The open project's folder: file cadences watch inside it. */
   root?: () => string | null;
   /** Folders never watched, even inside the project (the app's own data). */
@@ -123,6 +140,8 @@ export class CadenceKeeper {
   readonly #refusals = new Map<string, { at: number; more: number }>();
   /** File, event and webhook runs are handled one at a time, so two quick triggers never start two goals. */
   #queue: Promise<unknown> = Promise.resolve();
+  /** Maintenance jobs (A5) run one at a time, scheduled and "Run now" alike. */
+  #jobs: Promise<unknown> = Promise.resolve();
   #checking = false;
   #again = false;
   #stopped = false;
@@ -137,7 +156,36 @@ export class CadenceKeeper {
 
   // ---- the user's commands ------------------------------------------------------------------------
 
+  // ---- built-in maintenance jobs (Cadence 05-D7; Phase 3 A5) --------------------------------------
+
+  /**
+   * Makes sure every built-in job exists (on start): a missing one is made switched on with its default schedule.
+   * An existing one keeps the user's schedule and switch; only its name and sentence follow the app's wording.
+   */
+  seedMaintenance(): void {
+    const { cadences } = this.d.brain;
+    for (const job of MAINTENANCE_JOB_ORDER) {
+      const id = maintenanceCadenceId(job);
+      const spec = MAINTENANCE_JOBS[job];
+      const have = cadences.get(id);
+      if (!have) {
+        const when = { type: 'maintenance' as const, job, schedule: spec.schedule };
+        cadences.create({ id, shelf: MAINTENANCE_SHELF, ...builtInFields(job, when, true), nextRunAt: nextRunAt(when, this.d.now(), this.#opts) });
+        continue;
+      }
+      if (have.when.type !== 'maintenance') continue;
+      if (have.name !== spec.name || have.goal !== spec.sentence) {
+        cadences.update(id, { ...builtInFields(job, have.when, have.enabled), nextRunAt: have.nextRunAt });
+      }
+    }
+  }
+
+  // ---- the user's commands ------------------------------------------------------------------------
+
   create(input: CadenceInput): Cadence {
+    if (input.when.type === 'maintenance') {
+      throw new Error("Built-in jobs can't be made by hand: they are already in the list. Switch one on, run it now, or change its schedule there.");
+    }
     const shelf = this.#shelf();
     const c = this.#valid(CadenceInputSchema.parse(input), null);
     const made = this.d.brain.cadences.create({ ...c, shelf, nextRunAt: c.enabled ? nextRunAt(c.when, this.d.now(), this.#opts) : null });
@@ -148,7 +196,9 @@ export class CadenceKeeper {
 
   /** A changed schedule starts over from now (an owed run is kept). */
   update(id: string, input: CadenceInput): Cadence {
-    this.#own(id);
+    const cur = this.#own(id);
+    if (isBuiltIn(cur)) return this.#updateBuiltIn(cur, input);
+    if (input.when.type === 'maintenance') throw new Error("A cadence can't become a built-in job.");
     const c = this.#valid(CadenceInputSchema.parse(input), id);
     const made = this.d.brain.cadences.update(id, { ...c, nextRunAt: c.enabled ? nextRunAt(c.when, this.d.now(), this.#opts) : null });
     if (!c.enabled) this.d.brain.cadences.setPending(id, false);
@@ -172,8 +222,36 @@ export class CadenceKeeper {
     this.arm();
   }
 
+  /**
+   * A built-in job keeps its job, name and sentence (A5): only its schedule and switch change. The schedule may
+   * come as the job's own `maintenance` shape or as a plain interval or weekly schedule.
+   */
+  #updateBuiltIn(cur: Cadence, input: CadenceInput): Cadence {
+    if (cur.when.type !== 'maintenance') throw new Error('No such built-in job.');
+    const { job } = cur.when;
+    const w = input.when;
+    if (w.type === 'maintenance' && w.job !== job) throw new Error("A built-in job can't be turned into another one.");
+    const raw = w.type === 'maintenance' ? w.schedule : w;
+    const parsed = ScheduleWhenSchema.safeParse(raw);
+    if (!parsed.success) throw new Error('A built-in job runs on a schedule: pick every few hours or days, or days of the week and a time.');
+    const when = { type: 'maintenance' as const, job, schedule: parsed.data };
+    const enabled = input.enabled ?? cur.enabled;
+    const made = this.d.brain.cadences.update(cur.id, { ...builtInFields(job, when, enabled), nextRunAt: enabled ? nextRunAt(when, this.d.now(), this.#opts) : null });
+    if (!enabled) this.d.brain.cadences.setPending(cur.id, false);
+    this.d.note(`"${made.name}" now runs ${lowerFirst(this.#words(when))}${enabled ? '' : ' (it is switched off)'}.`);
+    this.arm();
+    return made;
+  }
+
   delete(id: string): void {
     const c = this.#own(id);
+    if (isBuiltIn(c)) {
+      // 05-D7: a built-in job can't be removed; it is switched off instead (and can be switched on again).
+      if (c.enabled) this.d.brain.cadences.setEnabled(id, false, null);
+      this.d.note(`Kept "${c.name}". Built-in jobs can't be removed, so it's switched off. Switch it on again any time.`);
+      this.arm();
+      return;
+    }
     this.d.brain.cadences.delete(id);
     this.#unwatch(id);
     this.#gone.delete(id);
@@ -188,6 +266,12 @@ export class CadenceKeeper {
   /** Run once now, outside the schedule. Refused (with the reason) when it can't start. */
   async runNow(id: string): Promise<void> {
     const c = this.#own(id);
+    // A maintenance job isn't hive work: it runs even while the hive is paused. A failure is logged and said.
+    if (isBuiltIn(c)) {
+      const r = await this.#jobQueue(() => this.#maintain(c, 'manual'));
+      if (r && !r.ok) throw new Error(r.message);
+      return;
+    }
     const blocked = this.d.blocked();
     if (blocked) throw new Error(`The hive can't start work now: ${blocked}`);
     const busy = this.#activeGoal(c.id);
@@ -197,10 +281,9 @@ export class CadenceKeeper {
 
   // ---- views ---------------------------------------------------------------------------------------
 
+  /** The open project's cadences, then the built-in jobs (always listed, with or without a project). */
   views(): CadenceView[] {
-    const shelf = this.d.shelf();
-    if (!shelf) return [];
-    return this.d.brain.cadences.list(shelf).map((c) => {
+    return this.#active().map((c) => {
       const last = this.d.brain.cadences.lastRun(c.id);
       return {
         id: c.id,
@@ -214,6 +297,7 @@ export class CadenceKeeper {
         shelf: c.shelf,
         nextRunAt: c.enabled ? c.nextRunAt : null,
         pending: c.pending,
+        builtIn: isBuiltIn(c),
         lastRun: last ? runView(last) : null,
         createdAt: c.createdAt,
         updatedAt: c.updatedAt,
@@ -233,11 +317,9 @@ export class CadenceKeeper {
     if (this.#timer) clearTimeout(this.#timer);
     this.#timer = null;
     this.#syncWatches();
-    const shelf = this.d.shelf();
-    if (!shelf) return;
     const now = this.d.now();
     let wait = this.d.recheckMs ?? RECHECK_MS;
-    for (const c of this.d.brain.cadences.list(shelf)) {
+    for (const c of this.#active()) {
       if (!c.enabled) continue;
       if (c.pending) wait = Math.min(wait, this.d.recheckMs ?? RECHECK_MS);
       if (c.nextRunAt !== null) wait = Math.min(wait, Math.max(0, c.nextRunAt - now));
@@ -263,7 +345,7 @@ export class CadenceKeeper {
     void this.check();
   }
 
-  /** Runs whatever is due or owed on the open project, then re-arms. Safe to call any time. */
+  /** Runs whatever is due or owed on the open project, and due built-in jobs, then re-arms. Safe to call any time. */
   async check(): Promise<void> {
     if (this.#stopped) return;
     if (this.#checking) {
@@ -288,11 +370,12 @@ export class CadenceKeeper {
     const shelf = this.d.shelf();
     const afterWake = this.#afterWake;
     this.#afterWake = false;
-    if (!shelf) return;
     const now = this.d.now();
     let touched = false;
-    for (const c of this.d.brain.cadences.list(shelf)) {
-      if (this.#stopped || this.d.shelf() !== shelf) return;
+    for (const c of this.#active()) {
+      if (this.#stopped) return;
+      // The project changed while earlier runs started: its cadences wait for their project (built-in jobs go on).
+      if (!isBuiltIn(c) && this.d.shelf() !== shelf) continue;
       if (!c.enabled) continue;
       if (!isScheduled(c.when)) {
         // File and event cadences only run when something happened; here they run what they still owe.
@@ -315,6 +398,14 @@ export class CadenceKeeper {
       }
       if (!reason) continue;
       if (afterWake) reason = 'wake';
+      if (isBuiltIn(c)) {
+        // A5: code, not a goal. It runs while the hive is paused too, and never waits on a goal.
+        if (c.pending) this.d.brain.cadences.setPending(c.id, false);
+        const r = reason;
+        await this.#jobQueue(() => this.#maintain(c, r));
+        touched = true;
+        continue;
+      }
       const blocked = this.d.blocked();
       if (blocked) {
         if (!c.pending) {
@@ -375,6 +466,44 @@ export class CadenceKeeper {
     }
     this.d.changed();
     return started;
+  }
+
+  /** Runs a built-in job through the host and logs `done` with what it did, or `failed` with why (A5). */
+  async #maintain(c: Cadence, reason: CadenceRunReason): Promise<{ ok: boolean; message: string }> {
+    if (c.when.type !== 'maintenance') return { ok: false, message: 'Not a built-in job.' };
+    let r: { ok: boolean; message: string };
+    try {
+      if (!this.d.maintain) throw new Error("Built-in jobs can't run in this build.");
+      const said = (await this.d.maintain(c.when.job, { manual: reason === 'manual' })).trim();
+      r = { ok: true, message: said || 'Done.' };
+    } catch (err) {
+      r = { ok: false, message: err instanceof Error ? err.message : String(err) };
+    }
+    if (this.#stopped) return r;
+    this.d.brain.cadences.recordRun({ cadenceId: c.id, reason, outcome: r.ok ? 'done' : 'failed', message: r.message });
+    if (!r.ok) this.d.note(`"${c.name}" didn't run: ${lowerFirst(r.message)}`);
+    else if (reason === 'manual') this.d.note(`"${c.name}": ${r.message}`);
+    this.d.changed();
+    return r;
+  }
+
+  /** Queues a built-in job behind the others, so two never run at once. */
+  #jobQueue<T>(job: () => Promise<T>): Promise<T | undefined> {
+    const next = this.#jobs.then(job).catch((err: unknown) => {
+      this.d.log?.(`[cadence] maintenance failed: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`);
+      return undefined;
+    });
+    this.#jobs = next;
+    return next;
+  }
+
+  /** What the scheduler looks at: the open project's cadences, then the built-in jobs on the Global shelf. */
+  #active(): Cadence[] {
+    const shelf = this.d.shelf();
+    const mine = shelf && shelf !== MAINTENANCE_SHELF ? this.d.brain.cadences.list(shelf) : [];
+    const order = (c: Cadence): number => (c.when.type === 'maintenance' ? MAINTENANCE_JOB_ORDER.indexOf(c.when.job) : 0);
+    const jobs = this.d.brain.cadences.list(MAINTENANCE_SHELF).filter(isBuiltIn).sort((a, b) => order(a) - order(b));
+    return [...mine, ...jobs];
   }
 
   // ---- webhook cadences (Cadence 05-D4; Phase 3 A4) -----------------------------------------------
@@ -841,11 +970,23 @@ export class CadenceKeeper {
     return s;
   }
 
+  /** The open project's cadence, or a built-in job (A5: those belong to no project). */
   #own(id: string): Cadence {
     const c = this.d.brain.cadences.get(id);
+    if (c && isBuiltIn(c)) return c;
     if (!c || c.shelf !== this.d.shelf()) throw new Error('No such cadence in this project.');
     return c;
   }
+}
+
+/** A built-in maintenance job (A5): the hive's own, on the Global shelf with its fixed id. */
+export const isBuiltIn = (c: Cadence): boolean => c.when.type === 'maintenance' && c.shelf === MAINTENANCE_SHELF && c.id === maintenanceCadenceId(c.when.job);
+
+/** A built-in job's stored fields: its name and sentence from the app, no tokens and no Queen (A5). */
+function builtInFields(job: MaintenanceJob, when: Extract<Cadence['when'], { type: 'maintenance' }>, enabled: boolean) {
+  const spec = MAINTENANCE_JOBS[job];
+  // Budget and autonomy don't apply (jobs are code); the schema's smallest budget and "ask" are stored.
+  return { name: spec.name, when, goal: spec.sentence, budgetTokens: 1_000, autonomy: 'ask' as const, enabled };
 }
 
 const lowerFirst = (s: string): string => (s ? s[0]!.toLowerCase() + s.slice(1) : s);

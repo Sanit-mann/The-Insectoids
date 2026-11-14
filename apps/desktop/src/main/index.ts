@@ -3,9 +3,11 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { BrowserWindow, type IpcMainInvokeEvent, app, clipboard, ipcMain, powerMonitor, powerSaveBlocker, safeStorage, session, shell } from 'electron';
-import { CommandResultSchema, HIVE_IPC, type HivePush, HiveSnapshotSchema, IPC } from '@insectoids/shared';
+import { CommandResultSchema, HIVE_IPC, type HivePush, HiveSnapshotSchema, IPC, maintenanceCadenceId } from '@insectoids/shared';
 import { buildAppInfo } from './app-info';
 import { AppSettingsStore, checkBrainFolder, limitsFor } from './app-settings';
+import { registerBackupIpc } from './backup-ipc';
+import { createBackupDirSync } from './backups';
 import { BrainHost } from './brain-host';
 import { Broker } from './broker';
 import { handleBrokerRequest } from './broker-requests';
@@ -62,6 +64,8 @@ let llm: LlmRoute | null = null;
 /** Webhooks (Phase 3 A4): the local listener and each webhook's secret, in main only. */
 let webhookSecrets: WebhookSecrets | null = null;
 let webhooks: WebhookService | null = null;
+/** Brain backups (Phase 3 A5): the host writes them; main tells it the folder at every start and on change. */
+const backupDirSync = createBackupDirSync({ dir: () => settings?.backupDir ?? join(app.getPath('userData'), 'backups'), log: (line) => console.log(line) });
 
 /** e2e only: a fake upstream on http://127.0.0.1 may stand in for a service. Never in a normal run. */
 function testUrlRules(): UrlRules {
@@ -158,6 +162,8 @@ function startBrain(brainDir: string): BrainHost {
       return handleBrokerRequest(broker, method, params);
     },
     onStatus: (s) => {
+      // A (re)started Brain learns where backups go before anything else can ask it for one.
+      backupDirSync.onStatus(host, s);
       scheduleTrayUpdate();
       // Every Brain status change reaches the window at once (its status line re-reads), and a (re)started
       // Brain has fresh data: the window re-reads everything.
@@ -225,6 +231,26 @@ async function settle(host: BrainHost, timeoutMs = 25_000): Promise<void> {
   if (host.status.state !== 'ready') throw new Error(host.status.message);
 }
 
+/** Why the Brain can't be switched right now (it is moving, or goals are running in it), or null. */
+async function brainBusy(): Promise<string | null> {
+  if (switchingBrain) return 'The Brain is already moving. Try again in a moment.';
+  const h = brainHost;
+  if (!h || h.status.state !== 'ready') return null;
+  const snap = await h.call('snapshot').then((x) => HiveSnapshotSchema.parse(x), () => null);
+  const busy = snap && (snap.hive.working > 0 || snap.goals.some((g) => g.status === 'running' || g.status === 'planning'));
+  return busy ? 'Goals are running in this Brain. Let them finish (or cancel them) before moving the Brain.' : null;
+}
+
+/** When the daily backup runs next (A5): a time, null when it is switched off, undefined when the hive can't say. */
+async function nextBackupAt(): Promise<number | null | undefined> {
+  const h = brainHost;
+  if (!h || h.status.state !== 'ready') return undefined;
+  const snap = HiveSnapshotSchema.parse(await h.call('snapshot'));
+  const job = snap.cadences.find((c) => c.id === maintenanceCadenceId('backup'));
+  if (!job) return undefined;
+  return job.enabled ? job.nextRunAt : null;
+}
+
 /**
  * Move the Brain to another folder (Onboarding 08 step 2). An existing brain.db there is used as is,
  * so a user can point the app at a Brain they already have. Refused while goals are running, because
@@ -237,12 +263,9 @@ async function switchBrainDir(dir: string | null): Promise<string | null> {
   if (switchingBrain) return 'The Brain is already moving. Try again in a moment.';
   const bad = checkBrainFolder(target);
   if (bad) return bad;
+  const busy = await brainBusy();
+  if (busy) return busy;
   const old = brainHost;
-  if (old && old.status.state === 'ready') {
-    const snap = await old.call('snapshot').then((x) => HiveSnapshotSchema.parse(x), () => null);
-    const busy = snap && (snap.hive.working > 0 || snap.goals.some((g) => g.status === 'running' || g.status === 'planning'));
-    if (busy) return 'Goals are running in this Brain. Let them finish (or cancel them) before moving the Brain.';
-  }
   switchingBrain = true;
   try {
     brainHost = null;
@@ -310,6 +333,19 @@ function registerIpc(): void {
   registerVaultIpc({ vault: vault!, services: services!, broker: broker!, providers: providers!, assertTrustedSender });
   registerProvidersIpc({ providers: providers!, vault: vault!, llm: llm!, assertTrustedSender });
   registerWebhookIpc({ service: webhooks!, secrets: webhookSecrets!, vault: vault!, webhookCadences, clipboard, assertTrustedSender });
+  const testBackupFolder = isE2E ? process.env['INSECTOIDS_E2E_BACKUP_FOLDER'] : undefined;
+  registerBackupIpc({
+    settings: settings!,
+    userDataDir: app.getPath('userData'),
+    nextBackupAt,
+    tellHost: () => backupDirSync.send(brainHost),
+    brainBusy,
+    // The same switch as "Brain folder": the restored copy becomes the Brain, the old one stays where it was.
+    switchBrainDir: (dir) => switchBrainDir(dir),
+    window: () => mainWindow,
+    assertTrustedSender,
+    ...(testBackupFolder ? { testPickedFolder: testBackupFolder } : {}),
+  });
   ipcMain.handle(IPC.brainStatus, (event) => {
     assertTrustedSender(event);
     return brainHost?.status ?? { state: 'starting', message: 'Starting the Brain…' };

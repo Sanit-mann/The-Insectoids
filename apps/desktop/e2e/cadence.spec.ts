@@ -60,7 +60,7 @@ test.describe('the Cadence screen', () => {
     await expect(alert).toContainText('Give the cadence a name.');
     await expect(alert).toContainText('the shortest interval is 15 minutes');
     await expect(alert).toContainText('Tell the Queen what to do');
-    expect((await hive(win).snapshot()).cadences).toHaveLength(0);
+    expect((await hive(win).snapshot()).cadences.filter((x) => !x.builtIn)).toHaveLength(0);
   });
 
   test('creates an interval cadence and lists it with its schedule and next run in words', async () => {
@@ -78,7 +78,7 @@ test.describe('the Cadence screen', () => {
     await expect(row.getByTestId('cadence-next')).toHaveText(/^next: .+, in 1[45] min$/);
     await expect(row.getByTestId('cadence-autonomy')).toHaveText('Small plans start on their own');
     await expect(row.getByTestId('cadence-last-run')).toHaveText('Not run yet');
-    const [c] = (await hive(win).snapshot()).cadences;
+    const [c] = (await hive(win).snapshot()).cadences.filter((x) => !x.builtIn);
     expect(c).toMatchObject({ name: 'Weekly report', when: { type: 'interval', everyMinutes: 15 }, autonomy: 'small-plans', enabled: true });
   });
 
@@ -142,7 +142,7 @@ test.describe('the Cadence screen', () => {
     await expect(row.getByTestId('cadence-when')).toContainText('09:00');
     await expect(row.getByTestId('cadence-next')).toHaveText(/^next: .*09:00, in \d+ (min|hours?|days)$/);
     await expect(row.getByTestId('cadence-autonomy')).toHaveText('Asks you to approve every plan');
-    const [c] = (await hive(win).snapshot()).cadences;
+    const [c] = (await hive(win).snapshot()).cadences.filter((x) => !x.builtIn);
     expect(c?.when).toEqual({ type: 'weekly', days: [1, 4], time: '09:00' });
   });
 
@@ -155,7 +155,7 @@ test.describe('the Cadence screen', () => {
     await holdUntilDone(win, form.getByRole('button', { name: 'Hold to delete Weekly report' }));
     await expect(win.getByTestId('cadence-row')).toHaveCount(0);
     await expect(win.getByTestId('cadence-empty')).toBeVisible();
-    expect((await hive(win).snapshot()).cadences).toHaveLength(0);
+    expect((await hive(win).snapshot()).cadences.filter((x) => !x.builtIn)).toHaveLength(0);
   });
 });
 

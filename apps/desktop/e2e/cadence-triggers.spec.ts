@@ -61,7 +61,7 @@ test('a file cadence on a folder that does not exist says so in words, and nothi
   const alert = form.getByRole('alert').or(form.getByRole('status')).filter({ hasText: 'Check the form' });
   // The exact words come from the hive; they name the problem with the folder.
   await expect(alert).toContainText(/folder/i);
-  expect((await snapshot(win)).cadences).toHaveLength(0);
+  expect((await snapshot(win)).cadences.filter((x) => !x.builtIn)).toHaveLength(0);
 
   // A folder outside the project is refused before anything is sent.
   await form.getByLabel('Folder in the project').fill('../elsewhere');

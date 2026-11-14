@@ -1,6 +1,10 @@
 import { type IpcRendererEvent, contextBridge, ipcRenderer } from 'electron';
 import {
   AppInfoSchema,
+  BACKUP_IPC,
+  type BackupApi,
+  BackupResultSchema,
+  BackupStateSchema,
   BrainDashboardViewSchema,
   BrainEditResultSchema,
   BrainGraphViewSchema,
@@ -136,6 +140,14 @@ const webhooks: WebhookApi = {
   newSecret: async (cadenceId) => WebhookSecretResultSchema.parse(await invoke(WEBHOOK_IPC.newSecret, cadenceId)),
 };
 
+/** Brain backups (Phase 3 A5): the folder, the copies in it, and restore into a new Brain folder. */
+const backups: BackupApi = {
+  state: async () => BackupStateSchema.parse(await invoke(BACKUP_IPC.state)),
+  pickFolder: async () => BackupResultSchema.parse(await invoke(BACKUP_IPC.pickFolder)),
+  useDefaultFolder: async () => BackupResultSchema.parse(await invoke(BACKUP_IPC.useDefaultFolder)),
+  restore: async (file) => BackupResultSchema.parse(await invoke(BACKUP_IPC.restore, file)),
+};
+
 // The only door from the UI to the main process. Every reply is validated.
 const api: InsectoidsApi = {
   appInfo: async () => AppInfoSchema.parse(await invoke(IPC.appInfo)),
@@ -145,6 +157,7 @@ const api: InsectoidsApi = {
   vault,
   providers,
   webhooks,
+  backups,
 };
 
 contextBridge.exposeInMainWorld('insectoids', api);

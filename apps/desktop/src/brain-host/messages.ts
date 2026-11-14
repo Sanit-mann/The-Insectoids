@@ -67,6 +67,9 @@ export type HostMethod =
   // A webhook call (Cadence 05-D4; Phase 3 A4): main checked the secret, size and rate; params WebhookCall,
   // result WebhookReply (what main answers the caller).
   | 'webhookCall'
+  // Where Brain backups go (Cadence 05-D7; Phase 3 A5): params { dir } (a full path); main sends it at every host
+  // start and whenever the user changes the folder.
+  | 'setBackupDir'
   // Engine install (C4): main reads the engine's card (its official install command) from the host.
   // 'e2eEngineInstalled' works only when the host runs under INSECTOIDS_E2E=1.
   | 'engineCard'

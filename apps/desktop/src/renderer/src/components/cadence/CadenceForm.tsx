@@ -8,9 +8,7 @@ import {
   FILE_SETTLE_MS,
   FilePatternSchema,
   type HiveEventTrigger,
-  MAX_INTERVAL_MINUTES,
   MAX_LISTED_FILES,
-  MIN_INTERVAL_MINUTES,
   ProjectFolderSchema,
   type WebhookTrust,
 } from '@insectoids/shared';
@@ -20,7 +18,8 @@ import { HoldButton } from '@/components/kokonutui/hold-button';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { AUTONOMY, AUTONOMY_ORDER, HIVE_EVENTS, HIVE_EVENT_ORDER, TRUST, TRUST_ORDER, WEEK } from './cadence-words';
+import { AUTONOMY, AUTONOMY_ORDER, HIVE_EVENTS, HIVE_EVENT_ORDER, TRUST, TRUST_ORDER } from './cadence-words';
+import { DEFAULT_SCHEDULE_DRAFT, ScheduleFields, type Unit, checkSchedule, inputCls, scheduleDraftOf } from './ScheduleFields';
 
 /**
  * Create or edit a cadence (Cadence 05; Phase 3 A1, A3, A4): when (every N minutes/hours, weekly at a local time,
@@ -29,11 +28,9 @@ import { AUTONOMY, AUTONOMY_ORDER, HIVE_EVENTS, HIVE_EVENT_ORDER, TRUST, TRUST_O
  * The form checks everything in words first and only sends what `CadenceInputSchema` accepts.
  */
 
-const inputCls = 'min-h-10 rounded-[10px] border border-line bg-ground px-3 text-sm text-text outline-none focus-visible:ring-2 focus-visible:ring-honey';
-
 export type { CadenceFields };
 
-type Unit = 'minutes' | 'hours';
+/** The user's own kinds of cadence. Built-in maintenance jobs (A5) are never offered: only the hive makes those. */
 type Kind = 'interval' | 'weekly' | 'file' | 'event' | 'webhook';
 const KINDS: ReadonlyArray<{ kind: Kind; label: string }> = [
   { kind: 'interval', label: 'Every few minutes or hours' },
@@ -65,10 +62,7 @@ function draftOf(c: CadenceView | null): Draft {
   const base: Draft = {
     name: '',
     kind: 'interval',
-    every: '1',
-    unit: 'hours',
-    days: [1],
-    time: '09:00',
+    ...DEFAULT_SCHEDULE_DRAFT,
     folder: '',
     pattern: '',
     eventOn: 'goal-done',
@@ -80,11 +74,9 @@ function draftOf(c: CadenceView | null): Draft {
   };
   if (!c) return base;
   const d: Draft = { ...base, name: c.name, goal: c.goal, budget: String(c.budgetTokens), autonomy: c.autonomy };
-  if (c.when.type === 'interval') {
-    const hours = c.when.everyMinutes % 60 === 0;
-    return { ...d, kind: 'interval', every: String(hours ? c.when.everyMinutes / 60 : c.when.everyMinutes), unit: hours ? 'hours' : 'minutes' };
-  }
-  if (c.when.type === 'weekly') return { ...d, kind: 'weekly', days: [...c.when.days], time: c.when.time };
+  if (c.when.type === 'interval' || c.when.type === 'weekly') return { ...d, kind: c.when.type, ...scheduleDraftOf(c.when) };
+  // Built-in jobs aren't edited here (the Housekeeping schedule editor does that); fall back to their schedule.
+  if (c.when.type === 'maintenance') return { ...d, kind: c.when.schedule.type, ...scheduleDraftOf(c.when.schedule) };
   if (c.when.type === 'file') return { ...d, kind: 'file', folder: c.when.folder, pattern: c.when.pattern ?? '' };
   if (c.when.type === 'webhook') return { ...d, kind: 'webhook', trust: c.when.trust };
   return { ...d, kind: 'event', eventOn: c.when.on, eventFrom: c.when.cadenceId ?? '' };
@@ -96,13 +88,10 @@ function check(d: Draft, enabled: boolean): { problems: string[]; input: Cadence
   if (!d.name.trim()) problems.push('Give the cadence a name.');
   if (d.name.trim().length > 80) problems.push('Keep the name under 80 characters.');
   let when: CadenceFields['when'] | null = null;
-  if (d.kind === 'interval') {
-    const n = Number(d.every);
-    const minutes = d.unit === 'hours' ? n * 60 : n;
-    if (!Number.isInteger(n) || n < 1) problems.push('How often: use a whole number, like 2.');
-    else if (minutes < MIN_INTERVAL_MINUTES) problems.push(`How often: the shortest interval is ${MIN_INTERVAL_MINUTES} minutes.`);
-    else if (minutes > MAX_INTERVAL_MINUTES) problems.push('How often: the longest interval is 4 weeks.');
-    else when = { type: 'interval', everyMinutes: minutes };
+  if (d.kind === 'interval' || d.kind === 'weekly') {
+    const s = checkSchedule(d.kind, d);
+    problems.push(...s.problems);
+    when = s.when;
   } else if (d.kind === 'file') {
     if (!d.folder.trim()) problems.push('Folder: name a folder inside the project, like inbox or docs/incoming.');
     const folder = d.folder.trim() ? ProjectFolderSchema.safeParse(d.folder) : null;
@@ -112,12 +101,8 @@ function check(d: Draft, enabled: boolean): { problems: string[]; input: Cadence
     if (folder?.success && (!pattern || pattern.success)) when = { type: 'file', folder: folder.data, pattern: pattern ? pattern.data : null };
   } else if (d.kind === 'webhook') {
     when = { type: 'webhook', trust: d.trust };
-  } else if (d.kind === 'event') {
-    when = { type: 'event', on: d.eventOn, cadenceId: d.eventOn === 'goal-done' && d.eventFrom ? d.eventFrom : null };
   } else {
-    if (!d.days.length) problems.push('Pick at least one day.');
-    if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(d.time)) problems.push('Pick a time, like 09:00.');
-    if (d.days.length && /^([01]\d|2[0-3]):[0-5]\d$/.test(d.time)) when = { type: 'weekly', days: [...d.days].sort((a, b) => a - b), time: d.time };
+    when = { type: 'event', on: d.eventOn, cadenceId: d.eventOn === 'goal-done' && d.eventFrom ? d.eventFrom : null };
   }
   if (d.goal.trim().length < 3) problems.push('Tell the Queen what to do each time (at least 3 characters).');
   if (d.goal.trim().length > 8000) problems.push('Keep the goal under 8,000 characters.');
@@ -196,7 +181,6 @@ export function CadenceForm({ cadence, onSave, onCancel, onDelete, others = [] }
     set('trust', next);
     document.getElementById(`${uid}-trust-${next}`)?.focus();
   };
-  const toggleDay = (day: number) => set('days', d.days.includes(day) ? d.days.filter((x) => x !== day) : [...d.days, day]);
 
   return (
     <form
@@ -238,27 +222,7 @@ export function CadenceForm({ cadence, onSave, onCancel, onDelete, others = [] }
           ))}
         </div>
         {d.kind === 'interval' ? (
-          <div className="flex flex-wrap items-end gap-2">
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-muted">Every</span>
-              <input
-                className={cn(inputCls, 'w-24')}
-                inputMode="numeric"
-                min={1}
-                onChange={(e) => set('every', e.target.value)}
-                type="number"
-                value={d.every}
-              />
-            </label>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-muted">Unit</span>
-              <select className={inputCls} onChange={(e) => set('unit', e.target.value as Unit)} value={d.unit}>
-                <option value="minutes">minutes</option>
-                <option value="hours">hours</option>
-              </select>
-            </label>
-            <p className="m-0 pb-2 text-xs text-muted">At least every {MIN_INTERVAL_MINUTES} minutes, at most every 4 weeks.</p>
-          </div>
+          <ScheduleFields draft={d} kind="interval" onChange={(patch) => setD((x) => ({ ...x, ...patch }))} />
         ) : d.kind === 'file' ? (
           <div className="flex flex-col gap-3" data-testid="cadence-file-fields">
             <div className="flex flex-wrap items-end gap-3">
@@ -380,29 +344,7 @@ export function CadenceForm({ cadence, onSave, onCancel, onDelete, others = [] }
             </p>
           </div>
         ) : (
-          <div className="flex flex-wrap items-end gap-3">
-            <div aria-label="Days" className="flex flex-wrap gap-1.5" role="group">
-              {WEEK.map((w) => (
-                <button
-                  aria-label={w.long}
-                  aria-pressed={d.days.includes(w.day)}
-                  className={cn(
-                    'inline-flex min-h-10 min-w-12 items-center justify-center rounded-[10px] border px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-honey',
-                    d.days.includes(w.day) ? 'border-honey bg-honey/10 font-semibold text-honey-text' : 'border-line bg-ground text-text hover:bg-surface-2',
-                  )}
-                  key={w.day}
-                  onClick={() => toggleDay(w.day)}
-                  type="button"
-                >
-                  {w.short}
-                </button>
-              ))}
-            </div>
-            <label className="flex flex-col gap-1 text-sm">
-              <span className="text-muted">Time (your local time)</span>
-              <input className={cn(inputCls, 'w-32 font-mono')} onChange={(e) => set('time', e.target.value)} step={60} type="time" value={d.time} />
-            </label>
-          </div>
+          <ScheduleFields draft={d} kind="weekly" onChange={(patch) => setD((x) => ({ ...x, ...patch }))} />
         )}
       </fieldset>
 

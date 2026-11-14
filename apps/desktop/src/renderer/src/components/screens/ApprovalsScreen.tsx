@@ -48,7 +48,7 @@ function OpenInLibrary({ item, onError }: { item: ApprovalView; onError: (m: str
   );
 }
 
-/** "Open Cadence" for webhook calls (A4): the cadence's runs and webhook live there. */
+/** "Open Cadence" for webhook calls (A4) and cadence proposals (A5): cadences, their runs and webhooks live there. */
 function OpenInCadence({ item }: { item: ApprovalView }) {
   if (!CADENCE_KINDS.has(item.kind)) return null;
   return (

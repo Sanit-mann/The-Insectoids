@@ -3,6 +3,7 @@ import { Clock, History, Pencil, Play, Plus, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { type CadenceFields, CadenceForm } from '@/components/cadence/CadenceForm';
 import { CadenceHistory } from '@/components/cadence/CadenceHistory';
+import { Housekeeping, ScheduleEditor, isBuiltIn } from '@/components/cadence/Housekeeping';
 import { WebhookPanel } from '@/components/cadence/WebhookPanel';
 import { AUTONOMY, OUTCOME, PENDING_ICON, nextRunWords, runTime } from '@/components/cadence/cadence-words';
 import { Switch } from '@/components/connections/Switch';
@@ -15,13 +16,19 @@ import { runCommand, useHive } from '@/lib/hive-store';
 import { cn } from '@/lib/utils';
 
 /**
- * Cadence (Cadence 05; App 07; Phase 3 A1, A4): the hive works without being asked. Each cadence is
+ * Cadence (Cadence 05; App 07; Phase 3 A1, A4, A5): the hive works without being asked. Each cadence is
  * when + what + limits on this project; every run goes through the Queen like the user's own goals.
  * The list shows what is set up and when it runs next; the side shows the form or a cadence's runs (and, for a
- * webhook cadence, its address and secret).
+ * webhook cadence, its address and secret). Below, Housekeeping lists the hive's built-in jobs (A5), which show
+ * even when no project is open.
  */
 
-type Side = { kind: 'none' } | { kind: 'new' } | { kind: 'edit'; id: string } | { kind: 'history'; id: string };
+type Side =
+  | { kind: 'none' }
+  | { kind: 'new' }
+  | { kind: 'edit'; id: string }
+  | { kind: 'history'; id: string }
+  | { kind: 'schedule'; id: string };
 
 function CadenceRow({
   c,
@@ -124,24 +131,16 @@ export function CadenceScreen() {
   const now = useNow(30_000);
   const [side, setSide] = useState<Side>({ kind: 'none' });
   const [actionError, setActionError] = useState<string | null>(null);
-  const cadences = snapshot?.cadences ?? [];
-  const sideCadence = side.kind === 'edit' || side.kind === 'history' ? (cadences.find((c) => c.id === side.id) ?? null) : null;
+  const all = snapshot?.cadences ?? [];
+  // The user's own cadences; built-in maintenance jobs (A5) show under Housekeeping instead.
+  const cadences = all.filter((c) => !isBuiltIn(c));
+  const sideCadence = side.kind === 'none' || side.kind === 'new' ? null : (all.find((c) => c.id === side.id) ?? null);
 
   // A deleted cadence's panel simply stops showing (it needs sideCadence below).
   if (loading && !snapshot) return <p className="m-0 p-6 text-sm text-muted">Loading cadences…</p>;
   if (error && !snapshot) return <InlineAlert className="m-6" message={error} title="Couldn't read the hive" tone="error" />;
 
-  if (!snapshot?.project) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-6" data-testid="cadence-screen">
-        <EmptyState
-          description="Cadences belong to a project: they run while it is the open project. Choose one on the Queen screen first."
-          icon={Clock}
-          title="Pick a project first"
-        />
-      </div>
-    );
-  }
+  const hasProject = Boolean(snapshot?.project);
 
   const save = async (input: CadenceFields, id: string | null): Promise<string | null> => {
     const r = await runCommand(id ? { type: 'updateCadence', id, cadence: input } : { type: 'createCadence', cadence: input });
@@ -156,26 +155,53 @@ export function CadenceScreen() {
     else setSide({ kind: 'none' });
   };
 
-  const showForm = side.kind === 'new' || (side.kind === 'edit' && sideCadence);
+  const toggleHistory = (id: string) => setSide(side.kind === 'history' && side.id === id ? { kind: 'none' } : { kind: 'history', id });
+  const toggleSchedule = (id: string) => setSide(side.kind === 'schedule' && side.id === id ? { kind: 'none' } : { kind: 'schedule', id });
+
+  const showForm = hasProject && (side.kind === 'new' || (side.kind === 'edit' && sideCadence !== null && !isBuiltIn(sideCadence)));
+  const showSchedule = side.kind === 'schedule' && sideCadence !== null && isBuiltIn(sideCadence);
+  const showHistory = side.kind === 'history' && sideCadence !== null;
+
+  const housekeeping = (
+    <Housekeeping
+      cadences={all}
+      historyId={side.kind === 'history' ? side.id : null}
+      now={now}
+      onError={setActionError}
+      onHistory={toggleHistory}
+      onSchedule={toggleSchedule}
+      scheduleId={side.kind === 'schedule' ? side.id : null}
+    />
+  );
 
   return (
     <div className="flex min-h-0 flex-1 flex-wrap" data-testid="cadence-screen">
       <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-4 p-4">
-        <div className="flex flex-wrap items-center gap-3">
-          <p className="m-0 max-w-[60ch] text-sm text-muted">
-            The hive works on its own schedule here. Each run is handed to the Queen as a goal, within its budget, and waits for you where it should.
-          </p>
-          {cadences.length > 0 ? (
-            <Button className="ml-auto" onClick={() => setSide({ kind: 'new' })}>
-              <Plus aria-hidden="true" />
-              New cadence
-            </Button>
-          ) : null}
-        </div>
+        {hasProject ? (
+          <div className="flex flex-wrap items-center gap-3">
+            <p className="m-0 max-w-[60ch] text-sm text-muted">
+              The hive works on its own schedule here. Each run is handed to the Queen as a goal, within its budget, and waits for you where it should.
+            </p>
+            {cadences.length > 0 ? (
+              <Button className="ml-auto" onClick={() => setSide({ kind: 'new' })}>
+                <Plus aria-hidden="true" />
+                New cadence
+              </Button>
+            ) : null}
+          </div>
+        ) : null}
         {actionError ? <InlineAlert message={actionError} onDismiss={() => setActionError(null)} title="That didn't work" tone="error" /> : null}
 
-        {cadences.length === 0 && side.kind !== 'new' ? (
-          <div className="flex flex-1 items-center justify-center" data-testid="cadence-empty">
+        {!hasProject ? (
+          <div className="flex items-center justify-center py-6">
+            <EmptyState
+              description="Cadences belong to a project: they run while it is the open project. Choose one on the Queen screen first."
+              icon={Clock}
+              title="Pick a project first"
+            />
+          </div>
+        ) : cadences.length === 0 && side.kind !== 'new' ? (
+          <div className="flex items-center justify-center py-6" data-testid="cadence-empty">
             <EmptyState
               description={
                 <>
@@ -197,16 +223,21 @@ export function CadenceScreen() {
                 now={now}
                 onEdit={() => setSide({ kind: 'edit', id: c.id })}
                 onError={setActionError}
-                onHistory={() => setSide(side.kind === 'history' && side.id === c.id ? { kind: 'none' } : { kind: 'history', id: c.id })}
+                onHistory={() => toggleHistory(c.id)}
                 selected={(side.kind === 'history' || side.kind === 'edit') && side.id === c.id}
               />
             ))}
           </ul>
         )}
+
+        {housekeeping}
       </div>
 
-      {showForm || (side.kind === 'history' && sideCadence) ? (
-        <aside aria-label={showForm ? 'Cadence form' : 'Cadence runs'} className="flex min-w-0 flex-[1_1_380px] flex-col gap-4 border-l border-line p-4">
+      {showForm || showSchedule || showHistory ? (
+        <aside
+          aria-label={showForm ? 'Cadence form' : showSchedule ? 'Schedule' : 'Cadence runs'}
+          className="flex min-w-0 flex-[1_1_380px] flex-col gap-4 border-l border-line p-4"
+        >
           {showForm ? (
             <CadenceForm
               cadence={side.kind === 'edit' ? sideCadence : null}
@@ -218,6 +249,8 @@ export function CadenceScreen() {
                 .filter((o) => o.when.type !== 'event' && !(side.kind === 'edit' && o.id === side.id))
                 .map((o) => ({ id: o.id, name: o.name }))}
             />
+          ) : showSchedule && sideCadence ? (
+            <ScheduleEditor cadence={sideCadence} key={sideCadence.id} onDone={() => setSide({ kind: 'none' })} />
           ) : sideCadence ? (
             <>
               {sideCadence.when.type === 'webhook' ? <WebhookPanel cadence={sideCadence} key={sideCadence.id} /> : null}

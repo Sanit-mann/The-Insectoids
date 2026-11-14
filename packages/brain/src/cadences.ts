@@ -7,8 +7,8 @@ import { type CadenceAutonomy, type CadenceWhen, CadenceWhenSchema } from '@inse
  */
 /** Why a run happened; the same words as the shared contract's CadenceRunReasonSchema (A2 added 'wake', A3 'file' and 'event', A4 'webhook'). */
 export type CadenceRunReason = 'schedule' | 'catch-up' | 'wake' | 'manual' | 'file' | 'event' | 'webhook';
-/** The same words as CadenceRunOutcomeSchema (A4 added the webhook outcomes). */
-export type CadenceRunOutcome = 'started' | 'skipped' | 'deferred' | 'failed' | 'waiting' | 'noted' | 'refused' | 'declined';
+/** The same words as CadenceRunOutcomeSchema (A4 added the webhook outcomes, A5 'done' for maintenance jobs). */
+export type CadenceRunOutcome = 'started' | 'skipped' | 'deferred' | 'failed' | 'waiting' | 'noted' | 'refused' | 'declined' | 'done';
 
 export interface CadenceFields {
   name: string;
@@ -95,8 +95,9 @@ export class CadenceStore {
     private readonly newId: () => string,
   ) {}
 
-  create(input: CadenceFields & { shelf: string; nextRunAt: number | null }): Cadence {
-    const id = `CAD-${this.newId()}`;
+  /** `id` is for the built-in maintenance jobs only (Cadence 05-D7; Phase 3 A5): their ids are fixed (`maint-<job>`). */
+  create(input: CadenceFields & { shelf: string; nextRunAt: number | null; id?: string }): Cadence {
+    const id = input.id ?? `CAD-${this.newId()}`;
     const at = this.now();
     this.db
       .prepare(
