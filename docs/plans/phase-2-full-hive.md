@@ -115,7 +115,7 @@ Three milestones, each ending in something the user can try.
 | C3 | **Skill proposals and imports** (03-D5, D6) | `harness`, `library` | A repeated pattern produces a proposal; a malicious import is caught |
 | C4 | **UI:** the living-hive honeycomb (pauses when hidden, reduced motion honoured); Budgets screen (goal, agent and subscription budgets with charts, Treasurer routing history); Connections finished (engines, providers, services, Vault) | `desktop` | Playwright tests; screenshots |
 | C5 | **Full onboarding** (08): the engines step for several engines, providers, all presets, and the optional sample goal on a practice project, with its token cost shown first (08-D8) | `desktop` | First-run e2e with two engines |
-| C6 | **Phase 2 demo** | — | The goal at the top works end to end with real Claude Code and Gemini CLI |
+| C6 | **Phase 2 demo** | — | The goal at the top works end to end with real Claude Code and a second engine (Gemini CLI was planned; with Gemini on hold, the user chose OpenCode with a free local model through Ollama) |
 
 **C1, all 8 castes + library activation:**
 - Castes: Coder, Tester, Reviewer, Researcher, Documenter, Designer, Analyst, Writer.
@@ -635,3 +635,26 @@ Three milestones, each ending in something the user can try.
     - `first-run` follows the new order.
   - **Bug fixed:** switching projects left the new hive paused. The old hive's settle pause leaked into the manager. Fixed with a regression test.
   - **Open issue:** the native 0xC0000409 crash of a Node test-runner worker happened again (Vitest, `vault-broker.test.ts`). The next full unit run was clean, and 15 isolated runs of the broker and provider tests were clean. It only happens under full parallel load.
+- **C6 Phase 2 demo: done (2026-11-14).** The real demo passed end to end on the third run, across two engines: Claude Code and OpenCode 2.2.6 with qwen3:8b on this computer through Ollama (the user's choice while Gemini is on hold). The user consented to the installs, to OpenCode 2.2.6 inside the 14-day window, and to each real run.
+  - **The demo:** `apps/desktop/e2e/phase2-demo.spec.ts`.
+    - **Modes:** `INSECTOIDS_DEMO2=real|fake`. The real mode needs Claude and OpenCode ready and a local model (`INSECTOIDS_DEMO2_LOCAL_MODEL`, here `qwen3-8b-16k:latest`: qwen3:8b with a 16k context window).
+    - **The goal:** add `truncate` and `capitalize` to the tiny-text sample with tests (wave 1: coder and tester cards), then three low-priority documenter cards, one usage example page each (wave 2).
+    - **What it checks:** a 2-wave plan, 3+ castes, every card done, both engines used, a skill proposal from the repeated doc work (approved, then Ready), the merge, `node --test` on main, and meaning search finding the truncate work from "shorten long strings".
+    - **Output:** `demo-runs/<time>-phase2` (git-ignored): screenshots, `summary.json`, activity and every run's output.
+  - **The passing run** (`2026-11-14T05-39-00-465Z-phase2`, 10 minutes):
+    - **Claude:** the Queen (Opus), the coder and tester (Sonnet), every inspection and the Librarian's skill draft. About 144k tokens; the goal reported $0.81.
+    - **The local model, free:** the Scout and all three doc cards (about 71k tokens), each passing inspection on the first try.
+    - **Learned skill:** `write-function-usage-example-doc`, drafted from the three doc cards, scanned clean, approved by the demo, then Ready.
+    - **Merge:** 6 files into main; `node --test` passed on main.
+    - **Meaning search:** "shorten long strings" found the truncate goal and test outcome by meaning. The screenshot stops above the result list; the check itself reads the results.
+    - **Safety guard:** it stopped the tester's heredoc shell command as unparseable and asked; the demo approved it, as the user would. No Watchdog incidents.
+    - **Weak spot:** the local Scout reported the workspace as empty; the Queen noticed and planned from the real files.
+  - **Found by the real runs and fixed:**
+    - **OpenCode 2.2.x access rules:** a bare `integration.use "*"` deny also blocks providers ("Model unavailable"), so the run's provider integration is allowed explicitly; MCP servers and skills use `mcp.use` and `skill.use`.
+    - **OpenCode 2.2.5** registered MCP tools too late for the first prompt, so the model saw none of the hive's tools. Found by capturing the model request; 2.2.6 fixes it, and the minimum version is now 2.2.6.
+    - **Free-first routing (02-D9 P1):** light work (the Scout, a low-priority card's first try) goes to a free engine on this computer when one is ready. Retries and the Foreman's "stronger model" never go back to it. Run 1 showed this working: a doc page failed inspection on the local model, and its retry passed on Claude Haiku.
+    - **Repeated work in real briefs (run 1):** the three doc briefs scored 0.38 on whole-text overlap, under the 0.5 bar. Cards now also count as the same work when their titles are similar and most of the shorter card's words appear in the other.
+    - **"Already covered" was too loose (run 2):** `writing-guidelines`, a prose review skill, matched 3 of the cluster's 11 words, so no skill was proposed. A skill now covers repeated work only when it matches half the cluster's words.
+    - **Plain-words write errors (run 2):** a local model got the same bare `EEXIST` 4 times, most likely because part of its folder path was a file. `write_file` now says when a path is a folder or sits under a file.
+  - **Runs:** 1 (26 min, ~164k Claude tokens) and 2 (41 min, ~200k) did all the cards but timed out waiting for the proposal; run 3 passed.
+  - **Checks:** 916 unit tests pass; typecheck and lint are clean; the fake demo and the skill-proposal and Librarian e2e tests pass.
