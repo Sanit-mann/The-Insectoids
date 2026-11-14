@@ -67,6 +67,8 @@ export const setupActions = {
   useDefaultBrainFolder: () => run(() => api().useDefaultBrainFolder()),
   setPreset: (preset: Preset) => run(() => api().setPreset(preset)),
   setKeepAwake: (enabled: boolean) => run(() => api().setKeepAwake(enabled)),
+  setNotifications: (enabled: boolean) => run(() => api().setNotifications(enabled)),
+  setStartWithComputer: (enabled: boolean) => run(() => api().setStartWithComputer(enabled)),
   saveAbout: (input: SaveAbout) => run(() => api().saveAbout(input)),
   finish: () => run(() => api().finish()),
   restart: () => run(() => api().restart()),

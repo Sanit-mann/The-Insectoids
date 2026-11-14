@@ -23,7 +23,12 @@ export interface AppSettings {
   webhookPort?: number;
   /** Where the daily Brain backups go (Memory 01-D8; Phase 3 A5). Absent = the default (<userData>/backups). */
   backupDir?: string;
+  /** Desktop notifications for approvals needed and failures (05-D8; Phase 3 B2). Absent = on; only `false` is stored. */
+  notifications?: boolean;
 }
+
+/** Whether desktop notifications are on (B2): on unless the user switched them off. */
+export const notificationsOn = (s: AppSettings): boolean => s.notifications !== false;
 
 /** Keeps every valid field and drops the rest, so one bad value never resets the whole file. */
 export function parseAppSettings(raw: unknown): AppSettings {
@@ -46,6 +51,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
     ...(webhookSecrets ? { webhookSecrets } : {}),
     ...(isPort(o['webhookPort']) ? { webhookPort: o['webhookPort'] } : {}),
     ...(typeof backupDir === 'string' && backupDir.length > 0 && isAbsolute(backupDir) ? { backupDir } : {}),
+    ...(o['notifications'] === false ? { notifications: false } : {}),
   };
 }
 

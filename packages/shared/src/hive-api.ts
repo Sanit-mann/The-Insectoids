@@ -961,6 +961,8 @@ export const HivePushSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('install-output'), engineId: z.string(), lines: z.array(z.string()) }),
   /** The window was shown (from the tray) or restored: the user is arriving (B1 digest). */
   z.object({ type: z.literal('window-shown') }),
+  /** Open a screen (B2: the user clicked a desktop notification or a tray item): Approvals, the Queen (with a goal) or Cadence. */
+  z.object({ type: z.literal('open-screen'), screen: z.enum(['approvals', 'queen', 'cadence']), goalId: z.string().nullable() }),
 ]);
 export type HivePush = z.infer<typeof HivePushSchema>;
 

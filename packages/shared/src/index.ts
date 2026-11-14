@@ -10,3 +10,4 @@ export * from './providers-api';
 export * from './cadence-api';
 export * from './webhook-api';
 export * from './backup-api';
+export * from './background-api';

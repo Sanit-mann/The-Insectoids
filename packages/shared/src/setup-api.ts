@@ -26,6 +26,10 @@ export const SETUP_IPC = {
   startSample: 'setup:start-sample',
   /** Phase 3 A2 (05-D5): keep the computer awake while the hive works (off by default; costs battery). */
   setKeepAwake: 'setup:set-keep-awake',
+  /** Phase 3 B2 (05-D8): desktop notifications for approvals needed and failures (on by default). */
+  setNotifications: 'setup:set-notifications',
+  /** Phase 3 B2: start the app (hidden, in the tray) when the user signs in to the computer (off by default). */
+  setStartWithComputer: 'setup:set-start-with-computer',
 } as const;
 
 /**
@@ -157,6 +161,13 @@ export const SetupStateSchema = z.object({
    * hive is working, so the computer is being kept awake right now.
    */
   keepAwake: z.object({ enabled: z.boolean(), active: z.boolean() }).default({ enabled: false, active: false }),
+  /** Desktop notifications (B2): on by default; only approvals needed and failures, only while the window isn't in front. */
+  notifications: z.object({ enabled: z.boolean() }).default({ enabled: true }),
+  /**
+   * Start with my computer (B2): off by default. `available` is false where the app can't register itself (Linux for
+   * now); `message` says the state in words ("Off: start The Insectoids yourself.", "On: it starts in the tray when you sign in.").
+   */
+  startWithComputer: z.object({ enabled: z.boolean(), available: z.boolean(), message: z.string() }).default({ enabled: false, available: false, message: '' }),
   checklist: z.array(ChecklistItemSchema),
 });
 export type SetupState = z.infer<typeof SetupStateSchema>;
@@ -180,4 +191,6 @@ export interface SetupApi {
   sampleEstimate(): Promise<SampleEstimate>;
   startSample(): Promise<StartSampleResult>;
   setKeepAwake(enabled: boolean): Promise<SetupResult>;
+  setNotifications(enabled: boolean): Promise<SetupResult>;
+  setStartWithComputer(enabled: boolean): Promise<SetupResult>;
 }

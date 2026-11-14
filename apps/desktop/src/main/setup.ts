@@ -18,8 +18,9 @@ import {
   type SetupState,
   SetupStateSchema,
 } from '@insectoids/shared';
-import { type AppSettingsStore, limitsFor } from './app-settings';
+import { type AppSettingsStore, limitsFor, notificationsOn } from './app-settings';
 import type { BrainHost } from './brain-host';
+import type { LoginItem } from './login-item';
 import { type Git, PRACTICE_DIR_NAME, PracticeProjectError, SAMPLE_GOAL_TEXT, ensurePracticeProject } from './practice-project';
 import { ABOUT_SOURCE, aboutTitle, buildChecklist, findAboutRecords, readyEngineIds } from './setup-model';
 import { type PastRun, estimateSample } from './setup-sample';
@@ -38,6 +39,10 @@ export interface SetupDeps {
   window: () => BrowserWindow | null;
   /** Whether the computer is being kept awake right now (A2), and a hook to apply a changed switch. */
   keepAwake: { active: () => boolean; changed: () => Promise<void> };
+  /** "Start with my computer" (B2): the login item (a fake under e2e). */
+  loginItem: LoginItem;
+  /** Notifications or the login item changed (B2): the tray's checkbox follows. */
+  backgroundChanged: () => void;
   assertTrustedSender: (event: IpcMainInvokeEvent) => void;
   /** Move the Brain to another folder (null = default). Resolves to an error in plain words, or null. */
   switchBrainDir: (dir: string | null) => Promise<string | null>;
@@ -73,6 +78,8 @@ export function registerSetupIpc(d: SetupDeps): void {
       sample: s.sample ?? null,
       previousProject: s.previousProject ?? null,
       keepAwake: { enabled: s.keepAwake === true, active: d.keepAwake.active() },
+      notifications: { enabled: notificationsOn(s) },
+      startWithComputer: d.loginItem.state(),
       checklist: buildChecklist({
         completed,
         engineReady: readyEngines.length > 0,
@@ -156,6 +163,26 @@ export function registerSetupIpc(d: SetupDeps): void {
     });
     await d.keepAwake.changed();
     return result();
+  });
+
+  handle(SETUP_IPC.setNotifications, async (arg) => {
+    if (typeof arg !== 'boolean') throw new Error('Notifications are on or off.');
+    const enabled = arg;
+    d.settings.update((s) => {
+      const next = { ...s };
+      if (enabled) delete next.notifications;
+      else next.notifications = false;
+      return next;
+    });
+    d.backgroundChanged();
+    return result();
+  });
+
+  handle(SETUP_IPC.setStartWithComputer, async (arg) => {
+    if (typeof arg !== 'boolean') throw new Error('Start with my computer is on or off.');
+    const err = d.loginItem.set(arg);
+    d.backgroundChanged();
+    return result(err);
   });
 
   handle(SETUP_IPC.saveAbout, async (arg) => {

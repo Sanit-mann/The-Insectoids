@@ -2,10 +2,20 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BrowserWindow, type IpcMainInvokeEvent, app, clipboard, ipcMain, powerMonitor, powerSaveBlocker, safeStorage, session, shell } from 'electron';
-import { CommandResultSchema, HIVE_IPC, type HivePush, HiveSnapshotSchema, IPC, maintenanceCadenceId } from '@insectoids/shared';
+import { BrowserWindow, type IpcMainInvokeEvent, Notification, app, clipboard, ipcMain, powerMonitor, powerSaveBlocker, safeStorage, session, shell } from 'electron';
+import {
+  type BackgroundE2E,
+  CommandResultSchema,
+  HIVE_IPC,
+  type HiveCommand,
+  type HivePush,
+  HiveSnapshotSchema,
+  IPC,
+  type NoticeModel,
+  maintenanceCadenceId,
+} from '@insectoids/shared';
 import { buildAppInfo } from './app-info';
-import { AppSettingsStore, checkBrainFolder, limitsFor } from './app-settings';
+import { AppSettingsStore, checkBrainFolder, limitsFor, notificationsOn } from './app-settings';
 import { registerBackupIpc } from './backup-ipc';
 import { createBackupDirSync } from './backups';
 import { BrainHost } from './brain-host';
@@ -15,13 +25,15 @@ import { KeepAwake } from './keep-awake';
 import { readyProviders } from './ready-providers';
 import { resolveDoorPaths, resolveLibraryDir } from './doors';
 import { registerHiveIpc } from './hive-ipc';
+import { LoginItem, startsHidden } from './login-item';
+import { Notifier } from './notifier';
 import { isAllowedExternalUrl, isTrustedRendererUrl } from './security';
 import { registerSetupIpc } from './setup';
 import { LlmRoute } from './llm-route';
 import { ProvidersStore } from './providers';
 import { registerProvidersIpc } from './providers-ipc';
 import { ServicesStore, type UrlRules } from './services';
-import { type TrayState, createTray } from './tray';
+import { type TrayAction, type TrayInput, createTray } from './tray';
 import { Vault } from './vault';
 import { registerVaultIpc } from './vault-ipc';
 import { registerWebhookIpc } from './webhook-ipc';
@@ -44,9 +56,33 @@ app.setName(APP_NAME);
 // lock (keyed on the profile folder) does not make them quit while the user has the app open.
 if (isE2E) app.setPath('userData', mkdtempSync(join(tmpdir(), 'insectoids-e2e-')));
 
+/**
+ * e2e only, main process only (read with `app.evaluate`, never reachable from the renderer): what the tray shows,
+ * what would have notified, the fake login item (B2), and a hook for the Brain screen's conflict test (Phase 2 B5).
+ */
+type E2EHook = BackgroundE2E & { agentEditRecord?: (id: string, body: string) => Promise<void> };
+const e2eHook: E2EHook | null = isE2E ? { tray: null, notices: [], loginItem: { openAtLogin: false }, windowInFront: null } : null;
+if (e2eHook) (globalThis as unknown as { __insectoidsE2E?: E2EHook }).__insectoidsE2E = e2eHook;
+/** Tests may replace a field of the hook object, or the whole object: always read the current one. */
+const e2e = (): E2EHook | null => (isE2E ? ((globalThis as unknown as { __insectoidsE2E?: E2EHook }).__insectoidsE2E ?? e2eHook) : null);
+
 let mainWindow: BrowserWindow | null = null;
 let tray: ReturnType<typeof createTray> | null = null;
 let trayTimer: NodeJS.Timeout | null = null;
+/** What the tray was last built from (B2); the login item and the clock are read fresh at every rebuild. */
+let trayInput: Omit<TrayInput, 'startWithComputer' | 'now'> = { status: { working: 0, approvals: 0, paused: false }, cadences: [], digestUnseen: false };
+/** "Start with my computer" (B2); created once the app is ready. */
+let loginItem: LoginItem | null = null;
+/** Started at sign-in (B2): the first window stays hidden in the tray. */
+let startHidden = false;
+/** Desktop notifications (B2): approvals needed and failures, only while the window isn't in front. */
+const notifier = new Notifier({
+  show: showNotice,
+  enabled: () => (settings ? notificationsOn(settings.value) : true),
+  windowInFront,
+});
+/** Shown notifications, kept so their click handlers aren't garbage-collected before the user clicks. */
+const liveNotices = new Set<Notification>();
 /** "Keep the computer awake while the hive works" (A2, 05-D5); created once the app is ready. */
 let keepAwake: KeepAwake | null = null;
 let quitting = false;
@@ -81,6 +117,47 @@ function showWindow(): void {
   mainWindow.focus();
 }
 
+/** The user already sees the app: visible, not minimised and focused. Under e2e a test may decide instead. */
+function windowInFront(): boolean {
+  const forced = e2e()?.windowInFront;
+  if (forced === true || forced === false) return forced;
+  const w = mainWindow;
+  return !!w && !w.isDestroyed() && w.isVisible() && !w.isMinimized() && w.isFocused();
+}
+
+/** Show the window on a screen (a notification or a tray item was clicked). */
+function openScreen(target: NoticeModel['target']): void {
+  const push: HivePush = { type: 'open-screen', screen: target.screen, goalId: target.goalId };
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    // The page isn't there yet: tell it once it has loaded.
+    mainWindow = createWindow();
+    mainWindow.webContents.once('did-finish-load', () => forwardPush(push));
+    return;
+  }
+  showWindow();
+  forwardPush(push);
+}
+
+/** One desktop notification (B2). Under e2e it is only recorded, so test runs stay quiet. */
+function showNotice(n: NoticeModel): void {
+  const hook = e2e();
+  if (hook) {
+    hook.notices.push(n);
+    return;
+  }
+  if (!Notification.isSupported()) return;
+  const note = new Notification({ title: n.title, body: n.body, silent: false });
+  liveNotices.add(note);
+  const forget = (): void => void liveNotices.delete(note);
+  note.on('click', () => {
+    forget();
+    openScreen(n.target);
+  });
+  note.on('close', forget);
+  note.on('failed', forget);
+  note.show();
+}
+
 function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     title: APP_NAME,
@@ -102,7 +179,12 @@ function createWindow(): BrowserWindow {
     },
   });
 
-  win.once('ready-to-show', () => win.show());
+  // Started at sign-in (B2): the first window stays hidden; the tray (or a notification) shows it.
+  const hidden = startHidden;
+  startHidden = false;
+  win.once('ready-to-show', () => {
+    if (!hidden) win.show();
+  });
   // The user arriving (shown from the tray, restored from the taskbar) lets the digest open by itself (B1). Window focus
   // isn't used here: other windows (and tests running side by side) move focus around without the user arriving;
   // the page's own focus events cover switching back from another app.
@@ -170,6 +252,8 @@ function startBrain(brainDir: string): BrainHost {
     onStatus: (s) => {
       // A (re)started Brain learns where backups go before anything else can ask it for one.
       backupDirSync.onStatus(host, s);
+      // A (re)started Brain's first snapshot is a new baseline: nothing that already waited notifies (B2).
+      if (s.state !== 'ready') notifier.rebaseline();
       scheduleTrayUpdate();
       // Every Brain status change reaches the window at once (its status line re-reads), and a (re)started
       // Brain has fresh data: the window re-reads everything.
@@ -207,7 +291,15 @@ function scheduleTrayUpdate(): void {
   }, 500);
 }
 
-/** The tray's status and keep-awake both follow the hive's real state. */
+/** Rebuild the tray menu from the last hive state, the login item and the clock (e2e keeps the model). */
+function renderTray(): void {
+  if (!tray) return;
+  const model = tray.update({ ...trayInput, startWithComputer: loginItem?.state() ?? { available: false, enabled: false }, now: Date.now() });
+  const hook = e2e();
+  if (hook) hook.tray = model;
+}
+
+/** The tray, keep-awake and notifications all follow the hive's real state, from the same snapshot. */
 async function refreshTray(): Promise<void> {
   if (!brainHost || brainHost.status.state !== 'ready') {
     keepAwake?.update({ enabled: false, working: false });
@@ -216,14 +308,54 @@ async function refreshTray(): Promise<void> {
   try {
     const s = HiveSnapshotSchema.parse(await brainHost.call('snapshot'));
     keepAwake?.update({ enabled: settings?.value.keepAwake === true, working: s.hive.working > 0 });
-    const state: TrayState = { working: s.hive.working, paused: s.hive.paused, approvals: s.approvals.filter((a) => a.status === 'waiting').length };
-    tray?.update(state);
+    notifier.observe(s);
+    trayInput = {
+      status: { working: s.hive.working, paused: s.hive.paused, approvals: s.approvals.filter((a) => a.status === 'waiting').length },
+      cadences: s.cadences,
+      digestUnseen: s.digest.unseen,
+    };
+    renderTray();
   } catch {
     // The tray keeps its last state; the next change retries.
   }
 }
 
-async function hiveCommand(cmd: { type: 'pause'; reason?: string } | { type: 'resume' }): Promise<void> {
+function onTrayAction(a: TrayAction): void {
+  switch (a.type) {
+    case 'open':
+    case 'digest':
+      // Showing the window lets the digest open by itself (B1).
+      if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createWindow();
+      else showWindow();
+      return;
+    case 'approvals':
+      openScreen({ screen: 'approvals', goalId: null });
+      return;
+    case 'runNow':
+      void hiveCommand({ type: 'runCadenceNow', id: a.cadenceId });
+      return;
+    case 'pause':
+      void hiveCommand({ type: 'pause', reason: 'Paused from the tray.' });
+      return;
+    case 'resume':
+      void hiveCommand({ type: 'resume' });
+      return;
+    case 'startWithComputer': {
+      const err = loginItem?.set(a.enabled) ?? 'The app is still starting.';
+      if (err) console.log(`[tray] start with my computer: ${err}`);
+      renderTray();
+      // Settings shows the same switch: let the window re-read it.
+      forwardPush({ type: 'changed', reason: 'start-with-computer' });
+      return;
+    }
+    case 'quit':
+      quitting = true;
+      app.quit();
+      return;
+  }
+}
+
+async function hiveCommand(cmd: HiveCommand): Promise<void> {
   if (!brainHost) return;
   const r = CommandResultSchema.parse(await brainHost.call('command', cmd).catch((e: unknown) => ({ ok: false, error: String(e) })));
   if (!r.ok) console.log(`[hive] ${cmd.type} failed: ${r.error}`);
@@ -303,6 +435,8 @@ function registerIpc(): void {
     settings: settings!,
     host: () => brainHost,
     keepAwake: { active: () => keepAwake?.active ?? false, changed: () => refreshTray() },
+    loginItem: loginItem!,
+    backgroundChanged: renderTray,
     userDataDir: app.getPath('userData'),
     providers: () => providers?.all().filter((p) => p.enabled).length ?? 0,
     // Under e2e the scripted test engine is the one that runs everything, so it counts as working.
@@ -325,15 +459,14 @@ function registerIpc(): void {
       }
     },
   });
-  if (isE2E) {
+  const hook = e2e();
+  if (hook) {
     // e2e only, main process only (never reachable from the renderer): an agent changes a record while the
     // user edits it, so the Brain screen's conflict view can be tested (Phase 2 B5). The host refuses it
     // unless it runs under INSECTOIDS_E2E=1 too.
-    (globalThis as unknown as { __insectoidsE2E?: unknown }).__insectoidsE2E = {
-      agentEditRecord: async (id: string, body: string): Promise<void> => {
-        if (!brainHost) throw new Error('The Brain is not running.');
-        await brainHost.call('e2eAgentEdit', { id, body });
-      },
+    hook.agentEditRecord = async (id: string, body: string): Promise<void> => {
+      if (!brainHost) throw new Error('The Brain is not running.');
+      await brainHost.call('e2eAgentEdit', { id, body });
     };
   }
   registerVaultIpc({ vault: vault!, services: services!, broker: broker!, providers: providers!, assertTrustedSender });
@@ -374,6 +507,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     quitting = true;
     keepAwake?.release();
+    notifier.dispose();
     void webhooks?.stop();
     void broker?.close();
     // Let the Brain close its database cleanly before the app exits.
@@ -421,19 +555,25 @@ if (!app.requestSingleInstanceLock()) {
       webhookCadences,
       log: (line) => console.log(line),
     });
+    // Start with my computer (B2): under e2e only the fake in __insectoidsE2E, never the real login item.
+    loginItem = new LoginItem({
+      platform: process.platform,
+      app,
+      fake: isE2E ? () => (e2e() ?? { loginItem: { openAtLogin: false } }).loginItem : null,
+      devAppPath: app.isPackaged ? null : app.getAppPath(),
+    });
+    startHidden = startsHidden({
+      argv: process.argv,
+      platform: process.platform,
+      ...(isE2E ? {} : { wasOpenedAtLogin: () => app.getLoginItemSettings().wasOpenedAtLogin }),
+    });
     registerIpc();
     brainHost = startBrain(settings.brainDir);
     mainWindow = createWindow();
-    tray = createTray({
-      iconPath: trayIcon,
-      onOpen: showWindow,
-      onPause: () => void hiveCommand({ type: 'pause', reason: 'Paused from the tray.' }),
-      onResume: () => void hiveCommand({ type: 'resume' }),
-      onQuit: () => {
-        quitting = true;
-        app.quit();
-      },
-    });
+    tray = createTray({ iconPath: trayIcon, onAction: onTrayAction });
+    renderTray();
+    // "Next: … today 09:00" stays true as the clock moves on, even while nothing else changes.
+    setInterval(renderTray, 60_000).unref();
 
     app.on('activate', () => {
       if (!mainWindow || mainWindow.isDestroyed()) mainWindow = createWindow();

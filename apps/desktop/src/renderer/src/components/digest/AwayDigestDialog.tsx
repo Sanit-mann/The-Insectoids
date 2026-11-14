@@ -84,6 +84,8 @@ export function AwayDigestDialog() {
     // visibility events don't.
     const off = window.insectoids.hive.onEvent((e) => {
       if (e.type === 'window-shown') arriving();
+      // A click on a notification or a tray item opens a screen on purpose: the digest doesn't cover it this time.
+      if (e.type === 'open-screen') arrivingRef.current = false;
     });
     return () => {
       document.removeEventListener('visibilitychange', arriving);
@@ -115,7 +117,8 @@ export function AwayDigestDialog() {
     window.addEventListener('focus', later);
     document.addEventListener('focusout', later);
     const off = window.insectoids.hive.onEvent((e) => {
-      if (e.type === 'window-shown') later();
+      // A little later than the page's own events, so an `open-screen` that comes with the same click wins.
+      if (e.type === 'window-shown') void setTimeout(check, 400);
     });
     return () => {
       clearTimeout(timer);

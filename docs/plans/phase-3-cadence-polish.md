@@ -209,3 +209,15 @@ Three milestones, each ending in something the user can try.
   - **Notes:**
     - Runs of deleted cadences are left out of the digest.
     - "Waits for you" counts the approvals the Approvals screen shows (the open project's and those tied to no goal), not other projects'.
+- **B2 Notifications and background: done (2026-11-14).** I wrote the contract (`background-api.ts`; `SetupState.notifications` and `startWithComputer` with their IPC; the `open-screen` push), then three parallel workers built main, the renderer and the e2e spec. Unit tests: 1088 pass, 4 skipped. e2e: 179 passed, 4 skipped (one of the new start-with-computer tests runs only on Linux). Lint and typecheck are clean.
+  - **Notifications** (05-D8), on by default, from main (`notifier.ts`, a pure decision over snapshots plus grouping):
+    - **Only two things notify:** something new waits for approval ("Approve the plan for …", or "N things wait for you"), and a failure ("Stuck: <goal>", "<cadence> failed", or "N things went wrong"). Done goals, started, skipped or deferred runs, notes, refused webhook calls and routine housekeeping stay quiet: they're in the digest.
+    - **Only while the window isn't in front**, grouped over 3 s, at most one per kind a minute. The first snapshot, a Brain restart or a project switch is a new baseline, so nothing old notifies.
+    - **A click** shows the window on Approvals, on the stuck goal, or on Cadence (`open-screen` push). The digest doesn't pop up over a screen opened that way.
+    - **A Settings switch** turns them off; the OS's do-not-disturb still applies.
+  - **The tray menu:** status in words; "Needs you (N)" opening Approvals; "Next: <cadence> <when>" or "Nothing scheduled"; a "Run now" submenu (the project's cadences, then the built-in jobs; disabled with the reason while paused); "While you were away" when the digest is unread; Pause/Resume; "Start with my computer" (checkbox); Open; Quit. It rebuilds every minute so the "Next" words stay true.
+  - **Start with my computer:** off by default, in the tray and in Settings. It registers a login item on Windows and macOS, and the app then starts hidden in the tray. On Linux it isn't offered yet ("add The Insectoids to your desktop's startup apps"). Tests never touch the real login item: under e2e a fake stands in.
+  - **e2e:** `background.spec.ts`: the tray's state as the hive idles, waits for approval, pauses and resumes, with the Run now list and the next run; notifications for a new approval only while the window is in back, none for finished goals or started runs, none while in front or switched off; start with my computer on and off (or unavailable on Linux).
+  - **Notes:**
+    - Electron 45 has no `openAsHidden`, so on macOS the hidden start relies on `wasOpenedAtLogin`.
+    - Not yet seen in a real desktop session: the OS notification itself and the tray menu are checked through their models in tests.

@@ -3,6 +3,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { MeaningSearchSettings } from '@/components/brain/MeaningSearch';
 import { Switch } from '@/components/connections/Switch';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
+import { NotificationsSetting, StartWithComputerSetting } from '@/components/settings/Background';
 import { BackupsSetting } from '@/components/settings/Backups';
 import { BrainFolder, Checklist, PresetCards } from '@/components/setup/parts';
 import { Button } from '@/components/ui/button';
@@ -106,6 +107,26 @@ export function SettingsScreen() {
         title="Keep awake"
       >
         <KeepAwakeSetting active={state.keepAwake.active} enabled={state.keepAwake.enabled} />
+      </Section>
+
+      <Section
+        description="A quiet heads-up when the hive needs you while the app is in the background."
+        id="settings-notifications"
+        title="Notifications"
+      >
+        <NotificationsSetting enabled={state.notifications.enabled} />
+      </Section>
+
+      <Section
+        description="Scheduled work runs only while the app is open. Closing the window keeps it in the tray."
+        id="settings-start-with-computer"
+        title="Start with my computer"
+      >
+        <StartWithComputerSetting
+          available={state.startWithComputer.available}
+          enabled={state.startWithComputer.enabled}
+          message={state.startWithComputer.message}
+        />
       </Section>
 
       <Section id="settings-theme" title="Theme">

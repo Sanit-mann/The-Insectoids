@@ -17,6 +17,7 @@ import { SetupGate } from '@/components/setup/SetupGate';
 import { TaskboardScreen } from '@/components/screens/TaskboardScreen';
 import { SidePanel } from '@/components/SidePanel';
 import { TopBar } from '@/components/TopBar';
+import { openGoal } from '@/lib/goal-nav';
 import { pendingApprovals, useHive } from '@/lib/hive-store';
 import { type Theme, applyTheme, initialTheme } from '@/lib/theme';
 import { SCREENS, type ScreenId } from '@/screens';
@@ -53,6 +54,17 @@ export function App() {
     window.addEventListener('insectoids:navigate', onNavigate);
     return () => window.removeEventListener('insectoids:navigate', onNavigate);
   }, []);
+
+  // A desktop notification or a tray item was clicked (B2): main asks for a screen, and for the Queen maybe a goal.
+  useEffect(
+    () =>
+      window.insectoids.hive.onEvent((e) => {
+        if (e.type !== 'open-screen') return;
+        if (e.screen === 'queen' && e.goalId) openGoal(e.goalId);
+        else setScreenId(e.screen);
+      }),
+    [],
+  );
 
   useEffect(() => {
     let alive = true;
