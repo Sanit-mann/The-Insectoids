@@ -96,7 +96,8 @@ describe('folder', () => {
     const brain = settings.brainDir;
     expect(checkBackupFolder(brain, brain)).toMatch(/can’t go in the Brain folder itself/);
     expect(checkBackupFolder(join(brain, 'backups'), brain)).toMatch(/inside the Brain folder/);
-    expect(checkBackupFolder(join(brain.toUpperCase(), 'x'), brain)).toMatch(process.platform === 'win32' ? /inside the Brain folder/ : /.*/);
+    // Case-insensitive disks (Windows, macOS): the same folder in other letters is still inside. Linux: a different folder.
+    if (process.platform === 'win32' || process.platform === 'darwin') expect(checkBackupFolder(join(brain.toUpperCase(), 'x'), brain)).toMatch(/inside the Brain folder/);
     expect(checkBackupFolder('relative/folder', brain)).toBe('Choose a full folder path.');
     writeFileSync(join(root, 'a-file'), 'x');
     expect(checkBackupFolder(join(root, 'a-file'), brain)).toMatch(/is a file, not a folder/);

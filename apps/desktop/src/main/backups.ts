@@ -71,7 +71,9 @@ export function listBackups(dir: string): BackupEntry[] {
 
 /** Is `child` the folder `parent` or inside it? Windows paths compare without case. */
 export function isSameOrInside(child: string, parent: string): boolean {
-  const norm = (p: string): string => (process.platform === 'win32' ? resolve(p).toLowerCase() : resolve(p));
+  // Windows and macOS disks are normally case-insensitive: fold case there, so "D:\Brain" and "d:\brain" count as the same.
+  const fold = process.platform === 'win32' || process.platform === 'darwin';
+  const norm = (p: string): string => (fold ? resolve(p).toLowerCase() : resolve(p));
   const rel = relative(norm(parent), norm(child));
   return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
 }
