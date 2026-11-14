@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ApprovalKindSchema, ApprovalStatusSchema } from './approvals';
+import { CadenceCommandSchemas, type CadenceRunView, type CadenceRunsRequest, CadenceViewSchema } from './cadence-api';
 import { RecordKindSchema, TrustSchema } from './brain';
 import { CasteSchema, PrioritySchema } from './hive';
 import { TaskStatusSchema } from './taskboard';
@@ -34,6 +35,8 @@ export const HIVE_IPC = {
   budgets: 'hive:budgets',
   /** One-click engine install after the user saw the exact command and said yes (C4, 04-D6). */
   engineInstall: 'hive:engine-install',
+  /** A cadence's run history (Phase 3 A1), newest first. */
+  cadenceRuns: 'hive:cadence-runs',
   /** Opens the folder picker in main; returns the chosen project or null if cancelled. */
   pickProject: 'hive:pick-project',
   /** main -> renderer push. */
@@ -166,6 +169,8 @@ export const GoalViewSchema = z.object({
   spentTokens: z.number(),
   spentUsd: z.number(),
   merge: MergeStateSchema,
+  /** The cadence that started this goal (Phase 3 A1), or null when the user gave it. */
+  cadenceId: Id.nullable().default(null),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -463,6 +468,8 @@ export const HiveSnapshotSchema = z.object({
     /** Agents working right now. */
     working: z.number().int(),
   }),
+  /** This project's cadences (Phase 3 A1), in creation order. */
+  cadences: z.array(CadenceViewSchema).default([]),
   /** Newest first. */
   goals: z.array(GoalViewSchema),
   /** Cards of every goal above. */
@@ -530,6 +537,7 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('requestUndoMerge'), goalId: Id }),
   /** Asks for approval to merge again after an undo ("redo"). */
   z.object({ type: z.literal('requestRedoMerge'), goalId: Id }),
+  ...CadenceCommandSchemas,
 ]);
 export type HiveCommand = z.infer<typeof HiveCommandSchema>;
 
@@ -884,6 +892,8 @@ export interface HiveApi {
   /** Opens a folder picker for a skill (SKILL.md) or agent (AGENT.md) folder; scans it; it waits as a draft for approval. */
   libraryImport(): Promise<LibraryImportResult>;
   budgets(): Promise<BudgetsView>;
+  /** A cadence's run history, newest first (Phase 3 A1). */
+  cadenceRuns(req: CadenceRunsRequest): Promise<CadenceRunView[]>;
   /**
    * Runs the engine's own official install command (the one its card shows), after the user agreed in the app.
    * Output streams as 'install-output' pushes; the engine is checked again at the end.
