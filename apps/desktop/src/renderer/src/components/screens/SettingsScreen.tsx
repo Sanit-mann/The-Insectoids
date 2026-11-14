@@ -1,10 +1,10 @@
 import { Palette, RotateCcw } from 'lucide-react';
-import { type ReactNode, useState } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 import { MeaningSearchSettings } from '@/components/brain/MeaningSearch';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { BrainFolder, Checklist, PresetCards } from '@/components/setup/parts';
 import { Button } from '@/components/ui/button';
-import { loadSetup, setupActions, useSetup } from '@/lib/setup-store';
+import { loadSetup, refreshSetup, setupActions, useSetup } from '@/lib/setup-store';
 
 function Section({ id, title, description, children }: { id: string; title: string; description?: string; children: ReactNode }) {
   return (
@@ -27,6 +27,10 @@ function Section({ id, title, description, children }: { id: string; title: stri
 export function SettingsScreen() {
   const { state, loading, loadError } = useSetup();
   const [restarting, setRestarting] = useState(false);
+  // Checklist items get done elsewhere too (engines, providers, the sample goal): read them fresh on open.
+  useEffect(() => {
+    void refreshSetup();
+  }, []);
   const [error, setError] = useState<string | null>(null);
 
   const rerun = async (): Promise<void> => {

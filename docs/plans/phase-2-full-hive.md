@@ -616,3 +616,22 @@ Three milestones, each ending in something the user can try.
       - the broker gained `readPosts` path patterns, a GraphQL query-as-read rule for Linear, and fixed extra headers that never override auth.
     - **UI pieces:** a shadcn Dialog on the existing `radix-ui`; Kokonut UI `inline-alert` and `hold-button`.
   - **Not built yet:** the Treasurer's live per-run budget bars, and an e2e check that the honeycomb pauses when the whole window is minimised.
+- **C5 Full onboarding: done (2026-11-14).** Built by two parallel workers (backend; wizard and e2e). Unit tests: 907 pass with no unhandled errors. e2e: 137 passed, 3 skipped, in three full runs in a row. Lint and typecheck are clean. No real engine runs.
+  - **Wizard:** in the 08 Flow order: Welcome → Brain folder → AI engines → Providers (optional) → About you → First project → Safety → First goal → Done.
+  - **Engines step:**
+    - It reuses the Connections engine cards (a new shared `EnginesPanel`), so it gets install-with-consent from C4.
+    - Next needs at least one ready engine (08-D5); with none, it explains the cheapest route (a local model through Ollama + OpenCode, or a free tier).
+    - The old Claude-only `EngineCheck` is gone.
+  - **Providers step:** the Connections provider form with every preset, plus the Vault inline.
+  - **First goal step (08-D8): the optional sample goal on a practice project.**
+    - **The practice project:** `<userData>/practice-project`, a tiny git repo with a marker file. Its commits use a per-command identity, so no git config is ever written. Any other folder is refused.
+    - **The estimate first:**
+      - **Tokens:** from this hive's own past runs, or 30k–150k for "a typical small goal";
+      - **Cost:** a per-token price for API providers, or the subscription note for subscription engines.
+    - **Start:** a separate click. The practice project becomes the open project, the goal runs capped at the high estimate, and "Back to your project" uses `previousProject`.
+  - **Finish-setup checklist:** "engine" means at least one ready engine; "providers" and "sample goal" are real items now.
+  - **e2e:**
+    - `first-run-full` checks two ready engines (`INSECTOIDS_E2E_READY_ENGINES=claude` shows Claude as ready, though it is never routed or run), adds an Ollama provider, shows the estimate before any goal exists, then starts and watches the sample.
+    - `first-run` follows the new order.
+  - **Bug fixed:** switching projects left the new hive paused. The old hive's settle pause leaked into the manager. Fixed with a regression test.
+  - **Open issue:** the native 0xC0000409 crash of a Node test-runner worker happened again (Vitest, `vault-broker.test.ts`). The next full unit run was clean, and 15 isolated runs of the broker and provider tests were clean. It only happens under full parallel load.

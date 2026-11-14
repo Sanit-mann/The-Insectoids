@@ -13,7 +13,7 @@ import { dirname, join } from 'node:path';
 import { type Brain, openBrain } from '@insectoids/brain';
 import { writeBrainShims } from '@insectoids/brain-cli/shims';
 import { type BrainService, startBrainService } from '@insectoids/brain-service';
-import { HiveManager } from './hive-manager';
+import { HiveManager, e2eReadyEngines } from './hive-manager';
 import { MeaningSearch } from './meaning-search';
 import type { LlmAccess, LlmUsage, ReadyProvider } from '@insectoids/harness';
 import { writeHookLauncher } from '../main/hook-launcher';
@@ -114,6 +114,10 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
       ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_BRAIN_SEED'] === '1' ? { seedBrainForE2E: true } : {}),
       ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_TIDY_SHIFT_DAYS']
         ? { tidy: { clockShiftDays: Number(process.env['INSECTOIDS_E2E_TIDY_SHIFT_DAYS']) || 0 } }
+        : {}),
+      // e2e only (C5): engines that show as ready on the Engines step (display only; the scripted engine runs everything).
+      ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_READY_ENGINES']
+        ? { e2eReadyEngines: e2eReadyEngines(process.env['INSECTOIDS_E2E_READY_ENGINES']) }
         : {}),
       // e2e only (B3): the demo Inspector fails C-01 once, so a lesson is learned.
       ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_INSPECTOR_FAILS_FIRST'] === '1' ? { demoInspectorFailsFirst: true } : {}),

@@ -203,6 +203,12 @@ export interface HiveManagerOptions {
   opencodeSystemConfig?: () => string | null;
   /** Tests: a custom engine instead of the demo or Claude. */
   engineOverride?: Engine;
+  /**
+   * e2e only (C5, "first run with two engines"): listed engines that report ready on the Engines step. With the
+   * scripted engine they are display-only: they have no runner, so the registry never routes work to them and
+   * the real CLI is never started.
+   */
+  e2eReadyEngines?: readonly EngineId[];
   now?: () => number;
   /** Seed for the Treasurer's learning router (tests). Default: the clock. */
   seed?: number;
@@ -291,6 +297,12 @@ export function engineLines(e: ClaudeEvent): string[] {
   }
 }
 
+/** e2e (C5): "claude,codex" → the listed engine ids that may show as ready; the scripted engine and unknown ids are dropped. */
+export function e2eReadyEngines(list: string): EngineId[] {
+  const ids = list.split(',').map((s) => s.trim()).filter(Boolean);
+  return [...new Set(ids)].filter((id): id is EngineId => id !== 'fake' && EngineIdSchema.safeParse(id).success);
+}
+
 export class HiveManager {
   readonly #o: HiveManagerOptions;
   readonly #now: () => number;
@@ -298,6 +310,8 @@ export class HiveManager {
   #engineTimer: NodeJS.Timeout | null = null;
   #project: ProjectState | null = null;
   #paused = false;
+  /** True while the open project's hive settles on close (its own "paused" event is not a user pause). */
+  #closingHive = false;
   #pausedReason: string | null = null;
   readonly #activity: ActivityView[] = [];
   #activitySeq = 0;
@@ -447,10 +461,13 @@ export class HiveManager {
       privacyNote: a.privacyNote,
       // e2e (C4): after a scripted install the engine shows as installed but signed out, so a test can never
       // route real work to it.
+      // e2e (C5): an engine listed in e2eReadyEngines shows as ready, still with no runner (no `create`).
       detect: async () =>
-        this.#e2eInstalled.has(a.id)
-          ? { state: 'signed-out', version: 'e2e-installed', message: 'Installed (test). Sign in to use it.' }
-          : { state: 'missing', version: null, message: 'Not checked: the scripted engine runs everything here.' },
+        this.#o.e2eReadyEngines?.includes(a.id)
+          ? { state: 'ready', version: 'e2e', message: 'Ready (test). Shown as working; the scripted engine still runs everything.' }
+          : this.#e2eInstalled.has(a.id)
+            ? { state: 'signed-out', version: 'e2e-installed', message: 'Installed (test). Sign in to use it.' }
+            : { state: 'missing', version: null, message: 'Not checked: the scripted engine runs everything here.' },
     });
     // In tests, OpenCode is real only when the test gave it its own detection (a stand-in binary).
     return [scripted, listedOnly(claude), listedOnly(gemini), ...plannedAdapters(), this.#o.opencodeDetect ? opencode : listedOnly(opencode)];
@@ -1055,8 +1072,15 @@ export class HiveManager {
     // Stop every agent and wait for its bookkeeping (spend, outcomes, worktree cleanup) to finish, plus the
     // Foreman pass and background planning, so nothing writes to the Brain or the workspace after they
     // close. Capped so a stuck engine can never hang shutdown.
-    const settled = Promise.allSettled([p.hive.settle('Switching project.'), this.#tickRun, ...this.#background]);
-    await Promise.race([settled, new Promise((r) => setTimeout(r, SETTLE_TIMEOUT_MS).unref?.())]);
+    // The old hive pauses itself to settle; that is not the user pausing the hive, so it must not carry over to
+    // the next project (C5 found switching projects left the new hive paused with "Switching project.").
+    this.#closingHive = true;
+    try {
+      const settled = Promise.allSettled([p.hive.settle('Switching project.'), this.#tickRun, ...this.#background]);
+      await Promise.race([settled, new Promise((r) => setTimeout(r, SETTLE_TIMEOUT_MS).unref?.())]);
+    } finally {
+      this.#closingHive = false;
+    }
     // Card worktrees stay on disk (they belong to goals in the Brain); nothing is deleted here.
   }
 
@@ -1663,6 +1687,8 @@ export class HiveManager {
       const lane = runId ? this.#lanes.get(runId) : undefined;
       if (lane) lane.status = 'blocked';
     }
+    // A closing project's hive pauses itself to settle: not a user pause, and not news for the activity feed.
+    if (e.type === 'paused' && this.#closingHive) return;
     if (e.type === 'paused') {
       this.#paused = true;
       this.#pausedReason = e.message;

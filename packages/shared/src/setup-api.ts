@@ -20,7 +20,42 @@ export const SETUP_IPC = {
   finish: 'setup:finish',
   /** Settings → "Run setup again". */
   restart: 'setup:restart',
+  /** C5 (08-D8): the sample goal's cost estimate, shown before anything runs. */
+  sampleEstimate: 'setup:sample-estimate',
+  /** C5 (08-D8): creates (or reuses) the practice project and starts the sample goal on it, after the user said yes. */
+  startSample: 'setup:start-sample',
 } as const;
+
+/**
+ * The optional sample goal (08-D8): a small goal on a practice project in its own folder under the app's data,
+ * never the user's real files. The estimate comes first; nothing runs until the user starts it.
+ */
+export const SampleEstimateSchema = z.object({
+  goalText: z.string(),
+  /** Where it would run, e.g. "<userData>/practice-project". */
+  practicePath: z.string(),
+  /** The engine it would use (the hive's default), or null when none is ready. */
+  engine: z.string().nullable(),
+  tokensLow: z.number().int(),
+  tokensHigh: z.number().int(),
+  /** null when the engine is a subscription with no per-token price (then `note` says so). */
+  costUsdLow: z.number().nullable(),
+  costUsdHigh: z.number().nullable(),
+  /** How it was estimated, in plain words (e.g. "from this hive's last 12 runs" or "a typical small goal"). */
+  basis: z.string(),
+  note: z.string(),
+  /** false → `reason` says why (no engine ready, a goal already running…). */
+  canRun: z.boolean(),
+  reason: z.string().nullable(),
+});
+export type SampleEstimate = z.infer<typeof SampleEstimateSchema>;
+
+export const StartSampleResultSchema = z.union([
+  /** The practice project is now the open project and the goal was submitted with a budget cap of tokensHigh. */
+  z.object({ ok: z.literal(true), goalId: z.string(), practicePath: z.string(), state: z.lazy(() => SetupStateSchema) }),
+  z.object({ ok: z.literal(false), error: z.string(), state: z.lazy(() => SetupStateSchema) }),
+]);
+export type StartSampleResult = z.infer<typeof StartSampleResultSchema>;
 
 /** Safety presets (08-D7). None of them can turn off the always-ask list or the command guard. */
 export const PresetSchema = z.enum(['careful', 'balanced', 'hands-off']);
@@ -107,6 +142,14 @@ export const SetupStateSchema = z.object({
   preset: PresetSchema,
   /** Ids of "about you" questions already answered (saved in the Brain). */
   aboutAnswered: z.array(AboutQuestionIdSchema),
+  /** C5: engines that can work right now (ready), by id; setup needs at least one (08-D5). */
+  readyEngines: z.array(z.string()).default([]),
+  /** C5: API providers the user added (switched on). */
+  providers: z.number().int().default(0),
+  /** C5: the sample goal, once started (08-D8). */
+  sample: z.object({ goalId: z.string(), practicePath: z.string(), startedAt: z.number() }).nullable().default(null),
+  /** C5: the project that was open before the sample switched to the practice project ("back to your project"). */
+  previousProject: z.string().nullable().default(null),
   checklist: z.array(ChecklistItemSchema),
 });
 export type SetupState = z.infer<typeof SetupStateSchema>;
@@ -127,4 +170,6 @@ export interface SetupApi {
   saveAbout(input: SaveAbout): Promise<SetupResult>;
   finish(): Promise<SetupResult>;
   restart(): Promise<SetupResult>;
+  sampleEstimate(): Promise<SampleEstimate>;
+  startSample(): Promise<StartSampleResult>;
 }

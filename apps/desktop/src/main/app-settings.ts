@@ -11,6 +11,10 @@ export interface AppSettings {
   brainDir?: string;
   preset: Preset;
   onboarding: { completedAt?: number };
+  /** The sample goal on the practice project (Onboarding 08-D8; Phase 2 C5), once started. */
+  sample?: { goalId: string; practicePath: string; startedAt: number };
+  /** The project that was open before the sample switched to the practice project, so the user can go back. */
+  previousProject?: string;
 }
 
 /** Keeps every valid field and drops the rest, so one bad value never resets the whole file. */
@@ -20,11 +24,24 @@ export function parseAppSettings(raw: unknown): AppSettings {
   const ob = typeof o['onboarding'] === 'object' && o['onboarding'] !== null ? (o['onboarding'] as Record<string, unknown>) : {};
   const completedAt = ob['completedAt'];
   const brainDir = o['brainDir'];
+  const prev = o['previousProject'];
+  const sample = parseSample(o['sample']);
   return {
     ...(typeof brainDir === 'string' && brainDir.length > 0 ? { brainDir } : {}),
     preset: preset.success ? preset.data : 'balanced',
     onboarding: typeof completedAt === 'number' && Number.isFinite(completedAt) ? { completedAt } : {},
+    ...(sample ? { sample } : {}),
+    ...(typeof prev === 'string' && prev.length > 0 ? { previousProject: prev } : {}),
   };
+}
+
+function parseSample(raw: unknown): AppSettings['sample'] | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  const s = raw as Record<string, unknown>;
+  const { goalId, practicePath, startedAt } = s;
+  if (typeof goalId !== 'string' || !goalId || typeof practicePath !== 'string' || !practicePath) return null;
+  if (typeof startedAt !== 'number' || !Number.isFinite(startedAt)) return null;
+  return { goalId, practicePath, startedAt };
 }
 
 const DEFAULTS: AppSettings = { preset: 'balanced', onboarding: {} };

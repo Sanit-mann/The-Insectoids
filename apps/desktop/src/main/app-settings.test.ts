@@ -33,6 +33,18 @@ describe('app.json', () => {
     expect(parseAppSettings(null)).toEqual({ preset: 'balanced', onboarding: {} });
   });
 
+  it('keeps the sample goal and the previous project (C5), and drops broken ones', () => {
+    const sample = { goalId: 'g1', practicePath: '/d/practice-project', startedAt: 5 };
+    expect(parseAppSettings({ preset: 'careful', onboarding: {}, sample, previousProject: '/d/site' })).toEqual({
+      preset: 'careful',
+      onboarding: {},
+      sample,
+      previousProject: '/d/site',
+    });
+    expect(parseAppSettings({ sample: { goalId: 'g1', practicePath: '', startedAt: 5 }, previousProject: '' })).toEqual({ preset: 'balanced', onboarding: {} });
+    expect(parseAppSettings({ sample: { goalId: 'g1', practicePath: '/p', startedAt: 'soon' } })).toEqual({ preset: 'balanced', onboarding: {} });
+  });
+
   it('maps presets to hive limits', () => {
     expect(limitsFor('careful')).toEqual({ insectCap: 2, goalBudgetTokens: 1_000_000, approveEveryPlan: true });
     expect(limitsFor('balanced')).toEqual({ insectCap: 3, goalBudgetTokens: 2_000_000, approveEveryPlan: false });

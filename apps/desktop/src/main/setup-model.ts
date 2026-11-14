@@ -13,17 +13,35 @@ export const aboutTitle = (id: AboutQuestionId): string => `About you: ${ABOUT_L
 export const ABOUT_SOURCE = 'onboarding';
 
 /** The "finish setup" checklist (08-D2). Later-phase items are shown, never faked as done. */
-export function buildChecklist(i: { completed: boolean; engineReady: boolean; aboutAnswered: number; hasProject: boolean }): ChecklistItem[] {
+export function buildChecklist(i: {
+  completed: boolean;
+  /** At least one engine can work (08-D5). */
+  engineReady: boolean;
+  aboutAnswered: number;
+  hasProject: boolean;
+  /** Switched-on API providers (C5). */
+  providers?: number;
+  /** The sample goal was started (C5, 08-D8). */
+  sampleStarted?: boolean;
+}): ChecklistItem[] {
   return [
     { id: 'brain', label: 'Choose where the Brain lives', done: i.completed, phase: 1 },
-    { id: 'engine', label: 'Connect an AI engine (Claude Code)', done: i.engineReady, phase: 1 },
+    { id: 'engine', label: 'Connect at least one AI engine', done: i.engineReady, phase: 1 },
     { id: 'about', label: 'Tell the hive about you', done: i.aboutAnswered > 0, phase: 1 },
     { id: 'preset', label: 'Pick a safety preset', done: true, phase: 1 },
     { id: 'project', label: 'Choose your first project', done: i.hasProject, phase: 1 },
     { id: 'backup', label: 'Choose a backup folder for the Brain', done: false, phase: 2 },
-    { id: 'providers', label: 'Add other AI providers or local models', done: false, phase: 2 },
-    { id: 'sample-goal', label: 'Try a sample goal on a practice project', done: false, phase: 2 },
+    { id: 'providers', label: 'Add other AI providers or local models (optional)', done: (i.providers ?? 0) > 0, phase: 2 },
+    { id: 'sample-goal', label: 'Try a sample goal on a practice project (optional)', done: i.sampleStarted ?? false, phase: 2 },
   ];
+}
+
+/**
+ * Engines that can work right now (08-D5), by id. The scripted test engine counts only under e2e, where it is
+ * the one that runs everything.
+ */
+export function readyEngineIds(engines: ReadonlyArray<{ id: string; state: string }>, countScripted: boolean): string[] {
+  return engines.filter((e) => e.state === 'ready' || (countScripted && e.state === 'fake')).map((e) => e.id);
 }
 
 /** Existing "About you" records on the Global shelf, by question id. */

@@ -2,15 +2,29 @@ import { type Brain, openBrain } from '@insectoids/brain';
 import { BrainClient, type BrainService, startBrainService } from '@insectoids/brain-service';
 import { ABOUT_QUESTIONS } from '@insectoids/shared';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { ABOUT_LABELS, ABOUT_SOURCE, aboutTitle, buildChecklist, findAboutRecords } from './setup-model';
+import { ABOUT_LABELS, ABOUT_SOURCE, aboutTitle, buildChecklist, findAboutRecords, readyEngineIds } from './setup-model';
 
 describe('finish-setup checklist (Onboarding 08-D2)', () => {
-  it('marks Phase 1 items from real state and never fakes later ones', () => {
+  it('marks items from real state and never fakes the ones not built yet', () => {
     const fresh = buildChecklist({ completed: false, engineReady: false, aboutAnswered: 0, hasProject: false });
     expect(fresh.filter((i) => i.done).map((i) => i.id)).toEqual(['preset']);
     const done = buildChecklist({ completed: true, engineReady: true, aboutAnswered: 2, hasProject: true });
     expect(done.filter((i) => !i.done).map((i) => i.id)).toEqual(['backup', 'providers', 'sample-goal']);
-    expect(done.filter((i) => i.phase > 1).every((i) => !i.done)).toBe(true);
+    // C5: providers and the sample goal are real items now; the backup folder is still not built.
+    const all = buildChecklist({ completed: true, engineReady: true, aboutAnswered: 2, hasProject: true, providers: 1, sampleStarted: true });
+    expect(all.filter((i) => !i.done).map((i) => i.id)).toEqual(['backup']);
+  });
+
+  it('counts engines that can work, and the scripted test engine only when asked (e2e)', () => {
+    const engines = [
+      { id: 'fake', state: 'fake' },
+      { id: 'claude', state: 'ready' },
+      { id: 'gemini', state: 'signed-out' },
+      { id: 'codex', state: 'unsupported' },
+    ];
+    expect(readyEngineIds(engines, false)).toEqual(['claude']);
+    expect(readyEngineIds(engines, true)).toEqual(['fake', 'claude']);
+    expect(readyEngineIds([{ id: 'claude', state: 'missing' }], true)).toEqual([]);
   });
 
   it('has a label for every question', () => {

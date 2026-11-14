@@ -1,8 +1,15 @@
 import { type BrowserWindow, type IpcMainInvokeEvent, dialog, ipcMain } from 'electron';
 import type { BrainClient } from '@insectoids/brain-service';
+import { join } from 'node:path';
 import {
   type AboutQuestionId,
+  BudgetsViewSchema,
+  CommandResultSchema,
   HiveSnapshotSchema,
+  type SampleEstimate,
+  SampleEstimateSchema,
+  type StartSampleResult,
+  StartSampleResultSchema,
   PresetSchema,
   SETUP_IPC,
   SaveAboutSchema,
@@ -13,11 +20,21 @@ import {
 } from '@insectoids/shared';
 import { type AppSettingsStore, limitsFor } from './app-settings';
 import type { BrainHost } from './brain-host';
-import { ABOUT_SOURCE, aboutTitle, buildChecklist, findAboutRecords } from './setup-model';
+import { type Git, PRACTICE_DIR_NAME, PracticeProjectError, SAMPLE_GOAL_TEXT, ensurePracticeProject } from './practice-project';
+import { ABOUT_SOURCE, aboutTitle, buildChecklist, findAboutRecords, readyEngineIds } from './setup-model';
+import { type PastRun, estimateSample } from './setup-sample';
 
 export interface SetupDeps {
   settings: AppSettingsStore;
   host: () => BrainHost | null;
+  /** The app's data folder: the practice project lives in `<userData>/practice-project` (C5). */
+  userDataDir: string;
+  /** Switched-on API providers (C5). */
+  providers: () => number;
+  /** e2e: the scripted test engine counts as a working engine. */
+  countScriptedEngine: boolean;
+  /** Tests: replace git for the practice project. */
+  git?: Git;
   window: () => BrowserWindow | null;
   assertTrustedSender: (event: IpcMainInvokeEvent) => void;
   /** Move the Brain to another folder (null = default). Resolves to an error in plain words, or null. */
@@ -40,6 +57,8 @@ export function registerSetupIpc(d: SetupDeps): void {
     const c = client();
     const about = c ? await findAboutRecords(c).catch(() => new Map<AboutQuestionId, string>()) : new Map<AboutQuestionId, string>();
     const completed = s.onboarding.completedAt !== undefined;
+    const readyEngines = snap ? readyEngineIds(snap.engines, d.countScriptedEngine) : [];
+    const providers = d.providers();
     return SetupStateSchema.parse({
       completed,
       completedAt: s.onboarding.completedAt ?? null,
@@ -47,13 +66,40 @@ export function registerSetupIpc(d: SetupDeps): void {
       defaultBrainDir: d.settings.defaultBrainDir,
       preset: s.preset,
       aboutAnswered: [...about.keys()],
+      readyEngines,
+      providers,
+      sample: s.sample ?? null,
+      previousProject: s.previousProject ?? null,
       checklist: buildChecklist({
         completed,
-        engineReady: snap ? snap.engine.state === 'ready' || snap.engine.state === 'fake' : false,
+        engineReady: readyEngines.length > 0,
         aboutAnswered: about.size,
         hasProject: Boolean(snap?.project),
+        providers,
+        sampleStarted: Boolean(s.sample),
       }),
     });
+  };
+
+  const practicePath = join(d.userDataDir, PRACTICE_DIR_NAME);
+
+  /** The hive's snapshot, or null while the Brain host is not ready. */
+  const snapshot = async () => {
+    const h = d.host();
+    if (!h || h.status.state !== 'ready') return null;
+    return h.call('snapshot').then((x) => HiveSnapshotSchema.parse(x), () => null);
+  };
+
+  const estimate = async (): Promise<SampleEstimate> => {
+    const h = d.host();
+    const snap = await snapshot();
+    const budgets = h && snap ? await h.call('budgets').then((x) => BudgetsViewSchema.parse(x), () => null) : null;
+    const runs: PastRun[] = (budgets?.routing ?? []).map((r) => ({ role: r.role, engine: r.engine, tokens: r.tokens, costUsd: r.costUsd }));
+    // The hive's default engine (snapshot.engine names it; the card has its id), only when it can run.
+    const engine =
+      snap && (snap.engine.state === 'ready' || snap.engine.state === 'fake') ? (snap.engines.find((e) => e.name === snap.engine.name) ?? null) : null;
+    const busy = (snap?.goals ?? []).some((g) => g.status === 'planning' || g.status === 'awaiting_approval' || g.status === 'running');
+    return SampleEstimateSchema.parse(estimateSample({ runs, engine: engine ? { id: engine.id, name: engine.name, state: engine.state } : null, busy, practicePath }));
   };
 
   const result = async (error?: string | null): Promise<SetupResult> =>
@@ -126,5 +172,42 @@ export function registerSetupIpc(d: SetupDeps): void {
   handle(SETUP_IPC.restart, async () => {
     d.settings.update((s) => ({ ...s, onboarding: {} }));
     return result();
+  });
+
+  // The optional sample goal (08-D8; C5): the estimate first, and nothing runs until the user starts it.
+  handle(SETUP_IPC.sampleEstimate, () => estimate());
+
+  handle(SETUP_IPC.startSample, async () => {
+    const fail = async (error: string): Promise<StartSampleResult> => StartSampleResultSchema.parse({ ok: false, error, state: await state() });
+    const h = d.host();
+    if (!h || h.status.state !== 'ready') return fail(h?.status.message ?? 'The Brain is not running.');
+    const est = await estimate();
+    if (!est.canRun) return fail(est.reason ?? 'The sample goal cannot run right now.');
+    let path: string;
+    try {
+      path = (await ensurePracticeProject(practicePath, d.git)).path;
+    } catch (err) {
+      return fail(err instanceof PracticeProjectError ? err.message : `Could not make the practice project: ${err instanceof Error ? err.message : String(err)}`);
+    }
+    const before = (await snapshot())?.project?.path ?? null;
+    const command = async (cmd: unknown): Promise<string | null> => {
+      const r = CommandResultSchema.parse(await h.call('command', cmd));
+      return r.ok ? null : r.error;
+    };
+    try {
+      const switchErr = await command({ type: 'setProject', path });
+      if (switchErr) return fail(`Could not open the practice project: ${switchErr}`);
+      // Remember the user's own project so the app can offer "back to your project" (never the practice one).
+      if (before && before !== path) d.settings.update((s) => ({ ...s, previousProject: before }));
+      const startedAt = Date.now();
+      const submitErr = await command({ type: 'submitGoal', text: SAMPLE_GOAL_TEXT, budgetTokens: est.tokensHigh });
+      if (submitErr) return fail(`Could not start the sample goal: ${submitErr}`);
+      const goal = (await snapshot())?.goals.find((g) => g.text === SAMPLE_GOAL_TEXT && g.createdAt >= startedAt - 1_000);
+      if (!goal) return fail('The sample goal was sent, but the hive did not list it. Check the Queen screen.');
+      d.settings.update((s) => ({ ...s, sample: { goalId: goal.id, practicePath: path, startedAt } }));
+      return StartSampleResultSchema.parse({ ok: true, goalId: goal.id, practicePath: path, state: await state() });
+    } catch (err) {
+      return fail(err instanceof Error ? err.message : String(err));
+    }
   });
 }

@@ -248,6 +248,10 @@ function registerIpc(): void {
   registerSetupIpc({
     settings: settings!,
     host: () => brainHost,
+    userDataDir: app.getPath('userData'),
+    providers: () => providers?.all().filter((p) => p.enabled).length ?? 0,
+    // Under e2e the scripted test engine is the one that runs everything, so it counts as working.
+    countScriptedEngine: isE2E,
     window: () => mainWindow,
     assertTrustedSender,
     switchBrainDir,

@@ -24,7 +24,7 @@ test('setup walks from welcome to the hive, by keyboard and mouse', async () => 
 
   // 1. Welcome: the privacy promise, then Enter moves on (keyboard-only).
   await expect(win.getByRole('heading', { name: 'Welcome to The Insectoids' })).toBeVisible({ timeout: 20_000 });
-  await expect(stepLabel()).toHaveText('Step 1 of 7 · Welcome');
+  await expect(stepLabel()).toHaveText('Step 1 of 9 · Welcome');
   const promise = win.getByRole('list', { name: 'Privacy promise' });
   await expect(promise).toContainText('Your Brain stays on this PC.');
   await expect(promise).toContainText('Nothing is uploaded.');
@@ -34,22 +34,26 @@ test('setup walks from welcome to the hive, by keyboard and mouse', async () => 
   await win.keyboard.press('Enter');
 
   // 2. Brain folder: keep the default.
-  await expect(stepLabel()).toHaveText('Step 2 of 7 · Brain folder');
+  await expect(stepLabel()).toHaveText('Step 2 of 9 · Brain folder');
   await expect(win.getByTestId('brain-dir')).not.toBeEmpty();
   await expect(win.getByText('Brain folder (default)')).toBeVisible();
   await win.getByRole('button', { name: 'Use this folder' }).click();
 
-  // 3. Engine: the scripted test engine reports ready.
-  await expect(stepLabel()).toHaveText('Step 3 of 7 · AI engine');
-  const engine = win.getByTestId('engine-status');
-  await expect(engine).toHaveAttribute('data-state', 'fake', { timeout: 30_000 });
-  await expect(engine).toContainText('Ready');
+  // 3. Engines (C5: every engine, as in Connections): the scripted test engine is ready, so Next works.
+  await expect(stepLabel()).toHaveText('Step 3 of 9 · AI engines');
+  const engines = win.getByTestId('setup-engines-summary');
+  await expect(engines).not.toHaveAttribute('data-ready', '0', { timeout: 30_000 });
+  await expect(win.getByTestId('engine-list')).toBeVisible();
   await win.getByRole('button', { name: 'Check again' }).click();
-  await expect(engine).toHaveAttribute('data-state', 'fake', { timeout: 30_000 });
+  await expect(engines).not.toHaveAttribute('data-ready', '0', { timeout: 30_000 });
   await win.getByRole('button', { name: 'Next', exact: true }).click();
 
-  // 4. About you: answer two questions, skip the rest.
-  await expect(stepLabel()).toHaveText('Step 4 of 7 · About you');
+  // 4. Providers (optional): skip.
+  await expect(stepLabel()).toHaveText('Step 4 of 9 · Providers');
+  await win.getByRole('button', { name: 'Skip for now' }).click();
+
+  // 5. About you: answer two questions, skip the rest.
+  await expect(stepLabel()).toHaveText('Step 5 of 9 · About you');
   const answer = win.getByLabel(/Your answer/);
   await answer.fill('I build desktop apps for small teams.');
   await answer.press('Enter');
@@ -62,8 +66,12 @@ test('setup walks from welcome to the hive, by keyboard and mouse', async () => 
   await expect(win.getByText('Skipped')).toHaveCount(3);
   await win.getByRole('button', { name: 'Continue' }).click();
 
-  // 5. Safety preset: Balanced is preselected and recommended; pick Careful.
-  await expect(stepLabel()).toHaveText('Step 5 of 7 · Safety');
+  // 6. First project: later.
+  await expect(stepLabel()).toHaveText('Step 6 of 9 · First project');
+  await win.getByRole('button', { name: 'Later' }).click();
+
+  // 7. Safety preset: Balanced is preselected and recommended; pick Careful.
+  await expect(stepLabel()).toHaveText('Step 7 of 9 · Safety');
   await expect(win.getByRole('radio', { name: 'Balanced (recommended)' })).toBeChecked();
   await expect(win.getByText('Always asks you, in every preset')).toBeVisible();
   await win.getByTestId('preset-careful').click();
@@ -71,12 +79,12 @@ test('setup walks from welcome to the hive, by keyboard and mouse', async () => 
   await expect(win.getByTestId('preset-careful')).toContainText('Selected', { timeout: 10_000 });
   await win.getByRole('button', { name: 'Next', exact: true }).click();
 
-  // 6. First project: later.
-  await expect(stepLabel()).toHaveText('Step 6 of 7 · First project');
-  await win.getByRole('button', { name: 'Later' }).click();
+  // 8. First goal: skip the sample (first-run-full covers it).
+  await expect(stepLabel()).toHaveText('Step 8 of 9 · First goal');
+  await win.getByRole('button', { name: "Skip: I'll give the Queen my own goal" }).click();
 
-  // 7. Done: the checklist shows what's left, then the hive opens.
-  await expect(stepLabel()).toHaveText('Step 7 of 7 · Done');
+  // 9. Done: the checklist shows what's left, then the hive opens.
+  await expect(stepLabel()).toHaveText('Step 9 of 9 · Done');
   await expect(win.getByTestId('checklist-about')).toHaveAttribute('data-done', 'true');
   await expect(win.getByTestId('checklist-project')).toHaveAttribute('data-done', 'false');
   await win.getByRole('button', { name: 'Open the hive' }).click();
@@ -113,11 +121,12 @@ test('"Run setup again" reopens the wizard and keeps what was saved', async () =
   await win.getByRole('button', { name: 'Run setup again' }).click();
   await expect(win.getByRole('heading', { name: 'Welcome to The Insectoids' })).toBeVisible({ timeout: 15_000 });
   await win.getByRole('button', { name: 'Get started' }).click();
-  for (const label of ['Step 2 of 7', 'Step 3 of 7', 'Step 4 of 7', 'Step 5 of 7', 'Step 6 of 7']) {
+  const skip: Record<string, string> = { 'Step 6 of 9': 'Later', 'Step 8 of 9': "Skip: I'll give the Queen my own goal" };
+  for (const label of ['Step 2 of 9', 'Step 3 of 9', 'Step 4 of 9', 'Step 5 of 9', 'Step 6 of 9', 'Step 7 of 9', 'Step 8 of 9']) {
     await expect(stepLabel()).toContainText(label);
-    await win.getByRole('button', { name: label === 'Step 6 of 7' ? 'Later' : 'Skip for now' }).click();
+    await win.getByRole('button', { name: skip[label] ?? 'Skip for now' }).click();
   }
-  await expect(stepLabel()).toHaveText('Step 7 of 7 · Done');
+  await expect(stepLabel()).toHaveText('Step 9 of 9 · Done');
   // Answers and preset survived the rerun.
   await expect(win.getByTestId('checklist-about')).toHaveAttribute('data-done', 'true');
   await win.getByRole('button', { name: 'Open the hive' }).click();

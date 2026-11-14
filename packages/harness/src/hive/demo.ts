@@ -65,6 +65,9 @@ const oneCardPlan = (title: string, headline: string) => ({
   waves: [{ cards: [{ id: 'C-01', title, brief: `Create C-01.txt. (${headline})`, caste: 'coder', priority: 'normal', acceptance: ['C-01.txt exists'], dependsOn: [] }] }],
 });
 export const DEMO_LOOP_PLAN = oneCardPlan('Loop on purpose', 'A card whose first insect loops, to show the Watchdog and the Foreman');
+/** Phase 2 C5: onboarding's sample goal on the practice project (08-D8) plans one small card, no approval needed. */
+export const DEMO_SAMPLE_GOAL = /farewell function/i;
+export const DEMO_SAMPLE_PLAN = oneCardPlan('Add a farewell function', 'One small card on the practice project');
 export const DEMO_FAIL_PLAN = oneCardPlan('Fail on purpose', 'A card the Inspector never passes, to show the Foreman sending it to the Queen');
 
 /**
@@ -157,8 +160,8 @@ export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
   return new FakeEngine((req): FakeReply => {
     const init: ClaudeEvent = { kind: 'init', sessionId: `demo-${req.agentId}`, model: req.route.model };
     const goal = /^# Goal\r?\n(.*)$/m.exec(req.task)?.[1] ?? '';
-    if (req.role === 'queen' && (DEMO_LOOP_GOAL.test(goal) || DEMO_FAIL_GOAL.test(goal))) {
-      const plan = DEMO_LOOP_GOAL.test(goal) ? DEMO_LOOP_PLAN : DEMO_FAIL_PLAN;
+    if (req.role === 'queen' && (DEMO_LOOP_GOAL.test(goal) || DEMO_FAIL_GOAL.test(goal) || DEMO_SAMPLE_GOAL.test(goal))) {
+      const plan = DEMO_LOOP_GOAL.test(goal) ? DEMO_LOOP_PLAN : DEMO_FAIL_GOAL.test(goal) ? DEMO_FAIL_PLAN : DEMO_SAMPLE_PLAN;
       return { delayMs: t.queenMs, tokens: 3_000, costUsd: 0.01, events: [init, { kind: 'text', text: 'Plan: 1 wave, 1 card.' }], text: fenced('Here is the plan.', plan) };
     }
     if (req.role === 'scout') {

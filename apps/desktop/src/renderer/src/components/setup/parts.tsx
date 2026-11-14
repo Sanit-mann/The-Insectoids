@@ -154,12 +154,15 @@ export function BrainFolder({ state, showNote = true }: { state: SetupState; sho
 
 // ---- checklist ---------------------------------------------------------------------------------
 
+/** The phase this build is in: checklist items up to it can be done now (C5 made providers and the sample goal real). */
+export const CURRENT_PHASE = 2;
+
 /** The "finish setup" checklist (08-D2): what's done, what's left, what comes in a later phase. */
 export function Checklist({ items }: { items: readonly ChecklistItem[] }) {
   return (
     <ul aria-label="Setup checklist" className="m-0 flex list-none flex-col gap-1.5 p-0">
       {items.map((item) => {
-        const later = !item.done && item.phase > 1;
+        const later = !item.done && item.phase > CURRENT_PHASE;
         return (
           <li
             className="flex min-h-10 items-center gap-3 rounded-xl border border-line bg-surface px-3.5 py-2"

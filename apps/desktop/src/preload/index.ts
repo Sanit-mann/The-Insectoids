@@ -28,6 +28,8 @@ import {
   SETUP_IPC,
   type SetupApi,
   SetupResultSchema,
+  SampleEstimateSchema,
+  StartSampleResultSchema,
   SetupStateSchema,
   SecretMetaSchema,
   ServiceTestResultSchema,
@@ -89,6 +91,8 @@ const setup: SetupApi = {
   saveAbout: async (input) => SetupResultSchema.parse(await invoke(SETUP_IPC.saveAbout, input)),
   finish: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.finish)),
   restart: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.restart)),
+  sampleEstimate: async () => SampleEstimateSchema.parse(await invoke(SETUP_IPC.sampleEstimate)),
+  startSample: async () => StartSampleResultSchema.parse(await invoke(SETUP_IPC.startSample)),
 };
 
 /** Vault and Services: keys go in once and never come back; replies are metadata only. */
