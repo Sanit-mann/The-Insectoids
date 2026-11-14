@@ -12,10 +12,12 @@ import {
   HiveSnapshotSchema,
   IPC,
   type NoticeModel,
+  E2E_UPDATE_FEED_ENV,
+  UPDATE_IPC,
   maintenanceCadenceId,
 } from '@insectoids/shared';
 import { buildAppInfo } from './app-info';
-import { AppSettingsStore, checkBrainFolder, limitsFor, notificationsOn } from './app-settings';
+import { AppSettingsStore, checkBrainFolder, limitsFor, notificationsOn, updatesOn } from './app-settings';
 import { registerBackupIpc } from './backup-ipc';
 import { createBackupDirSync } from './backups';
 import { registerBrainExportIpc } from './brain-export-ipc';
@@ -35,6 +37,8 @@ import { ProvidersStore } from './providers';
 import { registerProvidersIpc } from './providers-ipc';
 import { ServicesStore, type UrlRules } from './services';
 import { type TrayAction, type TrayInput, createTray } from './tray';
+import { electronAutoUpdater, registerUpdateIpc, writeE2EUpdateConfig } from './update-ipc';
+import { Updater } from './updater';
 import { Vault } from './vault';
 import { registerVaultIpc } from './vault-ipc';
 import { registerWebhookIpc } from './webhook-ipc';
@@ -65,6 +69,10 @@ type E2EHook = BackgroundE2E & {
   agentEditRecord?: (id: string, body: string) => Promise<void>;
   /** C2: a record whose body holds a secret (past the Brain's guard), for the Obsidian export test. */
   plantSecretRecord?: (title: string, body: string) => Promise<{ id: string }>;
+  /** C4: "Restart to update" was pressed (the app does not quit under e2e). */
+  updateRestartRequested?: boolean;
+  /** C4: the release page "Download" or "What's new" would have opened in the browser. */
+  updateOpenedRelease?: string;
 };
 const e2eHook: E2EHook | null = isE2E ? { tray: null, notices: [], loginItem: { openAtLogin: false }, windowInFront: null } : null;
 if (e2eHook) (globalThis as unknown as { __insectoidsE2E?: E2EHook }).__insectoidsE2E = e2eHook;
@@ -105,6 +113,8 @@ let llm: LlmRoute | null = null;
 /** Webhooks (Phase 3 A4): the local listener and each webhook's secret, in main only. */
 let webhookSecrets: WebhookSecrets | null = null;
 let webhooks: WebhookService | null = null;
+/** Update checks (Phase 3 C4); created once the app is ready. */
+let updater: Updater | null = null;
 /** Brain backups (Phase 3 A5): the host writes them; main tells it the folder at every start and on change. */
 const backupDirSync = createBackupDirSync({ dir: () => settings?.backupDir ?? join(app.getPath('userData'), 'backups'), log: (line) => console.log(line) });
 
@@ -512,6 +522,7 @@ function registerIpc(): void {
     assertTrustedSender,
     ...(testExportFolder ? { testPickedFolder: testExportFolder } : {}),
   });
+  registerUpdateIpc({ updater: updater!, assertTrustedSender });
   ipcMain.handle(IPC.brainStatus, (event) => {
     assertTrustedSender(event);
     return brainHost?.status ?? { state: 'starting', message: 'Starting the Brain…' };
@@ -535,6 +546,7 @@ if (!app.requestSingleInstanceLock()) {
     quitting = true;
     keepAwake?.release();
     notifier.dispose();
+    updater?.dispose();
     void webhooks?.stop();
     void broker?.close();
     // Let the Brain close its database cleanly before the app exits.
@@ -594,11 +606,50 @@ if (!app.requestSingleInstanceLock()) {
       platform: process.platform,
       ...(isE2E ? {} : { wasOpenedAtLogin: () => app.getLoginItemSettings().wasOpenedAtLogin }),
     });
+    const store = settings;
+    const e2eFeed = isE2E ? process.env[E2E_UPDATE_FEED_ENV] : undefined;
+    updater = new Updater({
+      currentVersion: app.getVersion(),
+      platform: process.platform,
+      isPackaged: app.isPackaged,
+      appImage: process.env['APPIMAGE'],
+      e2e: isE2E,
+      e2eFeedUrl: e2eFeed,
+      e2eUpdateConfigPath: e2eFeed ? writeE2EUpdateConfig(userData, e2eFeed) : undefined,
+      enabled: updatesOn(store.value),
+      autoUpdater: electronAutoUpdater,
+      saveEnabled: (on) =>
+        store.update((s) => {
+          const next = { ...s };
+          if (on) delete next.updates;
+          else next.updates = false;
+          return next;
+        }),
+      onChange: (s) => {
+        if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(UPDATE_IPC.changed, s);
+      },
+      // The window's close handler and the tray would otherwise keep the app alive.
+      beforeQuit: () => {
+        quitting = true;
+      },
+      e2eRestartRequested: () => {
+        const hook = e2e();
+        if (hook) hook.updateRestartRequested = true;
+      },
+      // Under e2e the page is only recorded, never opened in a real browser.
+      openExternal: async (url) => {
+        const hook = e2e();
+        if (hook) hook.updateOpenedRelease = url;
+        else await shell.openExternal(url);
+      },
+      log: (line) => console.log(line),
+    });
     registerIpc();
     brainHost = startBrain(settings.brainDir);
     mainWindow = createWindow();
     tray = createTray({ iconPath: trayIcon, onAction: onTrayAction });
     renderTray();
+    updater.start();
     // "Next: … today 09:00" stays true as the clock moves on, even while nothing else changes.
     setInterval(renderTray, 60_000).unref();
 

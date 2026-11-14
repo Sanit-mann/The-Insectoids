@@ -2,6 +2,7 @@ import { Moon, Pause, Play, Sun } from 'lucide-react';
 import type { AppInfo, LaneStatus } from '@insectoids/shared';
 import { AwayDigestButton } from '@/components/digest/AwayDigestDialog';
 import { StatusDot } from '@/components/StatusDot';
+import { UpdateNotice } from '@/components/UpdateNotice';
 import { currentGoal } from '@/components/queen/goal-status';
 import { runCommand, useHive } from '@/lib/hive-store';
 import type { Theme } from '@/lib/theme';
@@ -58,6 +59,7 @@ export function TopBar({ title, info, theme, onToggleTheme }: TopBarProps) {
       <span className="ml-auto inline-flex items-center gap-2 rounded-full border border-line bg-surface px-3 py-1.5 text-[13px] text-muted">
         {info ? `v${info.version} · Electron ${info.electron}` : 'Connecting…'}
       </span>
+      <UpdateNotice />
       <AwayDigestButton />
       {snap?.project && (
         <button

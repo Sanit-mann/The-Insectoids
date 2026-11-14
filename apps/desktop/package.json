@@ -13,7 +13,7 @@
     "typecheck": "tsc -p tsconfig.node.json && tsc -p tsconfig.web.json",
     "icons": "node scripts/make-icons.mjs",
     "test:e2e": "electron-vite build && playwright test",
-    "dist": "electron-vite build && electron-builder --config electron-builder.yml"
+    "dist": "electron-vite build && electron-builder --config electron-builder.yml --publish never"
   },
   "devDependencies": {
     "@axe-core/playwright": "4.14.0",
@@ -38,6 +38,7 @@
     "clsx": "2.1.1",
     "electron": "45.2.3",
     "electron-builder": "26.18.0",
+    "electron-updater": "6.8.11",
     "electron-vite": "6.0.0",
     "lucide-react": "1.72.0",
     "motion": "14.7.1",

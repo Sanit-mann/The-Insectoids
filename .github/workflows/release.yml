@@ -74,7 +74,7 @@ jobs:
 
       # Windows signing: added once SignPath approves the project.
       # It will submit the unsigned installer to SignPath and replace it with the signed one before the upload below.
-      # (Signing changes the file, so latest.yml, if produced, must be regenerated or its sha512 updated afterwards.)
+      # (Signing changes the file, so latest.yml's sha512 and size, and the installer's .blockmap, must be regenerated afterwards.)
       # - name: Sign the Windows installer (SignPath)
       #   if: runner.os == 'Windows'
       #   uses: signpath/github-action-submit-signing-request@<pinned version>
@@ -91,9 +91,11 @@ jobs:
           path: |
             apps/desktop/release/The-Insectoids-Setup-*.exe
             apps/desktop/release/The-Insectoids-*.dmg
+            apps/desktop/release/The-Insectoids-*-mac.zip
             apps/desktop/release/The-Insectoids-*.AppImage
             apps/desktop/release/the-insectoids_*.deb
             apps/desktop/release/latest*.yml
+            apps/desktop/release/*.blockmap
           if-no-files-found: error
           retention-days: 14
 

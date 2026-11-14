@@ -2,7 +2,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync 
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { AppSettingsStore, checkBrainFolder, limitsFor, notificationsOn, parseAppSettings } from './app-settings';
+import { AppSettingsStore, checkBrainFolder, limitsFor, notificationsOn, parseAppSettings, updatesOn } from './app-settings';
 
 let dir: string;
 beforeEach(() => {
@@ -56,6 +56,14 @@ describe('app.json', () => {
     expect(parseAppSettings({ notifications: 'no' })).not.toHaveProperty('notifications');
     expect(parseAppSettings({ notifications: false })).toMatchObject({ notifications: false });
     expect(notificationsOn(parseAppSettings({ notifications: false }))).toBe(false);
+  });
+
+  it('update checks are on by default; only a real "off" is kept (C4)', () => {
+    expect(updatesOn(parseAppSettings({}))).toBe(true);
+    expect(parseAppSettings({ updates: true })).not.toHaveProperty('updates');
+    expect(parseAppSettings({ updates: 'off' })).not.toHaveProperty('updates');
+    expect(parseAppSettings({ updates: false })).toMatchObject({ updates: false });
+    expect(updatesOn(parseAppSettings({ updates: false }))).toBe(false);
   });
 
   it('keeps webhook secret handles and the webhook port (A4), and drops broken ones', () => {

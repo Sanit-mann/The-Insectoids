@@ -6,6 +6,7 @@ import type { VaultApi } from './vault-api';
 import type { WebhookApi } from './webhook-api';
 import type { BackupApi } from './backup-api';
 import type { BrainExportApi } from './export-api';
+import type { UpdateApi } from './update-api';
 
 /**
  * Typed contract between the renderer and the main process.
@@ -47,4 +48,6 @@ export interface InsectoidsApi {
   backups: BackupApi;
   /** The Brain as an Obsidian vault (Phase 3 C2). */
   brainExport: BrainExportApi;
+  /** Update checks (Phase 3 C4). */
+  updates: UpdateApi;
 }

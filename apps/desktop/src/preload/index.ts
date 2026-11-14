@@ -40,6 +40,10 @@ import {
   SampleEstimateSchema,
   StartSampleResultSchema,
   SetupStateSchema,
+  UPDATE_IPC,
+  type UpdateApi,
+  type UpdateState,
+  UpdateStateSchema,
   SecretMetaSchema,
   ServiceTestResultSchema,
   VAULT_IPC,
@@ -163,6 +167,26 @@ const brainExport: BrainExportApi = {
   },
 };
 
+/** Update checks (Phase 3 C4): main checks, downloads and restarts; the page only asks and listens. */
+const updates: UpdateApi = {
+  state: async () => UpdateStateSchema.parse(await invoke(UPDATE_IPC.state)),
+  setEnabled: async (enabled) => UpdateStateSchema.parse(await invoke(UPDATE_IPC.setEnabled, enabled === true)),
+  check: async () => UpdateStateSchema.parse(await invoke(UPDATE_IPC.check)),
+  download: async () => UpdateStateSchema.parse(await invoke(UPDATE_IPC.download)),
+  restartToUpdate: async () => UpdateStateSchema.parse(await invoke(UPDATE_IPC.restartToUpdate)),
+  openRelease: async () => UpdateStateSchema.parse(await invoke(UPDATE_IPC.openRelease)),
+  onChanged: (listener) => {
+    const handler = (_e: IpcRendererEvent, raw: unknown): void => {
+      const parsed = UpdateStateSchema.safeParse(raw);
+      if (parsed.success) listener(parsed.data as UpdateState);
+    };
+    ipcRenderer.on(UPDATE_IPC.changed, handler);
+    return () => {
+      ipcRenderer.removeListener(UPDATE_IPC.changed, handler);
+    };
+  },
+};
+
 // The only door from the UI to the main process. Every reply is validated.
 const api: InsectoidsApi = {
   appInfo: async () => AppInfoSchema.parse(await invoke(IPC.appInfo)),
@@ -174,6 +198,7 @@ const api: InsectoidsApi = {
   webhooks,
   backups,
   brainExport,
+  updates,
 };
 
 contextBridge.exposeInMainWorld('insectoids', api);

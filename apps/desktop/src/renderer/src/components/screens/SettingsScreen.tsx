@@ -5,9 +5,11 @@ import { Switch } from '@/components/connections/Switch';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { NotificationsSetting, StartWithComputerSetting } from '@/components/settings/Background';
 import { BackupsSetting } from '@/components/settings/Backups';
+import { UpdatesSetting } from '@/components/settings/Updates';
 import { BrainFolder, Checklist, PresetCards } from '@/components/setup/parts';
 import { Button } from '@/components/ui/button';
 import { loadSetup, refreshSetup, setupActions, useSetup } from '@/lib/setup-store';
+import { UPDATES_HEADING_ID } from '@/lib/update-store';
 
 function Section({ id, title, description, children }: { id: string; title: string; description?: string; children: ReactNode }) {
   return (
@@ -127,6 +129,14 @@ export function SettingsScreen() {
           enabled={state.startWithComputer.enabled}
           message={state.startWithComputer.message}
         />
+      </Section>
+
+      <Section
+        description="New versions of The Insectoids, when you want them. Nothing installs until you choose to restart."
+        id={UPDATES_HEADING_ID}
+        title="Updates"
+      >
+        <UpdatesSetting />
       </Section>
 
       <Section id="settings-theme" title="Theme">

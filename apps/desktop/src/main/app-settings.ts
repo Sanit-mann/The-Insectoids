@@ -27,10 +27,15 @@ export interface AppSettings {
   notifications?: boolean;
   /** The folder last picked for the Obsidian export (Phase 3 C2); the picker starts there next time. */
   exportDir?: string;
+  /** Update checks (Tech stack 09-D4; Phase 3 C4). Absent = on; only `false` is stored. */
+  updates?: boolean;
 }
 
 /** Whether desktop notifications are on (B2): on unless the user switched them off. */
 export const notificationsOn = (s: AppSettings): boolean => s.notifications !== false;
+
+/** Whether update checks are on (C4): on unless the user switched them off. */
+export const updatesOn = (s: AppSettings): boolean => s.updates !== false;
 
 /** Keeps every valid field and drops the rest, so one bad value never resets the whole file. */
 export function parseAppSettings(raw: unknown): AppSettings {
@@ -56,6 +61,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
     ...(typeof backupDir === 'string' && backupDir.length > 0 && isAbsolute(backupDir) ? { backupDir } : {}),
     ...(o['notifications'] === false ? { notifications: false } : {}),
     ...(typeof exportDir === 'string' && exportDir.length > 0 && isAbsolute(exportDir) ? { exportDir } : {}),
+    ...(o['updates'] === false ? { updates: false } : {}),
   };
 }
 

@@ -12,3 +12,4 @@ export * from './webhook-api';
 export * from './backup-api';
 export * from './background-api';
 export * from './export-api';
+export * from './update-api';
