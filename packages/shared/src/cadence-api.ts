@@ -26,6 +26,33 @@ export const LocalTimeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Us
 /** Days of the week as JavaScript numbers them: 0 = Sunday … 6 = Saturday. */
 export const WeekdaySchema = z.number().int().min(0).max(6);
 
+/** A folder inside the project, relative to its root: "inbox", "docs/incoming" ("." is the whole project). */
+export const ProjectFolderSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(300)
+  .transform((s) => s.replace(/\\/g, '/').replace(/\/+$/, '') || '.')
+  .refine((s) => !/^([a-zA-Z]:|\/)/.test(s), 'Use a folder inside the project, like inbox or docs/incoming.')
+  .refine((s) => !s.split('/').some((p) => p === '..'), 'The folder must be inside the project.')
+  .refine((s) => !s.split('/').some((p) => p === '.git'), "The project's .git folder can't be watched.");
+
+/** A simple file-name pattern: `*` and `?` wildcards, e.g. `*.md` or `report-*.csv`. No folders. */
+export const FilePatternSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(100)
+  .regex(/^[^/\\]+$/, 'A file-name pattern like *.md (no folders).');
+
+export const HiveEventTriggerSchema = z.enum(['goal-done', 'budget-warning']);
+export type HiveEventTrigger = z.infer<typeof HiveEventTriggerSchema>;
+
+/** How long file changes settle before a file-watch run starts, so one copy of many files is one run. */
+export const FILE_SETTLE_MS = 5_000;
+/** At most this many files are listed in the run's goal (the rest are counted). */
+export const MAX_LISTED_FILES = 20;
+
 export const CadenceWhenSchema = z.discriminatedUnion('type', [
   /** Every N minutes, counted from the last scheduled run (not from when the run finished). */
   z.object({ type: z.literal('interval'), everyMinutes: z.number().int().min(MIN_INTERVAL_MINUTES).max(MAX_INTERVAL_MINUTES) }),
@@ -35,8 +62,26 @@ export const CadenceWhenSchema = z.discriminatedUnion('type', [
    * first valid minute after it; a time that happens twice on a fall-back day runs once.
    */
   z.object({ type: z.literal('weekly'), days: z.array(WeekdaySchema).min(1).max(7), time: LocalTimeSchema }),
+  /**
+   * When files are added or changed in a folder of the project (A3). `folder` is relative to the project root
+   * (forward slashes, no `..`, never `.git`); `pattern` optionally limits it to matching file names (`*.md`,
+   * `report-*.csv`). Changes settle for a few seconds and then start ONE run that lists the files. Deleted files
+   * never trigger. The hive's own worktrees and `.git` are never watched.
+   */
+  z.object({ type: z.literal('file'), folder: ProjectFolderSchema, pattern: FilePatternSchema.nullable().default(null) }),
+  /**
+   * When something happens in the hive (A3):
+   * - `goal-done`: a goal finished (its merge was approved or declined). With `cadenceId`, only goals that cadence
+   *   started ("after each weekly report, post a summary"); without, any goal the user or a schedule started.
+   * - `budget-warning`: a goal used 75% of its token budget (once per goal).
+   * Loop guard: a goal started by an event cadence never triggers another event cadence, and a cadence is never
+   * triggered by its own goals.
+   */
+  z.object({ type: z.literal('event'), on: HiveEventTriggerSchema, cadenceId: z.string().min(1).max(200).nullable().default(null) }),
 ]);
 export type CadenceWhen = z.infer<typeof CadenceWhenSchema>;
+/** Schedules have a next time; file and event cadences wait for something to happen. */
+export const isScheduled = (w: CadenceWhen): boolean => w.type === 'interval' || w.type === 'weekly';
 
 /**
  * How much a run may do without the user (05-D6), in plain words:
@@ -66,9 +111,10 @@ export type CadenceFields = z.output<typeof CadenceInputSchema>;
 
 /**
  * Why a run was triggered: on schedule, catching up once after the app was closed, after the computer woke from
- * sleep (A2), or the user's "Run now". A3–A5 add 'file', 'hive-event', 'webhook' and 'maintenance'.
+ * sleep (A2), the user's "Run now", files changing in a watched folder (A3) or a hive event (A3). A4–A5 add
+ * 'webhook' and 'maintenance'.
  */
-export const CadenceRunReasonSchema = z.enum(['schedule', 'catch-up', 'wake', 'manual']);
+export const CadenceRunReasonSchema = z.enum(['schedule', 'catch-up', 'wake', 'manual', 'file', 'event']);
 /**
  * What happened when it was due:
  * - `started`: a goal was submitted (goalId set);
@@ -102,7 +148,7 @@ export const CadenceViewSchema = z.object({
   enabled: z.boolean(),
   /** The project it belongs to (cadences run only while their project is the open one). */
   shelf: z.string(),
-  /** Next time it is due, or null when switched off. */
+  /** Next time it is due: null when switched off, and always null for file and event cadences (they wait for something to happen). */
   nextRunAt: z.number().nullable(),
   /** Set when a run is waiting to happen once it can (paused hive, another project open, app was closed). */
   pending: z.boolean(),
