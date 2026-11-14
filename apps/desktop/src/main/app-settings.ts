@@ -15,6 +15,8 @@ export interface AppSettings {
   sample?: { goalId: string; practicePath: string; startedAt: number };
   /** The project that was open before the sample switched to the practice project, so the user can go back. */
   previousProject?: string;
+  /** Keep the computer awake while the hive works (05-D5; Phase 3 A2). Absent = off. */
+  keepAwake?: boolean;
 }
 
 /** Keeps every valid field and drops the rest, so one bad value never resets the whole file. */
@@ -32,6 +34,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
     onboarding: typeof completedAt === 'number' && Number.isFinite(completedAt) ? { completedAt } : {},
     ...(sample ? { sample } : {}),
     ...(typeof prev === 'string' && prev.length > 0 ? { previousProject: prev } : {}),
+    ...(o['keepAwake'] === true ? { keepAwake: true } : {}),
   };
 }
 

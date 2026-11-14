@@ -120,3 +120,15 @@ Three milestones, each ending in something the user can try.
   - **e2e:** `cadence.spec.ts` (8 tests), including a cadence that fires on its own. Under e2e only, `INSECTOIDS_E2E_CADENCE_SECONDS=1` counts interval minutes as seconds.
   - **Fix after review:** the time field said "24-hour", but Windows shows the native time picker in 12-hour form, so the label is now "Time (your local time)".
   - **Open question:** a goal that waits for merge approval still counts as running, so its cadence skips later runs until the user approves or cancels the merge. The skip line says so. This is safe (unmerged work doesn't pile up), but a weekly report would need its merge approved each week. Revisit with the digest (B1).
+- **A2 Sleep and wake: done (2026-11-14).** Unit tests: 956 pass. e2e: 148 passed, 3 skipped. Lint and typecheck are clean.
+  - **Wake:**
+    - **The signal:** main listens for the computer waking up (Electron `powerMonitor` `resume`) and tells the Brain host (a new `wake` host call).
+    - **What happens:** the scheduler checks at once instead of waiting for its next re-check. On some systems timers don't count sleep time at all, so that could be up to a minute late.
+    - **Missed runs:** any that came due while asleep run once, labelled "After waking up" (a new run reason, `wake`).
+    - **Tests:** a unit test with a one-minute re-check proves only the wake signal makes it run, and that waking with nothing due starts nothing. An e2e test sends a real `resume` through Electron and checks the app keeps working.
+  - **Keep awake** (05-D5, off by default because it costs battery):
+    - **The switch:** in Settings → "Keep awake", stored in `app.json`.
+    - **What it does:** while it's on and agents are working, main holds Electron's `powerSaveBlocker` (`prevent-app-suspension`), so the computer won't go to sleep on its own; the screen can still turn off. It lets go as soon as the hive is idle, when the switch goes off, and on quit (`KeepAwake`, with unit tests and a fake blocker).
+    - **Status in words:** "Off: the computer sleeps as usual", "On: the hive is idle…", or "On: keeping the computer awake now, because the hive is working". It updates live from hive changes.
+    - **e2e:** the status really changes while a goal runs and again when it's done, checked against the real blocker. The choice is kept.
+  - **Where it lives:** both run in main, because Electron's power APIs only exist there. The tray refresh now also updates keep-awake, and keeps working without a tray.

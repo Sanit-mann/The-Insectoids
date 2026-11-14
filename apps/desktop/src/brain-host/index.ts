@@ -193,6 +193,9 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
     case 'cadenceRuns':
       // Validated in main against CadenceRunsRequestSchema.
       return hive.cadenceRuns(params as Parameters<HiveManager['cadenceRuns']>[0]);
+    case 'wake':
+      hive.wake();
+      return null;
     case 'engineCard':
       return hive.engineCard(String((params as { id?: unknown })?.id ?? ''));
     case 'e2eEngineInstalled': {

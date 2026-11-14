@@ -54,7 +54,7 @@ afterEach(async () => {
   rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 });
 
-async function make(project = repo): Promise<HiveManager> {
+async function make(project = repo, recheckMs = 25): Promise<HiveManager> {
   const m = new HiveManager({
     brain,
     tokens: null,
@@ -68,7 +68,7 @@ async function make(project = repo): Promise<HiveManager> {
     tickMs: 20,
     seed: 1,
     geminiDetect: async () => ({ status: 'missing' }),
-    cadence: { intervalUnitMs: UNIT, recheckMs: 25 },
+    cadence: { intervalUnitMs: UNIT, recheckMs },
   });
   managers.push(m);
   await m.init();
@@ -178,6 +178,33 @@ describe('schedules (Cadence 05; Phase 3 A1)', () => {
     expect(goalsOf(c.id)).toHaveLength(1);
     // Next time stays on the schedule's own phase (a week of 20 ms "minutes" ≈ 3.4 min after the missed one).
     expect(snap(m).cadences[0]!.nextRunAt).toBeGreaterThan(Date.now());
+  });
+
+  it('after the computer wakes from sleep, a run that came due while it slept happens at once, labelled "wake" (A2)', async () => {
+    // A slow safety re-check (a minute), as after a real sleep: only the wake signal can make it run now.
+    const m = await make(repo, 60_000);
+    const shelf = m.project!.shelf;
+    const c = brain.cadences.create({
+      shelf,
+      name: 'Morning summary',
+      when: { type: 'interval', everyMinutes: 60 * 24 },
+      goal: ONE_WAVE,
+      budgetTokens: 30_000,
+      autonomy: 'small-plans',
+      enabled: true,
+      nextRunAt: Date.now() - 2 * DAY,
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    expect(goalsOf(c.id)).toHaveLength(0);
+    m.wake();
+    const goal = await until('the run after waking', () => goalsOf(c.id)[0]);
+    const run = await until('the run in the log', () => m.cadenceRuns({ cadenceId: c.id })[0]);
+    expect(run).toMatchObject({ reason: 'wake', outcome: 'started', goalId: goal.id });
+    expect(goalsOf(c.id)).toHaveLength(1);
+    // Waking again with nothing due starts nothing.
+    m.wake();
+    await new Promise((r) => setTimeout(r, 150));
+    expect(goalsOf(c.id)).toHaveLength(1);
   });
 
   it("another project's cadence waits while its project is closed, then catches up once when it opens", async () => {

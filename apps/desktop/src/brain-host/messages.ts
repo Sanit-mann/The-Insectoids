@@ -62,6 +62,8 @@ export type HostMethod =
   | 'budgets'
   // Cadence run history (Phase 3 A1), read-only.
   | 'cadenceRuns'
+  // The computer woke from sleep (Phase 3 A2): main tells the host so owed cadence runs happen at once.
+  | 'wake'
   // Engine install (C4): main reads the engine's card (its official install command) from the host.
   // 'e2eEngineInstalled' works only when the host runs under INSECTOIDS_E2E=1.
   | 'engineCard'

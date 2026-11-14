@@ -30,6 +30,7 @@ export const AUTONOMY_ORDER: readonly CadenceAutonomy[] = ['ask', 'small-plans',
 export const REASON: Record<CadenceRunView['reason'], string> = {
   schedule: 'On schedule',
   'catch-up': 'Catch-up (the app was closed when it was due)',
+  wake: 'After waking up (the computer was asleep when it was due)',
   manual: 'Run now',
 };
 

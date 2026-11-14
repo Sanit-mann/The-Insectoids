@@ -36,6 +36,8 @@ export interface SetupDeps {
   /** Tests: replace git for the practice project. */
   git?: Git;
   window: () => BrowserWindow | null;
+  /** Whether the computer is being kept awake right now (A2), and a hook to apply a changed switch. */
+  keepAwake: { active: () => boolean; changed: () => Promise<void> };
   assertTrustedSender: (event: IpcMainInvokeEvent) => void;
   /** Move the Brain to another folder (null = default). Resolves to an error in plain words, or null. */
   switchBrainDir: (dir: string | null) => Promise<string | null>;
@@ -70,6 +72,7 @@ export function registerSetupIpc(d: SetupDeps): void {
       providers,
       sample: s.sample ?? null,
       previousProject: s.previousProject ?? null,
+      keepAwake: { enabled: s.keepAwake === true, active: d.keepAwake.active() },
       checklist: buildChecklist({
         completed,
         engineReady: readyEngines.length > 0,
@@ -139,6 +142,19 @@ export function registerSetupIpc(d: SetupDeps): void {
       const err = await h.call('setLimits', limitsFor(preset)).then(() => null, (e: unknown) => (e instanceof Error ? e.message : String(e)));
       if (err) return result(`Saved, but the hive could not apply it yet: ${err}`);
     }
+    return result();
+  });
+
+  handle(SETUP_IPC.setKeepAwake, async (arg) => {
+    if (typeof arg !== 'boolean') throw new Error('Keep awake is on or off.');
+    const enabled = arg;
+    d.settings.update((s) => {
+      const next = { ...s };
+      if (enabled) next.keepAwake = true;
+      else delete next.keepAwake;
+      return next;
+    });
+    await d.keepAwake.changed();
     return result();
   });
 

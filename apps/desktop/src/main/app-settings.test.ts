@@ -33,6 +33,12 @@ describe('app.json', () => {
     expect(parseAppSettings(null)).toEqual({ preset: 'balanced', onboarding: {} });
   });
 
+  it('keeps the keep-awake switch only when it is really on (A2)', () => {
+    expect(parseAppSettings({ keepAwake: true })).toMatchObject({ keepAwake: true });
+    expect(parseAppSettings({ keepAwake: 'yes' })).not.toHaveProperty('keepAwake');
+    expect(parseAppSettings({ keepAwake: false })).not.toHaveProperty('keepAwake');
+  });
+
   it('keeps the sample goal and the previous project (C5), and drops broken ones', () => {
     const sample = { goalId: 'g1', practicePath: '/d/practice-project', startedAt: 5 };
     expect(parseAppSettings({ preset: 'careful', onboarding: {}, sample, previousProject: '/d/site' })).toEqual({

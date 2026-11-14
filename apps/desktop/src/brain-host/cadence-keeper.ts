@@ -43,6 +43,8 @@ export class CadenceKeeper {
   #checking = false;
   #again = false;
   #stopped = false;
+  /** Set by wake(): the next pass labels late runs as 'wake' instead of schedule or catch-up. */
+  #afterWake = false;
 
   constructor(private readonly d: CadenceKeeperDeps) {}
 
@@ -152,6 +154,16 @@ export class CadenceKeeper {
     this.#timer = null;
   }
 
+  /**
+   * The computer woke from sleep (05-D5). Timers may have been held up while it slept (on some systems they
+   * don't count sleep at all), so check now instead of waiting for the next re-check. Runs that came due while
+   * it slept happen once, labelled "after waking up".
+   */
+  wake(): void {
+    this.#afterWake = true;
+    void this.check();
+  }
+
   /** Runs whatever is due or owed on the open project, then re-arms. Safe to call any time. */
   async check(): Promise<void> {
     if (this.#stopped) return;
@@ -175,6 +187,8 @@ export class CadenceKeeper {
 
   async #checkOnce(): Promise<void> {
     const shelf = this.d.shelf();
+    const afterWake = this.#afterWake;
+    this.#afterWake = false;
     if (!shelf) return;
     const now = this.d.now();
     let touched = false;
@@ -193,6 +207,7 @@ export class CadenceKeeper {
         reason = 'catch-up';
       }
       if (!reason) continue;
+      if (afterWake) reason = 'wake';
       const blocked = this.d.blocked();
       if (blocked) {
         if (!c.pending) {
@@ -225,11 +240,11 @@ export class CadenceKeeper {
   }
 
   async #start(c: Cadence, reason: CadenceRunReason, extra = ''): Promise<void> {
-    const why = reason === 'manual' ? 'You ran it now.' : reason === 'catch-up' ? 'Catching up once on a missed run.' : `${whenText(c.when)}.`;
+    const why = reason === 'manual' ? 'You ran it now.' : reason === 'catch-up' ? 'Catching up once on a missed run.' : reason === 'wake' ? 'The computer woke up; catching up once on a run it missed while asleep.' : `${whenText(c.when)}.`;
     try {
       const goalId = await this.d.submit(c, reason);
       this.d.brain.cadences.recordRun({ cadenceId: c.id, reason, outcome: 'started', goalId, message: [`Started a goal for the Queen. ${why}`, extra].filter(Boolean).join(' ') });
-      this.d.note(`Cadence "${c.name}" started a run (${reason === 'schedule' ? 'on schedule' : reason === 'manual' ? 'run now' : 'catching up once'}).`);
+      this.d.note(`Cadence "${c.name}" started a run (${reason === 'schedule' ? 'on schedule' : reason === 'manual' ? 'run now' : reason === 'wake' ? 'after the computer woke up' : 'catching up once'}).`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       this.d.brain.cadences.recordRun({ cadenceId: c.id, reason, outcome: 'failed', message: `Couldn't start: ${msg}` });

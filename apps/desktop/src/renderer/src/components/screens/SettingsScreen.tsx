@@ -1,6 +1,7 @@
-import { Palette, RotateCcw } from 'lucide-react';
+import { Moon, Palette, RotateCcw, Sun } from 'lucide-react';
 import { type ReactNode, useEffect, useState } from 'react';
 import { MeaningSearchSettings } from '@/components/brain/MeaningSearch';
+import { Switch } from '@/components/connections/Switch';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { BrainFolder, Checklist, PresetCards } from '@/components/setup/parts';
 import { Button } from '@/components/ui/button';
@@ -94,12 +95,74 @@ export function SettingsScreen() {
         <MeaningSearchSettings />
       </Section>
 
+      <Section
+        description="Scheduled work needs the computer awake. If it sleeps, missed runs happen once when it wakes up."
+        id="settings-keep-awake"
+        title="Keep awake"
+      >
+        <KeepAwakeSetting active={state.keepAwake.active} enabled={state.keepAwake.enabled} />
+      </Section>
+
       <Section id="settings-theme" title="Theme">
         <p className="m-0 flex items-center gap-2 text-sm text-muted">
           <Palette aria-hidden="true" className="size-4" />
           Switch between dark and light with the sun/moon button in the top bar.
         </p>
       </Section>
+    </div>
+  );
+}
+
+/**
+ * "Keep the computer awake while the hive works" (Cadence 05-D5; Phase 3 A2). Off by default because it costs
+ * battery; when on, the computer may still sleep whenever the hive is idle. The state is always shown in words.
+ */
+function KeepAwakeSetting({ enabled, active }: { enabled: boolean; active: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Whether it's keeping the computer awake follows the hive: re-read shortly after the hive changes (main applies
+  // it about half a second after each change).
+  useEffect(() => {
+    if (!enabled) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const off = window.insectoids.hive.onEvent((e) => {
+      if (e.type !== 'changed' || timer) return;
+      timer = setTimeout(() => {
+        timer = null;
+        void refreshSetup();
+      }, 900);
+    });
+    return () => {
+      off();
+      if (timer) clearTimeout(timer);
+    };
+  }, [enabled]);
+  const toggle = async (next: boolean): Promise<void> => {
+    setBusy(true);
+    setError(null);
+    const r = await setupActions.setKeepAwake(next);
+    setBusy(false);
+    if (!r.ok) setError(r.error);
+  };
+  const Icon = active ? Sun : Moon;
+  const status = !enabled
+    ? 'Off: the computer sleeps as usual. Missed runs happen once when it wakes up.'
+    : active
+      ? 'On: keeping the computer awake now, because the hive is working.'
+      : 'On: the hive is idle, so the computer may sleep as usual.';
+  return (
+    <div className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4" data-testid="keep-awake">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <p className="m-0 max-w-[560px] text-sm text-text">
+          Keep the computer awake while the hive is working. It uses more battery; the screen can still turn off.
+        </p>
+        <Switch checked={enabled} disabled={busy} label="Keep the computer awake while the hive works" onChange={(v) => void toggle(v)} />
+      </div>
+      <p aria-live="polite" className="m-0 flex items-center gap-2 text-sm text-muted" data-testid="keep-awake-status">
+        <Icon aria-hidden="true" className="size-4" />
+        {status}
+      </p>
+      {error ? <InlineAlert message={error} onDismiss={() => setError(null)} title="Could not change keep awake" tone="error" /> : null}
     </div>
   );
 }

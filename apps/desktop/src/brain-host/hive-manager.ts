@@ -1389,6 +1389,11 @@ export class HiveManager {
    * The Budgets screen (Phase 2 C4; 02-D7, D9; 04-D7). Goals are the open project's; days, roles, routing and
    * what the Treasurer learned span every project, because subscriptions are shared by all of them.
    */
+  /** The computer woke from sleep (Phase 3 A2, 05-D5): runs that came due while it slept happen now, once. */
+  wake(): void {
+    this.#cadences.wake();
+  }
+
   /** A cadence's run history, newest first (Phase 3 A1). Runs of a deleted cadence stay readable. */
   cadenceRuns(req: { cadenceId: string; limit?: number }): CadenceRunView[] {
     const c = this.#o.brain.cadences.get(req.cadenceId);

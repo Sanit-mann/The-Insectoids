@@ -24,6 +24,8 @@ export const SETUP_IPC = {
   sampleEstimate: 'setup:sample-estimate',
   /** C5 (08-D8): creates (or reuses) the practice project and starts the sample goal on it, after the user said yes. */
   startSample: 'setup:start-sample',
+  /** Phase 3 A2 (05-D5): keep the computer awake while the hive works (off by default; costs battery). */
+  setKeepAwake: 'setup:set-keep-awake',
 } as const;
 
 /**
@@ -150,6 +152,11 @@ export const SetupStateSchema = z.object({
   sample: z.object({ goalId: z.string(), practicePath: z.string(), startedAt: z.number() }).nullable().default(null),
   /** C5: the project that was open before the sample switched to the practice project ("back to your project"). */
   previousProject: z.string().nullable().default(null),
+  /**
+   * Phase 3 A2 (05-D5): `enabled` is the user's switch (off by default); `active` is true while it is on and the
+   * hive is working, so the computer is being kept awake right now.
+   */
+  keepAwake: z.object({ enabled: z.boolean(), active: z.boolean() }).default({ enabled: false, active: false }),
   checklist: z.array(ChecklistItemSchema),
 });
 export type SetupState = z.infer<typeof SetupStateSchema>;
@@ -172,4 +179,5 @@ export interface SetupApi {
   restart(): Promise<SetupResult>;
   sampleEstimate(): Promise<SampleEstimate>;
   startSample(): Promise<StartSampleResult>;
+  setKeepAwake(enabled: boolean): Promise<SetupResult>;
 }

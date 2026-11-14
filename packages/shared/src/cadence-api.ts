@@ -64,8 +64,11 @@ export type CadenceInput = z.input<typeof CadenceInputSchema>;
 /** A cadence after its defaults are filled in: what the cadence commands carry. */
 export type CadenceFields = z.output<typeof CadenceInputSchema>;
 
-/** Why a run was triggered. A2–A5 add 'wake', 'file', 'hive-event', 'webhook' and 'maintenance'. */
-export const CadenceRunReasonSchema = z.enum(['schedule', 'catch-up', 'manual']);
+/**
+ * Why a run was triggered: on schedule, catching up once after the app was closed, after the computer woke from
+ * sleep (A2), or the user's "Run now". A3–A5 add 'file', 'hive-event', 'webhook' and 'maintenance'.
+ */
+export const CadenceRunReasonSchema = z.enum(['schedule', 'catch-up', 'wake', 'manual']);
 /**
  * What happened when it was due:
  * - `started`: a goal was submitted (goalId set);

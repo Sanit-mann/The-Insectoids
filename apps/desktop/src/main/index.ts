@@ -2,13 +2,14 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, safeStorage, session, shell } from 'electron';
+import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, powerMonitor, powerSaveBlocker, safeStorage, session, shell } from 'electron';
 import { CommandResultSchema, HIVE_IPC, type HivePush, HiveSnapshotSchema, IPC } from '@insectoids/shared';
 import { buildAppInfo } from './app-info';
 import { AppSettingsStore, checkBrainFolder, limitsFor } from './app-settings';
 import { BrainHost } from './brain-host';
 import { Broker } from './broker';
 import { handleBrokerRequest } from './broker-requests';
+import { KeepAwake } from './keep-awake';
 import { readyProviders } from './ready-providers';
 import { resolveDoorPaths, resolveLibraryDir } from './doors';
 import { registerHiveIpc } from './hive-ipc';
@@ -42,6 +43,8 @@ if (isE2E) app.setPath('userData', mkdtempSync(join(tmpdir(), 'insectoids-e2e-')
 let mainWindow: BrowserWindow | null = null;
 let tray: ReturnType<typeof createTray> | null = null;
 let trayTimer: NodeJS.Timeout | null = null;
+/** "Keep the computer awake while the hive works" (A2, 05-D5); created once the app is ready. */
+let keepAwake: KeepAwake | null = null;
 let quitting = false;
 let brainHost: BrainHost | null = null;
 let settings: AppSettingsStore | null = null;
@@ -161,26 +164,31 @@ function startBrain(brainDir: string): BrainHost {
   return host;
 }
 
-/** Hive pushes go to the window; a "changed" also refreshes the tray. */
+/** Hive pushes go to the window; a "changed" also refreshes the tray and keep-awake. */
 function forwardPush(push: HivePush): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(HIVE_IPC.event, push);
   if (push.type === 'changed') scheduleTrayUpdate();
 }
 
 function scheduleTrayUpdate(): void {
-  if (trayTimer || !tray) return;
+  if (trayTimer || (!tray && !keepAwake)) return;
   trayTimer = setTimeout(() => {
     trayTimer = null;
     void refreshTray();
   }, 500);
 }
 
+/** The tray's status and keep-awake both follow the hive's real state. */
 async function refreshTray(): Promise<void> {
-  if (!tray || !brainHost || brainHost.status.state !== 'ready') return;
+  if (!brainHost || brainHost.status.state !== 'ready') {
+    keepAwake?.update({ enabled: false, working: false });
+    return;
+  }
   try {
     const s = HiveSnapshotSchema.parse(await brainHost.call('snapshot'));
+    keepAwake?.update({ enabled: settings?.value.keepAwake === true, working: s.hive.working > 0 });
     const state: TrayState = { working: s.hive.working, paused: s.hive.paused, approvals: s.approvals.filter((a) => a.status === 'waiting').length };
-    tray.update(state);
+    tray?.update(state);
   } catch {
     // The tray keeps its last state; the next change retries.
   }
@@ -248,6 +256,7 @@ function registerIpc(): void {
   registerSetupIpc({
     settings: settings!,
     host: () => brainHost,
+    keepAwake: { active: () => keepAwake?.active ?? false, changed: () => refreshTray() },
     userDataDir: app.getPath('userData'),
     providers: () => providers?.all().filter((p) => p.enabled).length ?? 0,
     // Under e2e the scripted test engine is the one that runs everything, so it counts as working.
@@ -292,6 +301,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('second-instance', showWindow);
   app.on('before-quit', (event) => {
     quitting = true;
+    keepAwake?.release();
     void broker?.close();
     // Let the Brain close its database cleanly before the app exits.
     if (brainHost) {
@@ -307,6 +317,12 @@ if (!app.requestSingleInstanceLock()) {
     session.defaultSession.setPermissionRequestHandler((_wc, _permission, callback) => callback(false));
 
     settings = new AppSettingsStore(app.getPath('userData'));
+    keepAwake = new KeepAwake(powerSaveBlocker);
+    // Runs that came due while the computer slept happen now, once (05-D5); timers may have been held up.
+    powerMonitor.on('resume', () => {
+      void brainHost?.call('wake').catch(() => undefined);
+      scheduleTrayUpdate();
+    });
     // e2e specs that are not about setup start as if setup were done (fresh throwaway profile each run).
     if (isE2E && process.env['INSECTOIDS_E2E_ONBOARDED'] === '1' && settings.value.onboarding.completedAt === undefined) {
       settings.update((s) => ({ ...s, onboarding: { completedAt: Date.now() } }));

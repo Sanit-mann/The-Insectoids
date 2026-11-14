@@ -90,6 +90,7 @@ const setup: SetupApi = {
   pickBrainFolder: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.pickBrainFolder)),
   useDefaultBrainFolder: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.useDefaultBrainFolder)),
   setPreset: async (preset) => SetupResultSchema.parse(await invoke(SETUP_IPC.setPreset, preset)),
+  setKeepAwake: async (enabled) => SetupResultSchema.parse(await invoke(SETUP_IPC.setKeepAwake, enabled)),
   saveAbout: async (input) => SetupResultSchema.parse(await invoke(SETUP_IPC.saveAbout, input)),
   finish: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.finish)),
   restart: async () => SetupResultSchema.parse(await invoke(SETUP_IPC.restart)),
