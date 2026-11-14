@@ -1,5 +1,5 @@
 import type { ApprovalItem, Brain, LibraryItem } from '@insectoids/brain';
-import { type DoneCard, type FolderScan, type RepeatedWork, type SkillDraft, type UserLibrary, findRepeatedWork } from '@insectoids/harness';
+import { type DoneCard, type FolderScan, type RepeatedWork, type SkillDraft, type UserLibrary, coverageTerms, findRepeatedWork } from '@insectoids/harness';
 import { type LibraryImportResult, type LibraryScan, LibraryScanSchema } from '@insectoids/shared';
 
 /**
@@ -83,7 +83,7 @@ export class LibraryKeeper {
     const lib = this.d.brain.library;
     for (const w of findRepeatedWork(cards, { skip: lib.proposedCardIds() })) {
       if (lib.proposed(w.cluster)) continue;
-      const covering = lib.activatable(w.words.join(' '), { caste: w.caste, limit: 1, minTerms: Math.min(3, w.words.length) })[0];
+      const covering = lib.activatable(w.words.join(' '), { caste: w.caste, limit: 1, minTerms: coverageTerms(w.words) })[0];
       if (covering) {
         lib.recordProposal({ cluster: w.cluster, caste: w.caste, cards: w.cards.map((c) => c.id), item: covering.name, outcome: 'covered' });
         continue;

@@ -1,10 +1,12 @@
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { type Brain, openBrain } from '@insectoids/brain';
+import { afterAll, afterEach, describe, expect, it } from 'vitest';
+import { loadCatalog } from '../hive/catalog';
 import { DEMO_LEARNED_SKILL, DEMO_SKILL_PLAN } from '../hive/demo';
 import { Library } from '../hive/prompts';
-import { type DoneCard, findRepeatedWork, parseSkillDraft, skillDraftPrompt } from './proposals';
+import { type DoneCard, coverageTerms, findRepeatedWork, parseSkillDraft, skillDraftPrompt } from './proposals';
 import { UserLibrary, slug } from './user-library';
 
 const LIBRARY = resolve(__dirname, '../../../../library');
@@ -159,5 +161,59 @@ describe('repeated work in real briefs (C6 demo regression)', () => {
       { title: 'Write usage report for storage', brief: 'Measure disk use per tenant from the metrics API and chart the weekly growth for operations.' },
     ];
     expect(findRepeatedWork(other.map((c, i) => card(c, i)))).toHaveLength(0);
+  });
+});
+
+describe('is repeated work already covered by a skill? (C6 demo regression)', () => {
+  // The doc cards of the second real demo run (2026-11-14). The cluster was found, but the prose review skill
+  // `writing-guidelines` counted as covering it on three loose words (docs, heading, sentence), so no skill was proposed.
+  const briefs = [
+    [
+      'Write usage example for wordCount',
+      "Create docs/examples/wordcount.md (create the docs/examples/ folder if it does not exist). Write a short usage example for wordCount from src/index.js: a heading, one sentence on what it does (counts runs of non-space characters), and one JS code block with `import { wordCount } from '../../src/index.js'` (or the package name 'tiny-text') and 2–3 calls with their real results in comments, e.g. wordCount('hello  world') // 2. Under 30 lines. Every result shown must match what the code really returns.",
+    ],
+    [
+      'Write usage example for capitalize',
+      "Create docs/examples/capitalize.md (create the docs/examples/ folder if it does not exist). Write a short usage example for capitalize from src/index.js: a heading, one sentence (upper-cases the first letter and leaves the rest as it is), and one JS code block that imports capitalize and shows 2–3 calls with their results in comments, e.g. capitalize('hello world') // 'Hello world' and capitalize('hELLO') // 'HELLO'. Under 30 lines. Every result shown must match what the code really returns.",
+    ],
+    [
+      'Write usage example for truncate',
+      "Create docs/examples/truncate.md (create the docs/examples/ folder if it does not exist). Write a short usage example for truncate from src/index.js: a heading, one sentence (returns the text unchanged when it has at most n characters, otherwise its first n - 1 characters followed by '…'), and one JS code block that imports truncate and shows 2–3 calls with their results in comments, e.g. truncate('hello', 5) // 'hello' and truncate('hello world', 5) // 'hell…'. Under 30 lines. Every result shown must match what the code really returns.",
+    ],
+  ] as const;
+  const cards = briefs.map(([title, brief], i) => done(`C-${i}`, title, brief, 'documenter', i));
+  let brain: Brain;
+  afterEach(() => brain?.close());
+
+  const covering = (words: readonly string[], minTerms: number) =>
+    brain.library.activatable(words.join(' '), { caste: 'documenter', limit: 1, minTerms }).map((i) => i.name);
+
+  it('a broad skill sharing a few words does not cover it, so a skill can be proposed', () => {
+    brain = openBrain(':memory:');
+    brain.library.sync(loadCatalog(LIBRARY));
+    const [work] = findRepeatedWork(cards);
+    expect(work?.cards).toHaveLength(3);
+    // The old bar (3 terms) is what went wrong in the real run.
+    expect(covering(work!.words, 3)).toEqual(['writing-guidelines']);
+    expect(covering(work!.words, coverageTerms(work!.words))).toEqual([]);
+  });
+
+  it('a skill made for this kind of work does cover it', () => {
+    brain = openBrain(':memory:');
+    brain.library.sync([
+      ...loadCatalog(LIBRARY),
+      {
+        name: 'function-usage-examples',
+        kind: 'skill',
+        status: 'ready',
+        castes: ['documenter'],
+        description: 'Write a short usage example doc for one function under docs/examples: a heading, one sentence, and a code block that imports it from src/index with real results.',
+        safety: 'vetted',
+        file: 'skills/function-usage-examples/SKILL.md',
+        sources: [{ repo: 'the-insectoids/learned', path: 'cards', license: 'MIT' }],
+      },
+    ]);
+    const [work] = findRepeatedWork(cards);
+    expect(covering(work!.words, coverageTerms(work!.words))).toEqual(['function-usage-examples']);
   });
 });

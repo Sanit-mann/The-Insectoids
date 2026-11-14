@@ -78,6 +78,14 @@ export function sameWork(
 }
 
 /**
+ * How strongly a library skill must match a cluster's shared words to count as already covering that work
+ * (the Brain's `activatable` score: 2 per word in its name, 1 per word in its description). Half the words: a
+ * broad skill that shares a few common words doesn't cover specific repeated work (C6 demo: `writing-guidelines`,
+ * a prose review skill, matched "docs", "heading" and "sentence" of 11 words about writing usage examples).
+ */
+export const coverageTerms = (words: readonly string[]): number => Math.max(Math.min(3, words.length), Math.ceil(words.length / 2));
+
+/**
  * Groups of repeated successful work, oldest card first. Each card joins the first cluster (same caste)
  * whose first card it resembles enough; a cluster counts once it has `minCards` cards that still share at
  * least two meaningful words. Cards in `skip` (already part of a proposal) never count again.

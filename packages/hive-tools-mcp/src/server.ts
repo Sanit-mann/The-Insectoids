@@ -267,6 +267,13 @@ export function createHiveToolsServer(policyOrResult: HookPolicy | PolicyResult 
     guarded((a: { path: string; content: string }, c) => {
       const r = checkPath(a.path, 'write', c);
       if ('refusal' in r) return r.refusal;
+      // Plain words for the two ways a path can't take a file (a small model got stuck on a bare EEXIST, C6 demo).
+      if (existsSync(r.abs) && statSync(r.abs).isDirectory()) return refuse(`${a.path} is a folder, not a file. Pick a file name inside it.`);
+      for (let dir = P.dirname(r.abs); dir.length >= c.workspace.length && dir !== P.dirname(dir); dir = P.dirname(dir)) {
+        if (existsSync(dir) && !statSync(dir).isDirectory()) {
+          return refuse(`${relOf(dir, c)} is a file, so nothing can be written inside it as a folder. Write to another path, or remove that file first if a folder belongs there.`);
+        }
+      }
       mkdirSync(P.dirname(r.abs), { recursive: true });
       writeFileSync(r.abs, a.content);
       return text(`Wrote ${relOf(r.abs, c)} (${Buffer.byteLength(a.content)} bytes).`);

@@ -73,6 +73,18 @@ describe('the tools work inside the workspace', () => {
     expect((await call(c, 'edit_file', { path: 'out/new.txt', old_string: 'missing', new_string: 'y' })).error).toBe(true);
   });
 
+  it('says in plain words when a path cannot take a file (a file where a folder should be, or a folder)', async () => {
+    const c = await connect(policy());
+    await call(c, 'write_file', { path: 'docs/examples', content: 'oops, a file' });
+    const inside = await call(c, 'write_file', { path: 'docs/examples/wordcount.md', content: '# x' });
+    expect(inside.error).toBe(true);
+    expect(inside.text).toMatch(/docs\/examples is a file/);
+    expect(inside.text).not.toMatch(/EEXIST/);
+    const folder = await call(c, 'write_file', { path: 'src', content: 'x' });
+    expect(folder.error).toBe(true);
+    expect(folder.text).toMatch(/src is a folder/);
+  });
+
   it('runs a shell command and reports a non-zero exit as a normal result', async () => {
     const c = await connect(policy());
     const ok = await call(c, 'run_shell', { command: 'node --version' });
