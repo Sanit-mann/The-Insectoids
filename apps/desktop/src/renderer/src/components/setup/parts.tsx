@@ -206,7 +206,7 @@ export function CopyCommand({ command, label }: { command: string; label: string
     <div className="flex flex-col gap-1.5">
       <span className="text-xs font-medium text-muted">{label}</span>
       <div className="flex items-center gap-2 rounded-xl border border-line bg-ground py-1.5 pr-1.5 pl-3.5">
-        <code className="flex-1 overflow-x-auto font-mono text-[13px] whitespace-nowrap text-text">{command}</code>
+        <code className="min-w-0 flex-1 font-mono text-[13px] break-all whitespace-pre-wrap text-text">{command}</code>
         <Button aria-label={`Copy: ${command}`} onClick={() => void copy()} size="sm" variant="outline">
           {copied === 'yes' ? <Check aria-hidden="true" /> : <Copy aria-hidden="true" />}
           {copied === 'yes' ? 'Copied' : copied === 'failed' ? 'Select and copy' : 'Copy'}

@@ -33,7 +33,8 @@ export function EngineCardView({ engine: e, isDefault, index, count, busy, error
   return (
     <article
       aria-labelledby={headingId}
-      className={cn('flex flex-col gap-3 rounded-2xl border border-line bg-surface p-4', unsupported && 'opacity-70')}
+      // Unsupported engines look set apart (dashed border, second surface) without fading their text below 4.5:1 (C1).
+      className={cn('flex flex-col gap-3 rounded-2xl border p-4', unsupported ? 'border-dashed border-line bg-surface-2' : 'border-line bg-surface')}
       data-engine={e.id}
       data-testid={`engine-${e.id}`}
     >

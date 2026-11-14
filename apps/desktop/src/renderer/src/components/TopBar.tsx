@@ -6,6 +6,9 @@ import { currentGoal } from '@/components/queen/goal-status';
 import { runCommand, useHive } from '@/lib/hive-store';
 import type { Theme } from '@/lib/theme';
 
+/** id of the screen's heading: the target of "Skip to main content" and of focus after a screen switch. */
+export const SCREEN_TITLE_ID = 'screen-title';
+
 interface TopBarProps {
   title: string;
   info: AppInfo | null;
@@ -38,7 +41,10 @@ export function TopBar({ title, info, theme, onToggleTheme }: TopBarProps) {
 
   return (
     <header className="flex flex-wrap items-center gap-2.5 border-b border-line px-6 py-3.5">
-      <h1 className="m-0 font-display text-xl font-semibold">{title}</h1>
+      {/* The skip link and screen switches move focus here (tabIndex -1: focusable by script, not a Tab stop). */}
+      <h1 className="m-0 rounded-md font-display text-xl font-semibold" id={SCREEN_TITLE_ID} tabIndex={-1}>
+        {title}
+      </h1>
       {pill && (
         <span
           aria-live="polite"

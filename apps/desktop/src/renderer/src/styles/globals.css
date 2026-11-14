@@ -23,6 +23,8 @@
   --st-done: #86c98a;
   --st-paused: #b49cf0;
   --st-idle: #6e675a;
+  /* Text on a solid --st-blocked fill (a finished danger hold): 6.68:1. */
+  --on-blocked: #1a1306;
   /*
    * Brain graph kinds (Phase 2 B5): the dataviz reference categorical palette, dark steps; validated on
    * our dark surface (all checks pass). Never colour alone: every kind also has its own shape and label.
@@ -47,9 +49,22 @@
   --surface-2: #f6f1e6;
   --line: #e6dfd0;
   --text: #1c1912;
-  --muted: #6b6354;
+  /* Muted text holds 4.5:1 on every light surface and on the 10% status tints over them (4.84 at worst). */
+  --muted: #625a4c;
   --honey-text: #8f5600;
   --active: #f6e7c8;
+  /*
+   * Status colours, light steps (C1, WCAG 2.2 AA): status words are coloured text, so each holds 4.5:1 on every
+   * light surface, the active highlight included (4.86–6.51). The dark steps were only ~2:1 on white.
+   */
+  --st-working: #8f5600;
+  --st-waiting: #1f5fa8;
+  --st-blocked: #b03a1e;
+  --st-done: #276b2b;
+  --st-paused: #6a4bc4;
+  --st-idle: #6b6354;
+  /* Text on a solid --st-blocked fill: white here (6.05:1); the dark ink was 3.04:1 on the light red. */
+  --on-blocked: #ffffff;
   /* Brain graph kinds, light steps (three sit under 3:1 on white: shapes, labels and the list view carry them). */
   --kind-1: #2a78d6;
   --kind-2: #eb6834;
@@ -80,6 +95,7 @@
   --color-st-done: var(--st-done);
   --color-st-paused: var(--st-paused);
   --color-st-idle: var(--st-idle);
+  --color-on-blocked: var(--on-blocked);
   --color-chart: var(--chart);
   --font-sans: 'Inter Variable', system-ui, sans-serif;
   --font-display: 'Space Grotesk Variable', 'Inter Variable', sans-serif;

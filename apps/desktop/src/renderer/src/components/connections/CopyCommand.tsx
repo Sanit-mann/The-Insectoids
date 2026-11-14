@@ -38,7 +38,7 @@ export function CopyCommand({ label, command, note, testId }: { label: string; c
     <div className="flex flex-col gap-1.5" data-testid={testId}>
       <div className="text-xs font-medium text-muted">{label}</div>
       <div className="flex items-stretch gap-2">
-        <code className="flex min-h-10 min-w-0 flex-1 items-center overflow-x-auto whitespace-pre rounded-[10px] border border-line bg-ground px-3 py-2 font-mono text-xs text-text">
+        <code className="flex min-h-10 min-w-0 flex-1 items-center whitespace-pre-wrap break-all rounded-[10px] border border-line bg-ground px-3 py-2 font-mono text-xs text-text">
           {command}
         </code>
         <Button

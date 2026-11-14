@@ -251,12 +251,16 @@ export function LivingHive({
               />
               {a.status === 'working' ? <polygon className="hive-cell-glow" fill={STROKE.working} points={GLOW} /> : null}
               <Icon aria-hidden="true" color="var(--honey-text)" height={18} width={18} x={-9} y={-40} />
+              {/*
+                Each line ends in a space (not drawn: SVG drops trailing spaces) so the words read apart when the
+                cell's text is taken as one string, as tools checking label-in-name (WCAG 2.5.3) do.
+              */}
               <text fill="var(--text)" fontSize={12} fontWeight={600} textAnchor="middle" y={-5}>
-                {short(roleLabel(a), 13)}
+                {short(roleLabel(a), 13)}{' '}
               </text>
               {a.agentId && a.agentId.toLowerCase() !== roleLabel(a).toLowerCase() ? (
                 <text fill="var(--muted)" fontSize={10} textAnchor="middle" y={9}>
-                  {short(a.agentId, 14)}
+                  {short(a.agentId, 14)}{' '}
                 </text>
               ) : null}
               <g transform="translate(0 28)">

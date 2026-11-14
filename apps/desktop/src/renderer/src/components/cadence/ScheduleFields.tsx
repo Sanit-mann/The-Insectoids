@@ -133,7 +133,6 @@ export function ScheduleFields({
       <div aria-label="Days" className="flex flex-wrap gap-1.5" role="group">
         {WEEK.map((w) => (
           <button
-            aria-label={w.long}
             aria-pressed={draft.days.includes(w.day)}
             className={cn(
               'inline-flex min-h-10 min-w-12 items-center justify-center rounded-[10px] border px-2 text-sm outline-none focus-visible:ring-2 focus-visible:ring-honey',
@@ -143,7 +142,9 @@ export function ScheduleFields({
             onClick={() => toggleDay(w.day)}
             type="button"
           >
-            {w.short}
+            {/* Name "Monday", shown "Mon": the shown text starts the name (label in name, WCAG 2.5.3). */}
+            <span aria-hidden="true">{w.short}</span>
+            <span className="sr-only">{w.long}</span>
           </button>
         ))}
       </div>

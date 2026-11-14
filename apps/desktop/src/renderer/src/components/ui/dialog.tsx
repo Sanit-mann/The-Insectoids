@@ -7,6 +7,7 @@
 import { X } from 'lucide-react';
 import { Dialog as DialogPrimitive } from 'radix-ui';
 import type * as React from 'react';
+import { useRef } from 'react';
 import { cn } from '@/lib/utils';
 
 function Dialog(props: React.ComponentProps<typeof DialogPrimitive.Root>) {
@@ -30,8 +31,13 @@ function DialogContent({
   children,
   showClose = true,
   closeLabel = 'Close',
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & { showClose?: boolean; closeLabel?: string }) {
+  // Radix returns focus only to a <DialogTrigger>. Our dialogs open from state (a row's Restore, the top-bar digest
+  // button), so remember what had focus when the dialog opened and give it back on close (WCAG 2.4.3).
+  const opener = useRef<HTMLElement | null>(null);
   return (
     <DialogPrimitive.Portal data-slot="dialog-portal">
       <DialogOverlay />
@@ -41,6 +47,19 @@ function DialogContent({
           className,
         )}
         data-slot="dialog-content"
+        onCloseAutoFocus={(e) => {
+          onCloseAutoFocus?.(e);
+          const el = opener.current;
+          opener.current = null;
+          if (e.defaultPrevented || !el?.isConnected) return;
+          e.preventDefault();
+          el.focus();
+        }}
+        onOpenAutoFocus={(e) => {
+          // Fires before focus moves into the dialog, so the active element is still the opener.
+          opener.current = document.activeElement instanceof HTMLElement && document.activeElement !== document.body ? document.activeElement : null;
+          onOpenAutoFocus?.(e);
+        }}
         {...props}
       >
         {children}

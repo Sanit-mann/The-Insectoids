@@ -123,7 +123,7 @@ export function EngineInstall({ engine: e, offer }: { engine: EngineCard; /** Sh
             <span className="text-xs font-medium text-muted">The command</span>
             <div className="flex items-stretch gap-2">
               <code
-                className="flex min-h-10 min-w-0 flex-1 items-center overflow-x-auto whitespace-pre rounded-[10px] border border-line bg-ground px-3 py-2 font-mono text-xs text-text"
+                className="flex min-h-10 min-w-0 flex-1 items-center whitespace-pre-wrap break-all rounded-[10px] border border-line bg-ground px-3 py-2 font-mono text-xs text-text"
                 data-testid="install-command"
               >
                 {install.command}

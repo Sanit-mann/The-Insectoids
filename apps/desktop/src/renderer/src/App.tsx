@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 import type { AppInfo } from '@insectoids/shared';
 import { AwayDigestDialog } from '@/components/digest/AwayDigestDialog';
 import { PlaceholderScreen } from '@/components/PlaceholderScreen';
@@ -16,7 +16,7 @@ import { SettingsScreen } from '@/components/screens/SettingsScreen';
 import { SetupGate } from '@/components/setup/SetupGate';
 import { TaskboardScreen } from '@/components/screens/TaskboardScreen';
 import { SidePanel } from '@/components/SidePanel';
-import { TopBar } from '@/components/TopBar';
+import { SCREEN_TITLE_ID, TopBar } from '@/components/TopBar';
 import { openGoal } from '@/lib/goal-nav';
 import { pendingApprovals, useHive } from '@/lib/hive-store';
 import { type Theme, applyTheme, initialTheme } from '@/lib/theme';
@@ -77,11 +77,33 @@ export function App() {
     };
   }, []);
 
+  // After a screen switch, focus the new screen's heading so screen-reader users hear where they are (WCAG 2.4.3).
+  // Only when the switch came from the Main navigation or left focus nowhere: a screen (or openGoal) that already
+  // put focus somewhere useful keeps it.
+  const shownScreen = useRef(screenId);
+  useEffect(() => {
+    if (shownScreen.current === screenId) return;
+    shownScreen.current = screenId;
+    const el = document.activeElement;
+    const lost = !el || el === document.body;
+    if (lost || el.closest('nav[aria-label="Main"]')) document.getElementById(SCREEN_TITLE_ID)?.focus();
+  }, [screenId]);
+
   const screen = SCREENS.find((s) => s.id === screenId) ?? SCREENS[0]!;
 
   return (
     <SetupGate>
     <div className="flex min-h-full flex-wrap items-stretch">
+      <a
+        className="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-[60] focus:rounded-[10px] focus:border focus:border-line focus:bg-surface focus:px-4 focus:py-2 focus:text-sm focus:font-semibold focus:text-text"
+        href={`#${SCREEN_TITLE_ID}`}
+        onClick={(e) => {
+          e.preventDefault();
+          document.getElementById(SCREEN_TITLE_ID)?.focus();
+        }}
+      >
+        Skip to main content
+      </a>
       <Rail active={screenId} onSelect={setScreenId} approvals={pendingApprovals(snapshot).length} />
       <main className="flex min-w-0 flex-[999_1_560px] flex-col">
         <TopBar

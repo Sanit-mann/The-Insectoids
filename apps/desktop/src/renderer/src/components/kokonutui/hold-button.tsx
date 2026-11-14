@@ -4,7 +4,7 @@
  * no demo icons or labels, strict TypeScript, named export.
  *
  * Press and hold to confirm (App 07 principle 2: destructive approvals use hold-to-approve).
- * The fill tracks the hold and drains back on an early release; Space/Enter hold works too.
+ * A bar along the bottom tracks the hold and drains back on an early release; Space/Enter hold works too.
  *
  * API:
  *   <HoldButton variant="honey" | "danger" icon={LucideIcon} onHoldComplete={() => …}
@@ -42,9 +42,10 @@ const holdButtonVariants = cva(
           'border-honey/50 bg-honey/10 text-honey-text hover:bg-honey/15',
           'data-complete:border-honey data-complete:bg-honey data-complete:text-honey-ink',
         ],
+        // Hover shows on the border only: a stronger tint drops the red label under 4.5:1 in the light theme.
         danger: [
-          'border-st-blocked/50 bg-st-blocked/10 text-st-blocked hover:bg-st-blocked/15',
-          'data-complete:border-st-blocked data-complete:bg-st-blocked data-complete:text-honey-ink',
+          'border-st-blocked/50 bg-st-blocked/10 text-st-blocked hover:border-st-blocked',
+          'data-complete:border-st-blocked data-complete:bg-st-blocked data-complete:text-on-blocked',
         ],
       },
     },
@@ -260,10 +261,13 @@ export function HoldButton({
         }}
         type={type}
       >
-        {/* The fill is the button's ink at low strength, revealed left to right. */}
+        {/*
+          The progress is a bar in the button's ink along its bottom edge, revealed left to right. A fill behind the
+          label (as upstream) dropped the label under 4.5:1 while holding (WCAG 1.4.3).
+        */}
         <motion.span
           aria-hidden="true"
-          className="pointer-events-none absolute inset-0 bg-current/20 transition-opacity duration-150 group-data-complete/hold:opacity-0"
+          className="pointer-events-none absolute inset-x-0 bottom-0 h-1 bg-current transition-opacity duration-150 group-data-complete/hold:opacity-0"
           style={{ clipPath }}
         />
         <span className="relative flex items-center justify-center overflow-hidden">

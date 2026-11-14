@@ -177,7 +177,8 @@ function Ready({
             {showText ? 'Hide the full text' : 'Read the full text'}
           </Button>
           {showText ? (
-            <div className="max-h-[480px] overflow-auto rounded-[10px] border border-line bg-ground p-3" data-testid="library-text">
+            // Focusable, so the text can be scrolled with the keyboard (WCAG 2.1.1).
+            <div aria-label="Full text" className="max-h-[480px] overflow-auto rounded-[10px] border border-line bg-ground p-3 outline-none focus-visible:ring-2 focus-visible:ring-honey" data-testid="library-text" role="region" tabIndex={0}>
               <MarkdownText text={body} />
             </div>
           ) : null}

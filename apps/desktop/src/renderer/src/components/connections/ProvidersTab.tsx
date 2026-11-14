@@ -138,6 +138,10 @@ function TierInputs({
           <label className="flex flex-col gap-1 text-xs" key={t.key}>
             <span className="text-muted">{t.label}</span>
             <input
+              // A combobox must say whether its list is open; the suggestions are the browser's own datalist popup,
+              // which the page can't track, so it reports closed (role="combobox" alone is an ARIA error).
+              aria-autocomplete="list"
+              aria-expanded={false}
               aria-label={`${t.label} model`}
               autoComplete="off"
               className={`${inputCls} font-mono`}

@@ -165,7 +165,6 @@ export function KanbanBoard<T>({ columns, getId, getLabel, renderCard, selectedI
                         }}
                         type="button"
                         tabIndex={id === tabStop ? 0 : -1}
-                        aria-label={getLabel(card)}
                         aria-pressed={selected}
                         onClick={() => onOpen(id)}
                         onKeyDown={(e) => onKey(e, ci, ri)}
@@ -174,7 +173,14 @@ export function KanbanBoard<T>({ columns, getId, getLabel, renderCard, selectedI
                           selected ? 'border-honey' : 'border-line',
                         )}
                       >
-                        {renderCard(card, { selected, columnId: column.id })}
+                        {/*
+                          The name is the one-line summary; the card face is for the eye (an aria-label over visible
+                          text it doesn't contain fails label-in-name, WCAG 2.5.3).
+                        */}
+                        <span className="sr-only">{getLabel(card)}</span>
+                        <span aria-hidden="true" className="contents">
+                          {renderCard(card, { selected, columnId: column.id })}
+                        </span>
                       </button>
                     </motion.li>
                   );

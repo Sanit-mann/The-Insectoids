@@ -13,7 +13,7 @@ import {
   type WebhookTrust,
 } from '@insectoids/shared';
 import { FolderOpen, GitMerge, Lock, Repeat, Trash2 } from 'lucide-react';
-import { type FormEvent, type KeyboardEvent, useId, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, useEffect, useId, useRef, useState } from 'react';
 import { HoldButton } from '@/components/kokonutui/hold-button';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { Button } from '@/components/ui/button';
@@ -136,6 +136,9 @@ export function CadenceForm({ cadence, onSave, onCancel, onDelete, others = [] }
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setD((x) => ({ ...x, [k]: v }));
   const editing = cadence !== null;
   const titleId = `${uid}-title`;
+  // The form opens beside the list: move focus to its first field so keyboard users land in it (WCAG 2.4.3).
+  const nameRef = useRef<HTMLInputElement>(null);
+  useEffect(() => nameRef.current?.focus(), []);
 
   const submit = async (ev: FormEvent) => {
     ev.preventDefault();
@@ -196,7 +199,7 @@ export function CadenceForm({ cadence, onSave, onCancel, onDelete, others = [] }
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-muted">Name</span>
-        <input className={inputCls} maxLength={80} onChange={(e) => set('name', e.target.value)} placeholder="Weekly report" value={d.name} />
+        <input className={inputCls} maxLength={80} onChange={(e) => set('name', e.target.value)} placeholder="Weekly report" ref={nameRef} value={d.name} />
       </label>
 
       <fieldset className="m-0 flex flex-col gap-3 border-0 p-0">

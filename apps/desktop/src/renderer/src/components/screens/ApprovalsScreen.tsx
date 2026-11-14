@@ -58,17 +58,17 @@ function OpenInCadence({ item }: { item: ApprovalView }) {
   );
 }
 
-function Detail({ item, onError }: { item: ApprovalView; onError: (m: string) => void }) {
+function Detail({ item, onError, onSettled }: { item: ApprovalView; onError: (m: string) => void; onSettled: () => void }) {
   return (
     <div className="flex flex-col">
-      <DetailCard item={item} onError={onError} />
+      <DetailCard item={item} onError={onError} onSettled={onSettled} />
       <OpenInLibrary item={item} onError={onError} />
       <OpenInCadence item={item} />
     </div>
   );
 }
 
-function DetailCard({ item, onError }: { item: ApprovalView; onError: (m: string) => void }) {
+function DetailCard({ item, onError, onSettled }: { item: ApprovalView; onError: (m: string) => void; onSettled: () => void }) {
   const meta = KIND_META[item.kind];
   const run = (approve: boolean) => decide(item, approve).catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)));
   if (item.status === 'waiting') {
@@ -83,6 +83,7 @@ function DetailCard({ item, onError }: { item: ApprovalView; onError: (m: string
         kindLabel={meta.label}
         onApprove={() => run(true)}
         onDeny={() => run(false)}
+        onSettled={onSettled}
         title={item.title}
         whyItNeedsYou={item.whyItNeedsYou}
       />
@@ -90,7 +91,7 @@ function DetailCard({ item, onError }: { item: ApprovalView; onError: (m: string
   }
   const approved = item.status === 'approved';
   return (
-    <section aria-label={item.title} className="rounded-[14px] border border-line bg-surface p-3.5 opacity-80">
+    <section aria-label={item.title} className="rounded-[14px] border border-dashed border-line bg-surface p-3.5">
       <header className="mb-2.5 flex flex-wrap items-center gap-2">
         <meta.icon aria-hidden="true" className="size-4 text-muted" />
         <h3 className="m-0 text-sm font-semibold">{item.title}</h3>
@@ -201,7 +202,9 @@ export function ApprovalsScreen() {
                     className={cn(
                       'flex min-h-12 w-full items-center gap-3 rounded-[12px] border px-3 py-2 text-left transition-colors duration-150',
                       isSel ? 'border-honey/50 bg-active' : 'border-line bg-surface hover:bg-surface-2',
-                      !waiting && 'opacity-60',
+                      // Decided items read as done by a dashed edge and their status word, not by fading (fading
+                      // dropped their text under 4.5:1).
+                      !waiting && 'border-dashed',
                     )}
                     data-id={a.id}
                     onClick={() => setSelectedId(a.id)}
@@ -228,7 +231,19 @@ export function ApprovalsScreen() {
               );
             })}
           </ul>
-          <div className="min-w-[300px] flex-[2_1_420px]">{selected && <Detail item={selected} onError={setActionError} />}</div>
+          <div className="min-w-[300px] flex-[2_1_420px]">
+            {selected && (
+              <Detail
+                item={selected}
+                onError={setActionError}
+                // The decided card leaves: focus goes back to the item in the list (WCAG 2.4.3).
+                onSettled={() => {
+                  setSelectedId(selected.id);
+                  listRef.current?.querySelector<HTMLElement>(`[data-id="${CSS.escape(selected.id)}"]`)?.focus();
+                }}
+              />
+            )}
+          </div>
         </div>
       )}
     </div>

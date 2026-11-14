@@ -1,6 +1,6 @@
 import { type CadenceView, isScheduled } from '@insectoids/shared';
 import { Clock, History, Pencil, Play, Plus, ShieldCheck } from 'lucide-react';
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { type CadenceFields, CadenceForm } from '@/components/cadence/CadenceForm';
 import { CadenceHistory } from '@/components/cadence/CadenceHistory';
 import { Housekeeping, ScheduleEditor, isBuiltIn } from '@/components/cadence/Housekeeping';
@@ -132,9 +132,36 @@ export function CadenceScreen() {
   const now = useNow(30_000);
   const [side, setSide] = useState<Side>({ kind: 'none' });
   const [actionError, setActionError] = useState<string | null>(null);
+  // Keyboard focus around the side panel (WCAG 2.4.3): the form takes focus when it opens; when it closes (saved,
+  // cancelled, deleted) and focus would be lost, it goes back to the button that opened it, or to "New cadence".
+  const screenRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const openSide = (next: Side) => {
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setSide(next);
+  };
   const all = snapshot?.cadences ?? [];
   // The user's own cadences; built-in maintenance jobs (A5) show under Housekeeping instead.
   const cadences = all.filter((c) => !isBuiltIn(c));
+  // Also re-checked when the list changes: a new first cadence (or a deleted last one) swaps the empty state's
+  // "New cadence" for the header's after the panel closed, and focus must not be lost with it.
+  const shownSide = useRef<Side>(side);
+  const closedRef = useRef(false);
+  useEffect(() => {
+    const was = shownSide.current;
+    shownSide.current = side;
+    if (side.kind !== 'none') {
+      closedRef.current = false;
+      return;
+    }
+    if (was.kind !== 'none') closedRef.current = true;
+    if (!closedRef.current) return;
+    const el = document.activeElement;
+    if (el && el !== document.body) return;
+    const opener = openerRef.current?.isConnected ? openerRef.current : null;
+    const fallback = [...(screenRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? [])].find((b) => b.textContent?.trim() === 'New cadence');
+    (opener ?? fallback)?.focus();
+  }, [side, cadences.length]);
   const sideCadence = side.kind === 'none' || side.kind === 'new' ? null : (all.find((c) => c.id === side.id) ?? null);
 
   // A deleted cadence's panel simply stops showing (it needs sideCadence below).
@@ -176,7 +203,7 @@ export function CadenceScreen() {
   );
 
   return (
-    <div className="flex min-h-0 flex-1 flex-wrap" data-testid="cadence-screen">
+    <div className="flex min-h-0 flex-1 flex-wrap" data-testid="cadence-screen" ref={screenRef}>
       <div className="flex min-w-0 flex-[999_1_560px] flex-col gap-4 p-4">
         {hasProject ? (
           <div className="flex flex-wrap items-center gap-3">
@@ -184,7 +211,7 @@ export function CadenceScreen() {
               The hive works on its own schedule here. Each run is handed to the Queen as a goal, within its budget, and waits for you where it should.
             </p>
             {cadences.length > 0 ? (
-              <Button className="ml-auto" onClick={() => setSide({ kind: 'new' })}>
+              <Button className="ml-auto" onClick={() => openSide({ kind: 'new' })}>
                 <Plus aria-hidden="true" />
                 New cadence
               </Button>
@@ -212,7 +239,7 @@ export function CadenceScreen() {
                 </>
               }
               icon={Clock}
-              primary={{ label: 'New cadence', onClick: () => setSide({ kind: 'new' }), icon: Plus }}
+              primary={{ label: 'New cadence', onClick: () => openSide({ kind: 'new' }), icon: Plus }}
               title="Nothing runs on a schedule yet"
             />
           </div>
@@ -223,7 +250,7 @@ export function CadenceScreen() {
                 c={c}
                 key={c.id}
                 now={now}
-                onEdit={() => setSide({ kind: 'edit', id: c.id })}
+                onEdit={() => openSide({ kind: 'edit', id: c.id })}
                 onError={setActionError}
                 onHistory={() => toggleHistory(c.id)}
                 selected={(side.kind === 'history' || side.kind === 'edit') && side.id === c.id}

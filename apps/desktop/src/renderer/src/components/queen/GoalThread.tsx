@@ -118,9 +118,11 @@ export function GoalThread({ goal, snap, onAdjust, onError }: GoalThreadProps) {
   const decided = approvals.filter((a) => a.status !== 'waiting');
   const activity = snap.activity.filter((a) => a.goalId === goal.id && !QUIET.has(a.type));
   const run = (a: ApprovalView, approve: boolean) => decide(a, approve).catch((e: unknown) => onError(e instanceof Error ? e.message : String(e)));
+  // A decided card leaves the thread: keep keyboard focus on this goal instead of losing it to the page.
+  const focusGoal = () => document.querySelector<HTMLElement>(`[data-goal-id="${CSS.escape(goal.id)}"]`)?.focus();
 
   return (
-    <article aria-label={`Goal: ${goal.title}`} className="flex flex-col gap-3 outline-none" data-goal-id={goal.id} tabIndex={-1}>
+    <article aria-label={`Goal: ${goal.title}`} className="flex flex-col gap-3 rounded-xl outline-offset-4" data-goal-id={goal.id} tabIndex={-1}>
       <FromCadence cadenceId={goal.cadenceId} className="self-end" snap={snap} />
       <Bubble who="you">
         <p className="m-0 whitespace-pre-wrap text-[14px]">{goal.text}</p>
@@ -145,6 +147,7 @@ export function GoalThread({ goal, snap, onAdjust, onError }: GoalThreadProps) {
             onDeny={() => run(planApproval, false)}
             approveLabel="Approve plan"
             title={planApproval.title}
+            onSettled={focusGoal}
             whyItNeedsYou={planApproval.whyItNeedsYou}
           >
             <PlanBody plan={goal.plan} />
@@ -175,6 +178,7 @@ export function GoalThread({ goal, snap, onAdjust, onError }: GoalThreadProps) {
                 onApprove={() => run(a, true)}
                 onDeny={() => run(a, false)}
                 title={a.title}
+                onSettled={focusGoal}
                 whyItNeedsYou={a.whyItNeedsYou}
               />
             );

@@ -7,7 +7,7 @@
  */
 import { Check, type LucideIcon, X } from 'lucide-react';
 import { AnimatePresence, MotionConfig, motion } from 'motion/react';
-import { type ReactNode, useId, useState } from 'react';
+import { type ReactNode, useId, useRef, useState } from 'react';
 import { HoldButton } from '@/components/kokonutui/hold-button';
 import { cn } from '@/lib/utils';
 
@@ -32,6 +32,11 @@ export interface ApprovalCardProps {
   extraAction?: { label: string; hint: string; onClick: () => void } | undefined;
   approveLabel?: string;
   className?: string;
+  /**
+   * Called after Approve or Deny finished while focus was in this card (or already lost with it): the card is
+   * about to leave, so the caller moves focus somewhere that stays (WCAG 2.4.3).
+   */
+  onSettled?: (() => void) | undefined;
 }
 
 /** A waiting decision. Approve / Deny; destructive ones need a hold. */
@@ -50,9 +55,11 @@ export function ApprovalCard({
   extraAction,
   approveLabel = 'Approve',
   className,
+  onSettled,
 }: ApprovalCardProps) {
   const titleId = useId();
   const [busy, setBusy] = useState(false);
+  const cardRef = useRef<HTMLElement>(null);
   const act = async (fn: () => Promise<void> | void) => {
     if (busy) return;
     setBusy(true);
@@ -60,6 +67,8 @@ export function ApprovalCard({
       await fn();
     } finally {
       setBusy(false);
+      const el = document.activeElement;
+      if (!el || el === document.body || cardRef.current?.contains(el)) onSettled?.();
     }
   };
 
@@ -71,6 +80,7 @@ export function ApprovalCard({
         className={cn('rounded-[14px] border border-st-waiting/40 bg-surface p-3.5 outline-none', className)}
         data-approval-id={id}
         initial={{ opacity: 0, y: 8, filter: 'blur(2px)' }}
+        ref={cardRef}
         onKeyDown={(e) => {
           if (e.key === 'Escape' && !busy) void act(onDeny);
         }}

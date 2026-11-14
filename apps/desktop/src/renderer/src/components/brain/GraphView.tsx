@@ -47,7 +47,16 @@ interface Transform {
 }
 
 const radius = (n: BrainGraphNode): number => 7 + Math.min(1, Math.max(0, n.importance)) * 9;
-const short = (s: string, max = 26): string => (s.length > max ? `${s.slice(0, max - 1)}…` : s);
+/**
+ * A title shortened for a node label. It cuts at a word boundary where it can, so the words shown are whole words of
+ * the node's name ("label in name", WCAG 2.5.3: someone saying what they see can still pick it).
+ */
+const short = (s: string, max = 26): string => {
+  if (s.length <= max) return s;
+  const cut = s.slice(0, max - 1);
+  const space = cut.lastIndexOf(' ');
+  return `${space > max / 2 ? cut.slice(0, space) : cut}…`;
+};
 
 /** A small mark for the legend and the list: the kind's shape in its colour. */
 export function KindMark({ kind, dashed = false, size = 16 }: { kind: RecordKind; dashed?: boolean; size?: number }) {
