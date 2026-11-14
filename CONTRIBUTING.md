@@ -1,6 +1,6 @@
 # Contributing to The Insectoids
 
-Thank you for wanting to help. The Insectoids is early (v0.0.2), so your ideas, bug reports and code can shape it a lot.
+Thank you for wanting to help. The Insectoids is early (v0.0.3), so your ideas, bug reports and code can shape it a lot.
 
 ## Ways to help
 

@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sanit-mann/The-Insectoids/releases/tag/v0.0.2">v0.0.2 · developer preview</a> ·
+  <a href="https://github.com/Sanit-mann/The-Insectoids/releases/tag/v0.0.3">v0.0.3 · developer preview</a> ·
   <a href="LICENSE">MIT license</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="functions/README.md">Design specs</a>
@@ -33,9 +33,9 @@ The Insectoids is a desktop app that turns AI coding agents into an organised te
 
 It runs on the AI subscription you already have. **Claude Code** is the main engine; **OpenCode** can run a free model on your own computer (Ollama or LM Studio) or an API provider you add. Light work goes to the free model first, and a card that struggles moves up to a stronger one.
 
-## Status: v0.0.2 (Phase 2 "The Full Hive")
+## Status: v0.0.3 (Phase 3 "Cadence & Polish")
 
-This is an early developer preview, built and tested on Windows. v0.0.2 has no installer: you run it from source (see [Run it](#run-it)). Installers for Windows, macOS and Linux start with the next release (see [Install](#install)).
+This is an early developer preview, built and tested on Windows. From v0.0.3 there are installers for Windows, macOS and Linux (see [Install](#install)); you can also run it from source (see [Run it](#run-it)).
 
 **What works today:**
 
@@ -45,27 +45,29 @@ This is an early developer preview, built and tested on Windows. v0.0.2 has no i
 - **A cost-aware router (the Treasurer):** it picks each run's engine, model and effort, says why in plain words, and learns from which runs pass.
 - **The Vault and secret broker:** you type keys into the app once; agents call services through the broker and never see a key.
 - **A library that learns:** skills switch on per card. Repeated successful work becomes a proposed skill you approve. Imported skills are safety-scanned first.
-- **The Brain grows up:** local meaning search (a small model on your computer), ranking and fading, lessons from failures, a health score, a graph view and a dashboard, plus a code map of your project.
-- **Screens:** Queen chat, Approvals, Taskboard, Hive (lanes and a living honeycomb), Brain, Changes & undo, Library, Connections, Budgets, and a full setup wizard with an optional sample goal.
+- **The Brain:** local meaning search, ranking and fading, lessons from failures, a health score, a graph view, a dashboard and a code map of your project. New in v0.0.3: daily local backups with restore, and an export as an Obsidian vault (secrets are never written).
+- **Cadences (new in v0.0.3):** the hive works without being asked: on a schedule (local time, catching up once after sleep), when files land in a folder, when a goal finishes, or when an outside app calls a local webhook (with trust modes). Every run is normal hive work through the Queen, within its own budget. If you ask for the same thing three times, the Queen proposes a cadence. Built-in housekeeping keeps the Brain healthy without spending tokens.
+- **While you were away (new in v0.0.3):** a digest of what ran, what it cost and what waits for you opens when you come back; desktop notifications only for approvals and failures; the tray shows the next run and can run one now; optional start with your computer.
+- **Polish (new in v0.0.3):** an accessibility pass (WCAG 2.2 AA, checked automatically on every screen in both themes, with keyboard-only tests), and update checks you control: never forced, nothing about you is sent.
+- **Screens:** Queen chat, Approvals, Taskboard, Hive (lanes and a living honeycomb), Brain, Changes & undo, Library, Connections, Budgets, Cadence and Settings, and a full setup wizard with an optional sample goal.
 - A command guard in front of every agent action (details under [Safety](#safety)), and a Watchdog that warns, pauses or stops an agent that keeps failing.
 
-**Real end-to-end demo** (sample project `tiny-text`; goal: add `truncate` and `capitalize` with tests, then three usage example pages):
+**Real end-to-end demo** (on the installed app; sample project `tiny-text`; a weekly report that runs on its own):
 
 | | Result |
 |---|---|
-| Engines | Claude Code (Opus plans; Sonnet codes, tests and inspects) and OpenCode with qwen3:8b on this computer through Ollama |
-| Plan | 2 waves, 5 cards, 3 castes |
-| Free local model | the Scout and all three doc pages, each passing inspection on the first try |
-| Learned skill | the three doc cards became a proposed skill, `write-function-usage-example-doc`; it scanned clean and was approved |
-| Merge | 6 files into `main`; `node --test` passed on `main` |
-| Meaning search | "shorten long strings" found the truncate work without sharing its words |
-| Time and cost | 10 minutes; about 144k Claude tokens ($0.81 reported) plus 71k free local tokens |
+| Install | the Windows installer, installed silently; uninstalled afterwards with nothing left behind |
+| Cadence | "Weekly report", every Saturday at 19:42, set two minutes ahead; then the window was closed to the tray |
+| Unattended run | on time, with the window closed: Scout, Queen plan, one writer card, Inspector check; the merge waited for the user and a notification was raised |
+| Morning digest | opened by itself when the window came back: "1 run, 1 waits for you. 137,910 tokens ($0.58)", and that the next weekly runs are skipped until the merge is approved |
+| Merge | `reports/weekly.md` on `main` (the week's commits, what the library does, three next steps); `node --test` passed |
+| Time and cost | 2.5 minutes; 4 Claude Code runs, 137,910 tokens ($0.58 reported) |
 
-It took three real runs: the first two did all the work but showed that the repeated-work check was too strict on real briefs, and then too loose about which skills already cover it. Both were fixed with tests. The full write-up is in [docs/plans/phase-2-full-hive.md](docs/plans/phase-2-full-hive.md).
+It passed on the first real run. The write-up, with every step of Phase 3, is in [docs/plans/phase-3-cadence-polish.md](docs/plans/phase-3-cadence-polish.md); the Phase 2 demo (two engines and a learned skill) is in [docs/plans/phase-2-full-hive.md](docs/plans/phase-2-full-hive.md).
 
-![Budgets: spend by goal, role and subscription, and how the Treasurer routed each run between Claude Code and the free local model](design/screenshots/phase-2-demo-10-budgets-routing.png)
+![The "While you were away" digest after the weekly report ran from the tray: one run, its tokens and cost, and the merge that waits for you](design/screenshots/phase-3-demo-morning-digest.png)
 
-**Tests:** 916 unit tests and 141 end-to-end tests (Playwright driving the real Electron app). A scripted engine runs every flow without spending tokens.
+**Tests:** 1,144 unit tests and 199 end-to-end tests (Playwright driving the real Electron app), including automated accessibility checks. A scripted engine runs every flow without spending tokens.
 
 ## What makes it different
 
@@ -217,7 +219,7 @@ pnpm check
 pnpm test:e2e
 ```
 
-**The demos**, without tokens (scripted engine) or with real engines. Real runs use your subscription: the Phase 1 demo costs about $0.50, the Phase 2 demo about 150–200k Claude tokens. Run them from `apps/desktop`; results go to `demo-runs/`:
+**The demos**, without tokens (scripted engine) or with real engines. Real runs use your subscription: the Phase 1 demo costs about $0.50, the Phase 2 demo about 150–200k Claude tokens, the Phase 3 demo about 140k ($0.60). Run them from `apps/desktop`; results go to `demo-runs/`:
 
 ```bash
 INSECTOIDS_DEMO=fake pnpm exec playwright test e2e/phase1-demo.spec.ts
@@ -235,6 +237,16 @@ INSECTOIDS_DEMO2=fake pnpm exec playwright test e2e/phase2-demo.spec.ts
 
 ```bash
 INSECTOIDS_DEMO2=real INSECTOIDS_DEMO2_LOCAL_MODEL="qwen3:8b" pnpm exec playwright test e2e/phase2-demo.spec.ts
+```
+
+The Phase 3 demo schedules a weekly report two minutes ahead and closes the window to the tray. Add `INSECTOIDS_PACKAGED_EXE` with the path to an installed or unpacked build to run it on that instead of the source build:
+
+```bash
+INSECTOIDS_DEMO3=fake pnpm exec playwright test e2e/phase3-demo.spec.ts
+```
+
+```bash
+INSECTOIDS_DEMO3=real pnpm exec playwright test e2e/phase3-demo.spec.ts
 ```
 
 ## Where things are
@@ -261,7 +273,7 @@ INSECTOIDS_DEMO2=real INSECTOIDS_DEMO2_LOCAL_MODEL="qwen3:8b" pnpm exec playwrig
 
 - **Phase 1 "First Spark" (done, v0.0.1):** the safe end-to-end loop with one engine.
 - **Phase 2 "The Full Hive" (done, v0.0.2):** all 8 castes and the manager agents, OpenCode with local models and API providers, a cost-aware router, the Vault and secret broker, a library that learns, meaning search and a graph view for the Brain. Gemini CLI is built but waits on Google (it no longer serves personal plans); Codex is planned.
-- **Phase 3 "Cadence & Polish":** schedules and triggers, a "while you were away" digest, installers and auto-update.
+- **Phase 3 "Cadence & Polish" (done, v0.0.3):** cadences (schedules, file watch, hive events, webhooks with trust modes, built-in housekeeping, proposed cadences), a "while you were away" digest, notifications and the tray, backups and Obsidian export, accessibility, installers and update checks.
 - **Phase 4 "Expansion":** more connections, a container sandbox mode, more Brain views.
 
 Details: [functions/10-build-roadmap.md](functions/10-build-roadmap.md).
