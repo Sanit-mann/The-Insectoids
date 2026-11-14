@@ -2,7 +2,7 @@ import type { EngineCard, EngineId } from '@insectoids/shared';
 import type { Effort } from '../claude/args';
 import type { Engine, EngineRequest, EngineResult, EngineRun } from '../hive/engine';
 import type { OutcomeStat } from '@insectoids/brain';
-import { type EngineCandidate, type GuardKind, type ModelTiers, type Route, type RouteInput, allowedEngines, pickEngine } from '../hive/router';
+import { type EngineCandidate, type GuardKind, type ModelTiers, type Route, type RouteInput, allowedEngines, freeEngineFor, pickEngine } from '../hive/router';
 import { learnRoute } from '../hive/treasurer';
 
 /** What an engine can do (Connections 04-D2). The router and the UI read this; nothing is assumed. */
@@ -15,6 +15,11 @@ export interface EngineCapabilities {
   effort: readonly Effort[] | null;
   /** Does it report cost itself? Otherwise the hive estimates it from tokens. */
   reportsCost: boolean;
+  /**
+   * Free to run: a model on this computer (e.g. OpenCode with Ollama). The Treasurer sends light work there
+   * first (02-D9 P1: the cheapest model that can do it).
+   */
+  free?: boolean;
 }
 
 /** Result of checking an engine on this computer. */
@@ -176,6 +181,7 @@ export class EngineRegistry {
         enabled: this.isEnabled(id),
         ready: this.isReady(id),
         guard: this.#adapters.get(id)!.capabilities.guard,
+        ...(this.#adapters.get(id)!.capabilities.free ? { free: true } : {}),
         ...(limit?.exhausted ? { exhausted: true } : {}),
         ...(limit?.near ? { near: true } : {}),
       };
@@ -194,6 +200,14 @@ export class EngineRegistry {
    */
   route(input: RouteInput, routeCard: (i: RouteInput, m: ModelTiers, e: EngineId) => Route): Route {
     const candidates = this.candidates();
+    // Light work goes to a free engine first (02-D9 P1: the cheapest model that can do it). Retries and
+    // anything heavier keep the user's order, so a stronger model takes over when the local one struggles.
+    const free = freeEngineFor(input, candidates, routeCard);
+    if (free) {
+      const a = this.#adapters.get(free)!;
+      const r = routeCard(input, a.models!, free);
+      return { ...r, reason: `rule: light work goes to the free model on this computer (${a.name}); ${r.reason.replace(/^rule: /, '')}` };
+    }
     const picked = pickEngine(input.role, candidates);
     const fallback = this.#order.find((id) => this.#adapters.get(id)?.models) ?? this.#order[0]!;
     const id = picked ?? fallback;

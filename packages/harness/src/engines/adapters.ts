@@ -227,7 +227,14 @@ export function opencodeAdapter(o: OpenCodeAdapterOptions): EngineAdapter {
     name: 'OpenCode',
     vendor: 'Anomaly (open source, MIT)',
     get capabilities() {
-      return { guard: hasTools() ? ('policy-and-tools' as const) : ('read-only' as const), mcp: true, effort: null, reportsCost: true };
+      return {
+        guard: hasTools() ? ('policy-and-tools' as const) : ('read-only' as const),
+        mcp: true,
+        effort: null,
+        reportsCost: true,
+        // A provider on this computer (Ollama, LM Studio, a local FreeLLMAPI) costs nothing per run.
+        ...(install && current?.local ? { free: true } : {}),
+      };
     },
     // The run's provider decides the models; until one is ready the tiers are placeholders.
     get models() {
@@ -235,8 +242,8 @@ export function opencodeAdapter(o: OpenCodeAdapterOptions): EngineAdapter {
     },
     availableIn: null,
     install: {
-      command: 'npm install -g @opencode/cli@2.2.1',
-      note: 'The official package (about 250 MB; its install step copies the program file using PowerShell). Needs Node.js. The hive never runs it without you.',
+      command: 'npm install -g @opencode/cli@2.2.6',
+      note: 'The official package (about 260 MB; its install step copies the program file using PowerShell). Needs Node.js. The hive never runs it without you.',
     },
     signIn: {
       command: 'Connections → API providers',

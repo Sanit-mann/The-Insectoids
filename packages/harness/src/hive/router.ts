@@ -146,6 +146,26 @@ export interface EngineCandidate {
   exhausted?: boolean;
   /** Near the user's cap: use it only when no other engine qualifies. */
   near?: boolean;
+  /** Free to run (a model on this computer): light work goes here first (02-D9 P1). */
+  free?: boolean;
+}
+
+/**
+ * The free engine for this run, if the rule route is light work and a free engine may take it: the cheapest
+ * model that can do it (02-D9 P1). Light = the light tier (a low-priority card on its first try, the Scout).
+ * Retries raise the tier, so a struggling card moves to the user's stronger engine on its own.
+ */
+export function freeEngineFor(
+  input: RouteInput,
+  candidates: readonly EngineCandidate[],
+  routeCard: (i: RouteInput, m: ModelTiers, e: EngineId) => Route,
+): EngineId | null {
+  if (input.role === 'queen' || input.role === 'inspector') return null;
+  // A retry (or the Foreman asking for more) never goes back to the free model: it already struggled there.
+  if (input.attempts > 0 || input.minTier) return null;
+  const free = allowedEngines(input.role, candidates).find((c) => c.free);
+  if (!free) return null;
+  return routeCard(input, { strongest: '', standard: '', light: '' }, free.id).tier === 'light' ? free.id : null;
 }
 
 /** Roles that never change files or run side-effecting commands: an engine limited to read-only work may take them. */

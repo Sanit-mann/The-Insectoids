@@ -1,5 +1,5 @@
 /**
- * Smoke test against a REAL OpenCode 2.2.1+ install and a REAL OpenAI-compatible model server.
+ * Smoke test against a REAL OpenCode 2.2.6+ install and a REAL OpenAI-compatible model server.
  * Off by default. It needs OpenCode installed (npm `@opencode/cli`) and a model server; a local one
  * (Ollama or LM Studio) costs nothing and keeps everything on this computer:
  *

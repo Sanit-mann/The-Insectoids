@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { budgetState, routeCard, runTokens } from './router';
+import { type EngineCandidate, budgetState, freeEngineFor, routeCard, runTokens } from './router';
 
 const models = { strongest: 'opus', standard: 'sonnet', light: 'haiku' };
 
@@ -41,5 +41,34 @@ describe('budgets (Treasurer reflex)', () => {
     expect(budgetState(750, 1_000)).toBe('warn');
     expect(budgetState(1_000, 1_000)).toBe('stop');
     expect(budgetState(5_000, null)).toBe('ok');
+  });
+});
+
+describe('free model first for light work (02-D9 P1: the cheapest model that can do it)', () => {
+  const claude: EngineCandidate = { id: 'claude', enabled: true, ready: true, guard: 'hook' };
+  const local: EngineCandidate = { id: 'opencode', enabled: true, ready: true, guard: 'policy-and-tools', free: true };
+
+  it('a low-priority first try goes to the free local engine', () => {
+    expect(freeEngineFor({ role: 'documenter', priority: 'low', attempts: 0 }, [claude, local], routeCard)).toBe('opencode');
+  });
+
+  it('the Scout surveys on the light model, so it may use the free engine too', () => {
+    expect(freeEngineFor({ role: 'scout', priority: 'normal', attempts: 0 }, [claude, local], routeCard)).toBe('opencode');
+  });
+
+  it('heavier work, retries, the Queen and the Inspector stay on the user’s engine', () => {
+    expect(freeEngineFor({ role: 'coder', priority: 'normal', attempts: 0 }, [claude, local], routeCard)).toBeNull();
+    expect(freeEngineFor({ role: 'documenter', priority: 'low', attempts: 1 }, [claude, local], routeCard)).toBeNull();
+    expect(freeEngineFor({ role: 'queen', priority: 'low', attempts: 0 }, [claude, local], routeCard)).toBeNull();
+    expect(freeEngineFor({ role: 'inspector', priority: 'low', attempts: 0 }, [claude, local], routeCard)).toBeNull();
+  });
+
+  it('never a free engine that is off, not ready, exhausted, or read-only for work that changes files', () => {
+    const lowCoder = { role: 'coder' as const, priority: 'low' as const, attempts: 0 };
+    expect(freeEngineFor(lowCoder, [claude, { ...local, enabled: false }], routeCard)).toBeNull();
+    expect(freeEngineFor(lowCoder, [claude, { ...local, ready: false }], routeCard)).toBeNull();
+    expect(freeEngineFor(lowCoder, [claude, { ...local, exhausted: true }], routeCard)).toBeNull();
+    expect(freeEngineFor(lowCoder, [claude, { ...local, guard: 'read-only' }], routeCard)).toBeNull();
+    expect(freeEngineFor(lowCoder, [claude], routeCard)).toBeNull();
   });
 });

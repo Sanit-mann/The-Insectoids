@@ -1,7 +1,7 @@
 import type { ModelTiers } from '../hive/router';
 
 /**
- * Per-run OpenCode 2.x configuration (checked against the v2.2.1 source).
+ * Per-run OpenCode 2.x configuration (checked against the v2.2.1 and v2.2.5 source and real 2.2.6 runs).
  *
  * Safety comes from three layers that don't depend on OpenCode's plugin hooks:
  * 1. Every built-in tool is removed: a permission rule list that denies everything, then allows only the
@@ -117,10 +117,17 @@ export function buildOpenCodeConfig(o: OpenCodeConfigInput): Record<string, unkn
     ],
     permissions: rules,
     policies: [
+      // OpenCode 2.2.5 (checked against its source and a real run): the last matching statement wins.
+      // A bare `integration.use` "*" also covers providers, so our provider's own integration (named like the
+      // provider; its key comes from an env var, no account) is allowed by name, or the model is "unavailable".
+      // MCP servers and skills have their own actions (the old `integration.use` "mcp:<name>" form is legacy).
       { action: 'provider.use', resource: '*', effect: 'deny' },
       { action: 'provider.use', resource: RUN_PROVIDER, effect: 'allow' },
       { action: 'integration.use', resource: '*', effect: 'deny' },
-      ...servers.map((s) => ({ action: 'integration.use', resource: `mcp:${s}`, effect: 'allow' })),
+      { action: 'integration.use', resource: RUN_PROVIDER, effect: 'allow' },
+      { action: 'mcp.use', resource: '*', effect: 'deny' },
+      ...servers.map((s) => ({ action: 'mcp.use', resource: s, effect: 'allow' })),
+      { action: 'skill.use', resource: '*', effect: 'deny' },
     ],
     agents: {
       [HIVE_AGENT]: { mode: 'primary', model: `${RUN_PROVIDER}/standard`, permissions: rules, ...(o.maxSteps ? { steps: o.maxSteps } : {}) },
@@ -131,6 +138,9 @@ export function buildOpenCodeConfig(o: OpenCodeConfigInput): Record<string, unkn
     providers: {
       [RUN_PROVIDER]: {
         name: 'The Insectoids (via the local broker)',
+        // OpenCode 2.2.x offers a configured provider's models only when its integration has a connection:
+        // naming the run pass's variable gives it one (the value is the per-run pass, never a real key).
+        env: [PASS_ENV],
         // Built into the OpenCode binary: nothing is downloaded from npm at run time.
         package: '@opencode/ai/providers/openai-compatible',
         settings: { baseURL: o.baseUrl, apiKey: `{env:${PASS_ENV}}` },

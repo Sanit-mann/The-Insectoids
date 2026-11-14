@@ -34,7 +34,7 @@ const hiveServer = { command: ['electron.exe', 'hive-tools.mjs'], environment: m
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Json = Record<string, any>;
 
-describe('per-run config (OpenCode 2.2.1)', () => {
+describe('per-run config (OpenCode 2.2.6)', () => {
   const config = buildOpenCodeConfig({ baseUrl: BROKER, tiers, mcpServers: { hive: hiveServer, brain: hiveServer }, readOnly: false, maxSteps: 40 }) as Json;
 
   it('denies every tool first, then allows only the hive MCP tools, also inside the hive agent', () => {
@@ -49,13 +49,20 @@ describe('per-run config (OpenCode 2.2.1)', () => {
 
   it('keeps built-in tools, web search, skills and auto-detected local providers from loading', () => {
     expect(config['plugins']).toEqual(expect.arrayContaining(['-opencode.tool.*', '-opencode.websearch.*', '-opencode.skill', '-opencode.provider.ollama', '-opencode.provider.lmstudio']));
+    // OpenCode 2.2.5 policy actions (last match wins): only our provider, its own integration, the hive's MCP
+    // servers, and no skills. A bare integration "*" deny also covers providers, hence the hive-or allow.
     expect(config['policies']).toEqual([
       { action: 'provider.use', resource: '*', effect: 'deny' },
       { action: 'provider.use', resource: 'hive-or', effect: 'allow' },
       { action: 'integration.use', resource: '*', effect: 'deny' },
-      { action: 'integration.use', resource: 'mcp:hive', effect: 'allow' },
-      { action: 'integration.use', resource: 'mcp:brain', effect: 'allow' },
+      { action: 'integration.use', resource: 'hive-or', effect: 'allow' },
+      { action: 'mcp.use', resource: '*', effect: 'deny' },
+      { action: 'mcp.use', resource: 'hive', effect: 'allow' },
+      { action: 'mcp.use', resource: 'brain', effect: 'allow' },
+      { action: 'skill.use', resource: '*', effect: 'deny' },
     ]);
+    // The provider's integration counts as connected through the run pass's variable (never a real key).
+    expect((config['providers'] as Record<string, { env?: string[] }>)['hive-or']?.env).toEqual(['HIVE_RUN_PASS']);
     expect(config).toMatchObject({ update: 'disable', share: 'disabled', snapshots: false, lsp: false, formatter: false, warming: false });
   });
 
@@ -167,10 +174,11 @@ describe('finding OpenCode', () => {
     const paths = candidatePaths({ env: { APPDATA: '/appdata', PATH: '/bin' }, platform: 'win32' });
     expect(paths[0]).toBe(exe);
     expect(paths.some((p) => p.endsWith('.cmd'))).toBe(false);
-    const found = await detectOpenCode({ exists: (p) => p === exe, version: async () => 'opencode 2.2.1\n', env: { APPDATA: '/appdata' }, platform: 'win32' });
-    expect(found).toEqual({ status: 'installed', command: exe, version: '2.2.1' });
-    const old = await detectOpenCode({ exists: (p) => p === exe, version: async () => '2.1.9', env: { APPDATA: '/appdata' }, platform: 'win32' });
-    expect(old).toMatchObject({ status: 'outdated', minimum: '2.2.1' });
+    const found = await detectOpenCode({ exists: (p) => p === exe, version: async () => 'opencode v2.2.6\n', env: { APPDATA: '/appdata' }, platform: 'win32' });
+    expect(found).toEqual({ status: 'installed', command: exe, version: '2.2.6' });
+    // 2.2.5 starts a run before local MCP servers register their tools (fixed in 2.2.6): too old for the hive.
+    const old = await detectOpenCode({ exists: (p) => p === exe, version: async () => 'opencode v2.2.5', env: { APPDATA: '/appdata' }, platform: 'win32' });
+    expect(old).toMatchObject({ status: 'outdated', minimum: '2.2.6' });
     expect(await detectOpenCode({ exists: () => false, env: {}, platform: 'win32' })).toEqual({ status: 'missing' });
     expect(versionAtLeast('2.10.0', '2.2.1')).toBe(true);
   });

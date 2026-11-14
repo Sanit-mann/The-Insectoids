@@ -5,8 +5,12 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-/** Oldest OpenCode the hive runs: every config key and flag below was checked in the 2.2.1 source. */
-export const MIN_OPENCODE_VERSION = '2.2.1';
+/**
+ * Oldest OpenCode the hive runs. Config keys and flags were checked in the 2.2.1 and 2.2.5 source and in real
+ * runs (Phase 2 C6). 2.2.6 is the minimum because 2.2.5 sends a run's first prompt before local MCP servers
+ * register their tools, so an insect would start without the hive tools (fixed in 2.2.6, PR #60490).
+ */
+export const MIN_OPENCODE_VERSION = '2.2.6';
 
 export type OpenCodeInstall =
   | { status: 'installed'; command: string; version: string; /** Tests: leading args (a stand-in script). */ args?: string[] }

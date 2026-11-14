@@ -120,6 +120,65 @@ A card asks for a greeting page (or a welcome note) for one named person.
 The file exists, greets the person by name, and nothing else changed.
 `;
 
+/**
+ * Phase 2 demo (C6) on the tiny-text sample project: a goal that names truncate(text, n) and usage examples
+ * gets two waves across three castes (so the plan waits for approval): wave 1, a coder adds truncate and a
+ * tester tests it; wave 2, three low-priority documenters each write one usage example (repeated work, so the
+ * Librarian drafts the skill below; low priority, so a free local engine takes them in the real demo).
+ */
+export const DEMO_PHASE2_GOAL = /truncate\(text, n\)[\s\S]*usage example/i;
+const exampleCard = (id: string, fn: string) => ({
+  id,
+  title: `Write a usage example for ${fn}`,
+  brief: `Create docs/examples/${fn.toLowerCase()}.md: one short usage example of ${fn} with its printed output.`,
+  caste: 'documenter',
+  priority: 'low',
+  acceptance: [`docs/examples/${fn.toLowerCase()}.md shows one usage example of ${fn} and its output`],
+  dependsOn: [],
+});
+export const DEMO_PHASE2_PLAN = {
+  headline: 'Add truncate and capitalize, test them, then write three usage examples',
+  summary: 'Wave 1: a coder adds truncate(text, n) and capitalize(text), and a tester tests them. Wave 2: three low-priority usage examples.',
+  waves: [
+    {
+      cards: [
+        { id: 'C-01', title: 'Add truncate(text, n) and capitalize(text) to src/index.js', brief: 'Export truncate(text, n) and capitalize(text) from src/index.js.', caste: 'coder', priority: 'normal', acceptance: ['truncate is exported'], dependsOn: [] },
+        { id: 'C-02', title: 'Test truncate and capitalize with node:test', brief: 'Add test/truncate.test.js and test/capitalize.test.js.', caste: 'tester', priority: 'normal', acceptance: ['The tests pass'], dependsOn: ['C-01'] },
+      ],
+    },
+    { cards: [exampleCard('C-03', 'wordCount'), exampleCard('C-04', 'capitalize'), exampleCard('C-05', 'truncate')] },
+  ],
+};
+export const DEMO_LEARNED_EXAMPLES_SKILL = `---
+name: usage-example-pages
+description: Write one short usage example page for a single library function, with the call and its printed output. Use when a card asks for a usage example or an examples page for one function.
+metadata:
+  kind: skill
+  castes: [documenter]
+  version: 1
+  status: draft
+  sources:
+    - repo: the-insectoids/learned
+      path: cards
+---
+
+# Usage example pages
+
+## When to use
+
+A card asks for a usage example of one function, in its own page under docs/examples/.
+
+## Steps
+
+1. Name the page after the function, in lowercase.
+2. Show one import line and one call, then the printed output on the next line.
+3. Add one sentence on what the function is for. No other prose.
+
+## Done means
+
+The page exists, the example matches the function's real behaviour, and nothing else changed.
+`;
+
 const fenced = (intro: string, value: unknown): string => `${intro}\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
 
 /** The demo Foreman: sends "Fail on purpose" to the Queen; gives anything else one more try with a note. */
@@ -178,8 +237,18 @@ export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
     if (req.role === 'queen' && DEMO_SKILL_GOAL.test(goal)) {
       return { delayMs: t.queenMs, tokens: 3_000, costUsd: 0.01, events: [init, { kind: 'text', text: 'Plan: 1 wave, 3 cards.' }], text: fenced('Here is the plan.', DEMO_SKILL_PLAN) };
     }
+    if (req.role === 'queen' && DEMO_PHASE2_GOAL.test(goal)) {
+      return {
+        delayMs: t.queenMs,
+        tokens: 4_000,
+        costUsd: 0.01,
+        events: [init, { kind: 'text', text: 'Reading the goal and the project files.' }, { kind: 'text', text: 'Plan: 2 waves, 5 cards, 3 castes.' }],
+        text: fenced('Here is the plan.', DEMO_PHASE2_PLAN),
+      };
+    }
     if (req.role === 'librarian' && req.task.startsWith('# Draft a skill')) {
-      return { delayMs: t.inspectorMs, tokens: 1_400, events: [init, { kind: 'text', text: 'Reading the repeated cards.' }], text: `Here is the draft.\n\`\`\`markdown\n${DEMO_LEARNED_SKILL}\`\`\`` };
+      const skill = /^Caste: documenter$/m.test(req.task) ? DEMO_LEARNED_EXAMPLES_SKILL : DEMO_LEARNED_SKILL;
+      return { delayMs: t.inspectorMs, tokens: 1_400, events: [init, { kind: 'text', text: 'Reading the repeated cards.' }], text: `Here is the draft.\n\`\`\`markdown\n${skill}\`\`\`` };
     }
     if (req.role === 'queen' && DEMO_TEAM_GOAL.test(goal)) {
       return {
