@@ -3,6 +3,9 @@ import {
   AppInfoSchema,
   BACKUP_IPC,
   type BackupApi,
+  BRAIN_EXPORT_IPC,
+  type BrainExportApi,
+  ObsidianExportResultSchema,
   BackupResultSchema,
   BackupStateSchema,
   BrainDashboardViewSchema,
@@ -152,6 +155,14 @@ const backups: BackupApi = {
   restore: async (file) => BackupResultSchema.parse(await invoke(BACKUP_IPC.restore, file)),
 };
 
+/** The Brain as an Obsidian vault (Phase 3 C2): main picks the folder; "Show folder" opens only the last export's. */
+const brainExport: BrainExportApi = {
+  exportObsidian: async (opts) => ObsidianExportResultSchema.parse(await invoke(BRAIN_EXPORT_IPC.exportObsidian, { includeArchived: opts?.includeArchived === true })),
+  showFolder: async (path) => {
+    await invoke(BRAIN_EXPORT_IPC.showFolder, path);
+  },
+};
+
 // The only door from the UI to the main process. Every reply is validated.
 const api: InsectoidsApi = {
   appInfo: async () => AppInfoSchema.parse(await invoke(IPC.appInfo)),
@@ -162,6 +173,7 @@ const api: InsectoidsApi = {
   providers,
   webhooks,
   backups,
+  brainExport,
 };
 
 contextBridge.exposeInMainWorld('insectoids', api);

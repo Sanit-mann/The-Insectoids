@@ -25,6 +25,8 @@ export interface AppSettings {
   backupDir?: string;
   /** Desktop notifications for approvals needed and failures (05-D8; Phase 3 B2). Absent = on; only `false` is stored. */
   notifications?: boolean;
+  /** The folder last picked for the Obsidian export (Phase 3 C2); the picker starts there next time. */
+  exportDir?: string;
 }
 
 /** Whether desktop notifications are on (B2): on unless the user switched them off. */
@@ -41,6 +43,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
   const sample = parseSample(o['sample']);
   const webhookSecrets = parseWebhookSecrets(o['webhookSecrets']);
   const backupDir = o['backupDir'];
+  const exportDir = o['exportDir'];
   return {
     ...(typeof brainDir === 'string' && brainDir.length > 0 ? { brainDir } : {}),
     preset: preset.success ? preset.data : 'balanced',
@@ -52,6 +55,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
     ...(isPort(o['webhookPort']) ? { webhookPort: o['webhookPort'] } : {}),
     ...(typeof backupDir === 'string' && backupDir.length > 0 && isAbsolute(backupDir) ? { backupDir } : {}),
     ...(o['notifications'] === false ? { notifications: false } : {}),
+    ...(typeof exportDir === 'string' && exportDir.length > 0 && isAbsolute(exportDir) ? { exportDir } : {}),
   };
 }
 

@@ -469,7 +469,7 @@ export class Brain {
    * nothing. `supersedes` replaces an older record (time-aware facts).
    */
   write(input: WriteInput, actor: Actor): WriteResult {
-    this.#assertNoSecrets(input.title, input.body, input.summary);
+    this.#assertNoSecrets(input.title, input.body, input.summary, input.source);
     let trust = this.#initialTrust(input, actor);
     const hash = this.#hash(input.kind, input.title, input.body);
 

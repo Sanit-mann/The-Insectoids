@@ -9,10 +9,11 @@
  * through the typed RPC below.
  */
 import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
+import { DatabaseSync } from 'node:sqlite';
 import { dirname, join } from 'node:path';
 import { type Brain, openBrain } from '@insectoids/brain';
 import { writeBrainShims } from '@insectoids/brain-cli/shims';
-import { WebhookCallSchema } from '@insectoids/shared';
+import { ObsidianExportRequestSchema, WebhookCallSchema } from '@insectoids/shared';
 import { type BrainService, startBrainService } from '@insectoids/brain-service';
 import { HiveManager, e2eReadyEngines } from './hive-manager';
 import { MeaningSearch } from './meaning-search';
@@ -22,6 +23,8 @@ import type { ServiceAccess, ServiceTicket } from '@insectoids/harness';
 import { type DoorPaths, type FromHost, type HostMethod, type HostRequestMethod, type ToHost, isHostReply, isRpcMessage, isStartMessage } from './messages';
 
 const port = process.parentPort;
+/** The Brain file (only the e2e secret-planting hook opens a second connection to it). */
+let brainDbPath: string | null = null;
 let brain: Brain | null = null;
 let service: BrainService | null = null;
 let hive: HiveManager | null = null;
@@ -80,6 +83,7 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
     // A Unix socket left behind by a crashed host would block listen(); named pipes vanish with their process.
     if (process.platform !== 'win32' && existsSync(m.endpoint)) unlinkSync(m.endpoint);
     brain = openBrain(m.dbPath);
+    brainDbPath = m.dbPath;
     // Meaning search (Phase 2 B1): off until the user switches it on; then the model runs in this process.
     const ms = new MeaningSearch({
       brain,
@@ -213,6 +217,9 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
       hive.setBackupDir(dir);
       return null;
     }
+    case 'exportObsidian':
+      // Phase 3 C2: main picked the folder and checked it isn't the Brain folder; parsed again here.
+      return hive.exportObsidian(ObsidianExportRequestSchema.parse(params));
     case 'engineCard':
       return hive.engineCard(String((params as { id?: unknown })?.id ?? ''));
     case 'e2eEngineInstalled': {
@@ -229,6 +236,23 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
       if (typeof p?.id !== 'string' || typeof p.body !== 'string') throw new Error('e2eAgentEdit needs an id and a body.');
       hive.e2eAgentEdit(p.id, p.body);
       return null;
+    }
+    case 'e2ePlantSecret': {
+      // e2e only (C2): a record whose body holds a secret, to prove the Obsidian export never writes one. The Brain's
+      // guard refuses secrets on every write, so the body is swapped in through a second connection to the file.
+      if (process.env['INSECTOIDS_E2E'] !== '1') throw new Error('Only available in end-to-end tests.');
+      const p = params as { title?: unknown; body?: unknown };
+      if (typeof p?.title !== 'string' || typeof p.body !== 'string') throw new Error('e2ePlantSecret needs a title and a body.');
+      if (!brain || !brainDbPath) throw new Error('The Brain is not open.');
+      const { id } = brain.write({ kind: 'fact', shelf: 'global', title: p.title, body: 'placeholder' }, { type: 'user' });
+      const raw = new DatabaseSync(brainDbPath);
+      try {
+        raw.exec('PRAGMA busy_timeout = 5000');
+        raw.prepare('UPDATE records SET body = ? WHERE id = ?').run(p.body, id);
+      } finally {
+        raw.close();
+      }
+      return { id };
     }
     // Library screen (Phase 2 C1): requests are validated in main and parsed again in the HiveManager.
     case 'libraryCastes':

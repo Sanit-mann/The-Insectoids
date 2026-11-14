@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { detectSecrets } from './secrets';
+import { SECRET_REMOVED } from '@insectoids/shared';
+import { detectSecrets, redactSecrets } from './secrets';
 
 describe('secrets guard (Memory 01-E6)', () => {
   it.each([
@@ -27,5 +28,33 @@ describe('secrets guard (Memory 01-E6)', () => {
   it('reports what kind of secret it found, never the value', () => {
     const found = detectSecrets('token ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789');
     expect(found).toEqual(['github-token']);
+  });
+});
+
+describe('redactSecrets (Phase 3 C2)', () => {
+  it('replaces every secret with the placeholder and reports kinds, never values', () => {
+    const key = 'sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
+    const gh = 'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789';
+    const out = redactSecrets(`a ${key} b ${gh} c ${gh}`);
+    expect(out.text).toBe(`a ${SECRET_REMOVED} b ${SECRET_REMOVED} c ${SECRET_REMOVED}`);
+    expect(out.kinds.sort()).toEqual(['anthropic-key', 'github-token']);
+    expect(JSON.stringify(out)).not.toContain(gh);
+  });
+
+  it('takes the name with an assigned secret, so nothing left looks like a secret', () => {
+    const cases: Array<[string, string]> = [
+      ['API_KEY=sk-ant-api03-AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', `x ${SECRET_REMOVED} y`],
+      ['DB_PASSWORD = "hunter2hunter2"', `x ${SECRET_REMOVED}" y`],
+      ['my secret: ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789', `x my ${SECRET_REMOVED} y`],
+    ];
+    for (const [text, expected] of cases) {
+      const out = redactSecrets(`x ${text} y`);
+      expect(out.text).toBe(expected);
+      expect(detectSecrets(out.text)).toEqual([]);
+    }
+  });
+
+  it('leaves clean text alone', () => {
+    expect(redactSecrets('Store the API key in the vault.')).toEqual({ text: 'Store the API key in the vault.', kinds: [] });
   });
 });

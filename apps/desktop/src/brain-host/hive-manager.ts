@@ -61,6 +61,7 @@ import { LibraryKeeper, scanOf } from './library-keeper';
 import { CadenceKeeper, isBuiltIn } from './cadence-keeper';
 import { CadenceProposer } from './cadence-proposals';
 import { approvalView, buildDigest } from './digest';
+import { exportObsidian } from './obsidian-export';
 import {
   type ActivityView,
   type AgentView,
@@ -76,6 +77,8 @@ import {
   type BudgetsView,
   type CadenceRunView,
   type DigestView,
+  type ObsidianExportRequest,
+  type ObsidianExportResult,
   BudgetsViewSchema,
   CasteSchema,
   type BrainEditRequest,
@@ -1576,6 +1579,15 @@ export class HiveManager {
   /** The "while you were away" digest (Phase 3 B1): unattended work since the user last read it. */
   digest(): DigestView {
     return this.#digest();
+  }
+
+  /**
+   * The Brain as an Obsidian vault (Memory 01-D11; Phase 3 C2): every shelf, the open project's shelf named after its
+   * folder. main picked the folder; errors come back in words, never thrown.
+   */
+  exportObsidian(req: ObsidianExportRequest): ObsidianExportResult {
+    const p = this.#project?.view;
+    return exportObsidian({ brain: this.#o.brain, request: req, now: this.#now(), project: p ? { shelf: p.shelf, name: p.name } : null });
   }
 
   /** `waiting`: every waiting approval, when the caller already read them (the snapshot). */

@@ -54,6 +54,8 @@ export type HostMethod =
   | 'brainDashboard'
   | 'brainEdit'
   | 'e2eAgentEdit'
+  /** e2e only (C2): plant a record with a secret in its body, past the Brain's guard. */
+  | 'e2ePlantSecret'
   // Library screen (Phase 2 C1): the castes and the catalog, read-only.
   | 'libraryCastes'
   | 'librarySearch'
@@ -72,6 +74,9 @@ export type HostMethod =
   // Where Brain backups go (Cadence 05-D7; Phase 3 A5): params { dir } (a full path); main sends it at every host
   // start and whenever the user changes the folder.
   | 'setBackupDir'
+  // The Brain as an Obsidian vault (Memory 01-D11; Phase 3 C2): params ObsidianExportRequest (main picked and checked
+  // the folder), result ObsidianExportResult (errors come back as { ok: false, error }, never thrown).
+  | 'exportObsidian'
   // Engine install (C4): main reads the engine's card (its official install command) from the host.
   // 'e2eEngineInstalled' works only when the host runs under INSECTOIDS_E2E=1.
   | 'engineCard'

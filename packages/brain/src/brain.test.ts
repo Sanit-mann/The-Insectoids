@@ -51,6 +51,13 @@ describe('secrets never enter the Brain (Memory 01-E6)', () => {
     expect(brain.search('creds')).toEqual([]);
   });
 
+  it('refuses a secret in the source too (found by the C2 export work)', () => {
+    expect(() =>
+      brain.write({ kind: 'fact', shelf: 's', title: 'deploy', body: 'safe', source: 'run with ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789' }, ant),
+    ).toThrow(SecretError);
+    expect(brain.search('deploy')).toEqual([]);
+  });
+
   it('refuses an update that adds a secret', () => {
     const { id } = brain.write({ kind: 'fact', shelf: 's', title: 'note', body: 'safe' }, user);
     expect(() => brain.update(id, { body: 'ghp_AbCdEfGhIjKlMnOpQrStUvWxYz0123456789' }, user)).toThrow(SecretError);

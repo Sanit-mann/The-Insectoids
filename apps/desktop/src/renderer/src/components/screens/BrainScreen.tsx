@@ -9,6 +9,7 @@ import { GraphView } from '@/components/brain/GraphView';
 import { KINDS, kindInfo } from '@/components/brain/kinds';
 import { HitStatusBadge } from '@/components/brain/HitStatus';
 import { MatchBadge, MeaningSearchStrip, TURN_ON_ID } from '@/components/brain/MeaningSearch';
+import { ObsidianExport } from '@/components/brain/ObsidianExport';
 import { Switch } from '@/components/connections/Switch';
 import { InlineError } from '@/components/changes/CardChanges';
 import { useHive } from '@/lib/hive-store';
@@ -171,6 +172,7 @@ function NotesView({ switcher, openRequest }: { switcher: ReactNode; openRequest
     <div className="flex flex-1 flex-wrap items-start gap-6 p-6">
       {switcher}
       <BrainCareRow onOpen={setOpenId} />
+      <ObsidianExport />
       <section aria-label="Search the Brain" className="flex w-full flex-[1_1_300px] flex-col gap-3 md:max-w-[400px]">
         <p className="m-0 text-xs text-muted" data-testid="brain-tidy-intro">
           The Brain keeps itself tidy: notes that get used rise in results, unused agent notes fade into the archive, and nothing is

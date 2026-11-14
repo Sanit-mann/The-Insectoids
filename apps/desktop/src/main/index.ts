@@ -18,6 +18,7 @@ import { buildAppInfo } from './app-info';
 import { AppSettingsStore, checkBrainFolder, limitsFor, notificationsOn } from './app-settings';
 import { registerBackupIpc } from './backup-ipc';
 import { createBackupDirSync } from './backups';
+import { registerBrainExportIpc } from './brain-export-ipc';
 import { BrainHost } from './brain-host';
 import { Broker } from './broker';
 import { handleBrokerRequest } from './broker-requests';
@@ -60,7 +61,11 @@ if (isE2E) app.setPath('userData', mkdtempSync(join(tmpdir(), 'insectoids-e2e-')
  * e2e only, main process only (read with `app.evaluate`, never reachable from the renderer): what the tray shows,
  * what would have notified, the fake login item (B2), and a hook for the Brain screen's conflict test (Phase 2 B5).
  */
-type E2EHook = BackgroundE2E & { agentEditRecord?: (id: string, body: string) => Promise<void> };
+type E2EHook = BackgroundE2E & {
+  agentEditRecord?: (id: string, body: string) => Promise<void>;
+  /** C2: a record whose body holds a secret (past the Brain's guard), for the Obsidian export test. */
+  plantSecretRecord?: (title: string, body: string) => Promise<{ id: string }>;
+};
 const e2eHook: E2EHook | null = isE2E ? { tray: null, notices: [], loginItem: { openAtLogin: false }, windowInFront: null } : null;
 if (e2eHook) (globalThis as unknown as { __insectoidsE2E?: E2EHook }).__insectoidsE2E = e2eHook;
 /** Tests may replace a field of the hook object, or the whole object: always read the current one. */
@@ -468,6 +473,10 @@ function registerIpc(): void {
       if (!brainHost) throw new Error('The Brain is not running.');
       await brainHost.call('e2eAgentEdit', { id, body });
     };
+    hook.plantSecretRecord = async (title: string, body: string): Promise<{ id: string }> => {
+      if (!brainHost) throw new Error('The Brain is not running.');
+      return (await brainHost.call('e2ePlantSecret', { title, body })) as { id: string };
+    };
   }
   registerVaultIpc({ vault: vault!, services: services!, broker: broker!, providers: providers!, assertTrustedSender });
   registerProvidersIpc({ providers: providers!, vault: vault!, llm: llm!, assertTrustedSender });
@@ -484,6 +493,24 @@ function registerIpc(): void {
     window: () => mainWindow,
     assertTrustedSender,
     ...(testBackupFolder ? { testPickedFolder: testBackupFolder } : {}),
+  });
+  // e2e only (Phase 3 C2): the folder the native picker would return for the Obsidian export.
+  const testExportFolder = isE2E ? process.env['INSECTOIDS_E2E_EXPORT_FOLDER'] : undefined;
+  registerBrainExportIpc({
+    settings: settings!,
+    notReady: () => {
+      const h = brainHost;
+      if (switchingBrain) return 'The Brain is moving. Try again in a moment.';
+      return h && h.status.state === 'ready' ? null : (h?.status.message ?? 'The Brain is not running yet.');
+    },
+    callHost: (req) => {
+      const h = brainHost;
+      if (!h || h.status.state !== 'ready') return Promise.reject(new Error(h?.status.message ?? 'The Brain is not running.'));
+      return h.call('exportObsidian', req);
+    },
+    window: () => mainWindow,
+    assertTrustedSender,
+    ...(testExportFolder ? { testPickedFolder: testExportFolder } : {}),
   });
   ipcMain.handle(IPC.brainStatus, (event) => {
     assertTrustedSender(event);
