@@ -4,6 +4,7 @@ import {
   CadenceInputSchema,
   type CadenceView,
   DEFAULT_CADENCE_BUDGET_TOKENS,
+  DEFAULT_WEBHOOK_TRUST,
   FILE_SETTLE_MS,
   FilePatternSchema,
   type HiveEventTrigger,
@@ -11,18 +12,19 @@ import {
   MAX_LISTED_FILES,
   MIN_INTERVAL_MINUTES,
   ProjectFolderSchema,
+  type WebhookTrust,
 } from '@insectoids/shared';
-import { FolderOpen, GitMerge, Repeat, Trash2 } from 'lucide-react';
+import { FolderOpen, GitMerge, Lock, Repeat, Trash2 } from 'lucide-react';
 import { type FormEvent, type KeyboardEvent, useId, useState } from 'react';
 import { HoldButton } from '@/components/kokonutui/hold-button';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
-import { AUTONOMY, AUTONOMY_ORDER, HIVE_EVENTS, HIVE_EVENT_ORDER, WEEK } from './cadence-words';
+import { AUTONOMY, AUTONOMY_ORDER, HIVE_EVENTS, HIVE_EVENT_ORDER, TRUST, TRUST_ORDER, WEEK } from './cadence-words';
 
 /**
- * Create or edit a cadence (Cadence 05; Phase 3 A1, A3): when (every N minutes/hours, weekly at a local time,
- * when files change in a project folder, or when something happens in the hive),
+ * Create or edit a cadence (Cadence 05; Phase 3 A1, A3, A4): when (every N minutes/hours, weekly at a local time,
+ * when files change in a project folder, when something happens in the hive, or when a webhook is called),
  * what (a goal for the Queen), and limits (a token budget and how much may start without the user).
  * The form checks everything in words first and only sends what `CadenceInputSchema` accepts.
  */
@@ -32,12 +34,13 @@ const inputCls = 'min-h-10 rounded-[10px] border border-line bg-ground px-3 text
 export type { CadenceFields };
 
 type Unit = 'minutes' | 'hours';
-type Kind = 'interval' | 'weekly' | 'file' | 'event';
+type Kind = 'interval' | 'weekly' | 'file' | 'event' | 'webhook';
 const KINDS: ReadonlyArray<{ kind: Kind; label: string }> = [
   { kind: 'interval', label: 'Every few minutes or hours' },
   { kind: 'weekly', label: 'On days of the week' },
   { kind: 'file', label: 'When files change in a folder' },
   { kind: 'event', label: 'When something happens in the hive' },
+  { kind: 'webhook', label: 'A webhook is called' },
 ];
 
 interface Draft {
@@ -52,6 +55,7 @@ interface Draft {
   eventOn: HiveEventTrigger;
   /** '' = any goal. */
   eventFrom: string;
+  trust: WebhookTrust;
   goal: string;
   budget: string;
   autonomy: CadenceAutonomy;
@@ -69,6 +73,7 @@ function draftOf(c: CadenceView | null): Draft {
     pattern: '',
     eventOn: 'goal-done',
     eventFrom: '',
+    trust: DEFAULT_WEBHOOK_TRUST,
     goal: '',
     budget: String(DEFAULT_CADENCE_BUDGET_TOKENS),
     autonomy: 'small-plans',
@@ -81,6 +86,7 @@ function draftOf(c: CadenceView | null): Draft {
   }
   if (c.when.type === 'weekly') return { ...d, kind: 'weekly', days: [...c.when.days], time: c.when.time };
   if (c.when.type === 'file') return { ...d, kind: 'file', folder: c.when.folder, pattern: c.when.pattern ?? '' };
+  if (c.when.type === 'webhook') return { ...d, kind: 'webhook', trust: c.when.trust };
   return { ...d, kind: 'event', eventOn: c.when.on, eventFrom: c.when.cadenceId ?? '' };
 }
 
@@ -104,6 +110,8 @@ function check(d: Draft, enabled: boolean): { problems: string[]; input: Cadence
     const pattern = d.pattern.trim() ? FilePatternSchema.safeParse(d.pattern) : null;
     if (pattern && !pattern.success) problems.push(...pattern.error.issues.map((i) => `File pattern: ${i.message}`));
     if (folder?.success && (!pattern || pattern.success)) when = { type: 'file', folder: folder.data, pattern: pattern ? pattern.data : null };
+  } else if (d.kind === 'webhook') {
+    when = { type: 'webhook', trust: d.trust };
   } else if (d.kind === 'event') {
     when = { type: 'event', on: d.eventOn, cadenceId: d.eventOn === 'goal-done' && d.eventFrom ? d.eventFrom : null };
   } else {
@@ -179,6 +187,14 @@ export function CadenceForm({ cadence, onSave, onCancel, onDelete, others = [] }
     const next = HIVE_EVENT_ORDER[(i + step + HIVE_EVENT_ORDER.length) % HIVE_EVENT_ORDER.length]!;
     set('eventOn', next);
     document.getElementById(`${uid}-event-${next}`)?.focus();
+  };
+  const trustKey = (ev: KeyboardEvent<HTMLButtonElement>, i: number) => {
+    const step = ev.key === 'ArrowDown' || ev.key === 'ArrowRight' ? 1 : ev.key === 'ArrowUp' || ev.key === 'ArrowLeft' ? -1 : 0;
+    if (!step) return;
+    ev.preventDefault();
+    const next = TRUST_ORDER[(i + step + TRUST_ORDER.length) % TRUST_ORDER.length]!;
+    set('trust', next);
+    document.getElementById(`${uid}-trust-${next}`)?.focus();
   };
   const toggleDay = (day: number) => set('days', d.days.includes(day) ? d.days.filter((x) => x !== day) : [...d.days, day]);
 
@@ -267,6 +283,52 @@ export function CadenceForm({ cadence, onSave, onCancel, onDelete, others = [] }
               <span>
                 A folder inside the project, like inbox or docs/incoming. When files are added or changed there, the hive waits {Math.round(FILE_SETTLE_MS / 1000)}{' '}
                 seconds for things to settle, then starts one run that lists the files (up to {MAX_LISTED_FILES}). Deleted files don't count.
+              </span>
+            </p>
+          </div>
+        ) : d.kind === 'webhook' ? (
+          <div className="flex flex-col gap-3" data-testid="cadence-webhook-fields">
+            <div aria-label="How much to trust the caller" className="flex flex-col gap-2" role="radiogroup">
+              {TRUST_ORDER.map((t, i) => (
+                <button
+                  aria-checked={d.trust === t}
+                  aria-describedby={`${uid}-trust-${t}-sentence`}
+                  aria-labelledby={`${uid}-trust-${t}-label`}
+                  className={cn(
+                    'flex min-h-10 items-start gap-3 rounded-[10px] border px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-honey',
+                    d.trust === t ? 'border-honey bg-honey/10' : 'border-line bg-ground hover:bg-surface-2',
+                  )}
+                  data-trust={t}
+                  id={`${uid}-trust-${t}`}
+                  key={t}
+                  onClick={() => set('trust', t)}
+                  onKeyDown={(ev) => trustKey(ev, i)}
+                  role="radio"
+                  tabIndex={d.trust === t ? 0 : -1}
+                  type="button"
+                >
+                  <span
+                    aria-hidden="true"
+                    className={cn('mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border', d.trust === t ? 'border-honey' : 'border-line')}
+                  >
+                    {d.trust === t ? <span className="size-2 rounded-full bg-honey" /> : null}
+                  </span>
+                  <span className="flex flex-col">
+                    <span className="text-sm font-semibold text-text" id={`${uid}-trust-${t}-label`}>
+                      {TRUST[t].label}
+                    </span>
+                    <span className="text-xs text-muted" id={`${uid}-trust-${t}-sentence`}>
+                      {TRUST[t].sentence}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+            <p className="m-0 flex items-start gap-2 text-xs text-muted">
+              <Lock aria-hidden="true" className="mt-px size-3.5 shrink-0 text-honey-text" />
+              <span>
+                The webhook&apos;s address works on this computer only. Every call needs its secret, and every call is listed in the cadence&apos;s runs, refused ones
+                too. The address and secret show under Runs once the cadence is saved.
               </span>
             </p>
           </div>

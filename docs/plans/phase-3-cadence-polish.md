@@ -160,3 +160,22 @@ Three milestones, each ending in something the user can try.
     - **Not checked on Linux yet:** Node's recursive `fs.watch` is implemented in JavaScript there and is heavier on big trees; CI will be its first real check.
     - **After a restart:** a pending file or event run still runs once, but the trigger details were kept in memory only, so they're lost.
     - **Merges:** a merge that changes a watched folder triggers a run. Loops can only go through merges the user approves, and busy runs skip.
+- **A4 Webhooks and trust: done (2026-11-14).** I wrote the contract (`webhook-api.ts`, the `webhook` when-shape with `trust`, new outcomes and the `webhook` approval kind), then four parallel workers built main, the Brain host, the UI and the e2e spec against it. Unit tests: 999 pass, 4 skipped. e2e: 158 passed, 3 skipped; the new webhook spec passes in full. Lint and typecheck are clean.
+  - **The listener** lives in main, next to the Vault: `node:http` on 127.0.0.1 only, port 47821 (`webhookPort` in app.json; e2e uses a free port). It listens only while the open project has a webhook cadence; a taken port is said in words on the Cadence screen.
+    - `POST /hooks/<cadenceId>` asks the hive to run the cadence; `POST /hooks/<cadenceId>/note` only tells it something.
+    - **Secret:** one per webhook, in the Vault ("Webhook secret · <name>"); app.json keeps only the cadence → Vault handle. Calls carry it as `X-Insectoids-Signature: sha256=<HMAC-SHA256 of the body>`, GitHub's `X-Hub-Signature-256`, or `Authorization: Bearer <secret>`, checked in constant time. No OS key store: no secret, so every call is refused (fail closed).
+    - **Limits:** bodies up to 64 KB (413), 30 calls a minute per webhook (429), 10 s timeouts. Bodies and secrets are never logged.
+    - **"Copy secret" / "New secret"** put the secret on the clipboard from main; it never reaches the renderer. A new secret stops the old one at once. Deleting the cadence removes its secret.
+  - **Trust modes** (05-D4), per webhook, decided in the Brain host:
+    - **Strict:** every call waits in Approvals, notes too.
+    - **Notes in, runs wait** (communication-only, the default): notes go into the Brain (kind `update`, unconfirmed, written as "Webhook", never as the user); runs wait in Approvals.
+    - **Allow all:** notes are kept and runs start on their own; the cadence's autonomy and budget still apply.
+  - **The trigger log:** every call is in the cadence's run history: waiting, noted, started, skipped, deferred, declined, or refused (bad or missing secret, too big, too many, switched off; at most one refused line a minute per webhook). A second run call while one waits for approval is skipped.
+  - **Outside content:** what a caller sent is fenced off in the run's goal as data, not instructions, and never changes the title, budget or autonomy. The run-history line never repeats it.
+  - **Approvals:** a new "Webhook call" kind with an "Open Cadence" link. Saying yes to a cadence that is off or not in the open project is refused in words and the approval stays; deleting a cadence says no to its waiting calls.
+  - **UI:** the form's "A webhook is called" choice with the three trust modes in plain sentences; under Runs, the webhook panel shows the listener status, both addresses with copy buttons, Copy secret / New secret (with a confirm) and a "How to call it" example with placeholders only.
+  - **e2e:** `webhooks.spec.ts`: default trust (note saved, run waits, approved run starts), wrong/missing secret refused and logged, unknown webhook 404, a new secret replaces the old, strict note declined, allow-all starts without asking, and the screen's panel, clipboard and history words. It skips on Linux without a key store, like the other Vault specs.
+  - **Notes:**
+    - The rate limit is checked before the secret, so another program on this computer could use up a webhook's 30 calls a minute. A local program could do worse anyway.
+    - A call while its project isn't open is logged every time (deferred, 409); main's rate limit is the only cap.
+    - Webhook approvals have no goal, so they show whichever project is open, like the library's.

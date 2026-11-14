@@ -43,6 +43,10 @@ import {
   type ProvidersApi,
   VaultResultSchema,
   VaultStatusSchema,
+  WEBHOOK_IPC,
+  type WebhookApi,
+  WebhookInfoSchema,
+  WebhookSecretResultSchema,
 } from '@insectoids/shared';
 
 /** Electron prefixes errors from main with "Error invoking remote method '…': Error: "; the UI shows plain words. */
@@ -125,6 +129,13 @@ const providers: ProvidersApi = {
   test: async (id) => ProviderTestResultSchema.parse(await invoke(PROVIDERS_IPC.test, id)),
 };
 
+/** Webhooks (Phase 3 A4): URLs and status only; "Copy secret" puts the secret on the clipboard in main, never here. */
+const webhooks: WebhookApi = {
+  info: async (cadenceId) => WebhookInfoSchema.parse(await invoke(WEBHOOK_IPC.info, cadenceId)),
+  copySecret: async (cadenceId) => WebhookSecretResultSchema.parse(await invoke(WEBHOOK_IPC.copySecret, cadenceId)),
+  newSecret: async (cadenceId) => WebhookSecretResultSchema.parse(await invoke(WEBHOOK_IPC.newSecret, cadenceId)),
+};
+
 // The only door from the UI to the main process. Every reply is validated.
 const api: InsectoidsApi = {
   appInfo: async () => AppInfoSchema.parse(await invoke(IPC.appInfo)),
@@ -133,6 +144,7 @@ const api: InsectoidsApi = {
   setup,
   vault,
   providers,
+  webhooks,
 };
 
 contextBridge.exposeInMainWorld('insectoids', api);

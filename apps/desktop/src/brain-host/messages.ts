@@ -64,6 +64,9 @@ export type HostMethod =
   | 'cadenceRuns'
   // The computer woke from sleep (Phase 3 A2): main tells the host so owed cadence runs happen at once.
   | 'wake'
+  // A webhook call (Cadence 05-D4; Phase 3 A4): main checked the secret, size and rate; params WebhookCall,
+  // result WebhookReply (what main answers the caller).
+  | 'webhookCall'
   // Engine install (C4): main reads the engine's card (its official install command) from the host.
   // 'e2eEngineInstalled' works only when the host runs under INSECTOIDS_E2E=1.
   | 'engineCard'

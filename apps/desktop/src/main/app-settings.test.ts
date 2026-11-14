@@ -39,6 +39,13 @@ describe('app.json', () => {
     expect(parseAppSettings({ keepAwake: false })).not.toHaveProperty('keepAwake');
   });
 
+  it('keeps webhook secret handles and the webhook port (A4), and drops broken ones', () => {
+    const webhookSecrets = { 'CAD-1': 'sec_0123456789ab', 'bad id!': 'sec_0123456789ab', 'CAD-2': 'whsec_plain', 'CAD-3': 7 };
+    expect(parseAppSettings({ webhookSecrets, webhookPort: 48000 })).toMatchObject({ webhookSecrets: { 'CAD-1': 'sec_0123456789ab' }, webhookPort: 48000 });
+    expect(parseAppSettings({ webhookSecrets: { x: 'nope' }, webhookPort: 70_000 })).not.toHaveProperty('webhookSecrets');
+    expect(parseAppSettings({ webhookPort: 1.5 })).not.toHaveProperty('webhookPort');
+  });
+
   it('keeps the sample goal and the previous project (C5), and drops broken ones', () => {
     const sample = { goalId: 'g1', practicePath: '/d/practice-project', startedAt: 5 };
     expect(parseAppSettings({ preset: 'careful', onboarding: {}, sample, previousProject: '/d/site' })).toEqual({

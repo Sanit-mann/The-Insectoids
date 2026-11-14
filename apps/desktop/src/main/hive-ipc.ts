@@ -40,6 +40,8 @@ interface Deps {
   assertTrustedSender: (event: IpcMainInvokeEvent) => void;
   /** Pushes to the window (C4: engine install output). */
   push?: (p: HivePush) => void;
+  /** A cadence was deleted (Phase 3 A4: its webhook secret goes too). */
+  cadenceDeleted?: (id: string) => void;
 }
 
 /** Same rule as every id in the hive contract. */
@@ -68,7 +70,9 @@ export function registerHiveIpc(d: Deps): void {
 
   handle(HIVE_IPC.command, async (arg) => {
     const cmd = HiveCommandSchema.parse(arg);
-    return CommandResultSchema.parse(await host().call('command', cmd));
+    const r = CommandResultSchema.parse(await host().call('command', cmd));
+    if (r.ok && cmd.type === 'deleteCadence') d.cadenceDeleted?.(cmd.id);
+    return r;
   });
 
   handle(HIVE_IPC.changes, async (arg) => ChangesViewSchema.parse(await host().call('changes', ChangesRequestSchema.parse(arg))));

@@ -12,6 +12,7 @@ import { existsSync, mkdirSync, unlinkSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { type Brain, openBrain } from '@insectoids/brain';
 import { writeBrainShims } from '@insectoids/brain-cli/shims';
+import { WebhookCallSchema } from '@insectoids/shared';
 import { type BrainService, startBrainService } from '@insectoids/brain-service';
 import { HiveManager, e2eReadyEngines } from './hive-manager';
 import { MeaningSearch } from './meaning-search';
@@ -196,6 +197,9 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
     case 'wake':
       hive.wake();
       return null;
+    case 'webhookCall':
+      // Validated in main against WebhookCallSchema, and again here (the call carries outside content).
+      return hive.webhookCall(WebhookCallSchema.parse(params));
     case 'engineCard':
       return hive.engineCard(String((params as { id?: unknown })?.id ?? ''));
     case 'e2eEngineInstalled': {

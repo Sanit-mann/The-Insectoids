@@ -17,6 +17,10 @@ export interface AppSettings {
   previousProject?: string;
   /** Keep the computer awake while the hive works (05-D5; Phase 3 A2). Absent = off. */
   keepAwake?: boolean;
+  /** Each webhook cadence's secret, as a Vault handle (cadence id -> ref; Cadence 05-D4; Phase 3 A4). Never the secret itself. */
+  webhookSecrets?: Record<string, string>;
+  /** The webhook listener's port on 127.0.0.1 (A4). Absent = DEFAULT_WEBHOOK_PORT. */
+  webhookPort?: number;
 }
 
 /** Keeps every valid field and drops the rest, so one bad value never resets the whole file. */
@@ -28,6 +32,7 @@ export function parseAppSettings(raw: unknown): AppSettings {
   const brainDir = o['brainDir'];
   const prev = o['previousProject'];
   const sample = parseSample(o['sample']);
+  const webhookSecrets = parseWebhookSecrets(o['webhookSecrets']);
   return {
     ...(typeof brainDir === 'string' && brainDir.length > 0 ? { brainDir } : {}),
     preset: preset.success ? preset.data : 'balanced',
@@ -35,7 +40,23 @@ export function parseAppSettings(raw: unknown): AppSettings {
     ...(sample ? { sample } : {}),
     ...(typeof prev === 'string' && prev.length > 0 ? { previousProject: prev } : {}),
     ...(o['keepAwake'] === true ? { keepAwake: true } : {}),
+    ...(webhookSecrets ? { webhookSecrets } : {}),
+    ...(isPort(o['webhookPort']) ? { webhookPort: o['webhookPort'] } : {}),
   };
+}
+
+const WEBHOOK_ID = /^[A-Za-z0-9_-]{1,200}$/;
+const VAULT_REF = /^sec_[a-z0-9]{8,40}$/;
+const isPort = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1 && v <= 65_535;
+
+/** Keeps only well-formed cadence id -> Vault ref pairs; null when none are left. */
+function parseWebhookSecrets(raw: unknown): Record<string, string> | null {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) return null;
+  const out: Record<string, string> = {};
+  for (const [id, ref] of Object.entries(raw as Record<string, unknown>)) {
+    if (WEBHOOK_ID.test(id) && typeof ref === 'string' && VAULT_REF.test(ref)) out[id] = ref;
+  }
+  return Object.keys(out).length ? out : null;
 }
 
 function parseSample(raw: unknown): AppSettings['sample'] | null {

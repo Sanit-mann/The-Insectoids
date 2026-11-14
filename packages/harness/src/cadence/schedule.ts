@@ -47,11 +47,11 @@ export function localInstant(year: number, month: number, day: number, h: number
  * The first scheduled time strictly after `after`.
  * - interval: `after` + the interval (callers pass the last *scheduled* time, so runs keep their rhythm);
  * - weekly: the next chosen weekday at the local time;
- * - file and event cadences: null. They have no time; they wait for something to happen (A3), so they never
+ * - file, event and webhook cadences: null. They have no time; they wait for something to happen (A3, A4), so they never
  *   "miss" a run and never catch up.
  */
 export function nextRunAt(when: CadenceWhen, after: number, o: ScheduleOptions = {}): number | null {
-  if (when.type === 'file' || when.type === 'event') return null;
+  if (when.type === 'file' || when.type === 'event' || when.type === 'webhook') return null;
   return scheduledNext(when, after, o);
 }
 
@@ -84,7 +84,7 @@ export interface DueCheck {
  * next time keeps the schedule's own rhythm (an interval stays on its phase; weekly goes to the next slot).
  */
 export function dueCheck(when: CadenceWhen, scheduledAt: number, now: number, o: ScheduleOptions = {}): DueCheck {
-  if (when.type === 'file' || when.type === 'event') throw new Error('File and event cadences have no schedule.');
+  if (when.type === 'file' || when.type === 'event' || when.type === 'webhook') throw new Error('File, event and webhook cadences have no schedule.');
   if (scheduledAt > now) return { due: false, occurrences: 0, nextRunAt: scheduledAt };
   if (when.type === 'interval') {
     const step = when.everyMinutes * (o.intervalUnitMs ?? MINUTE_MS);
@@ -118,10 +118,14 @@ const andList = (items: readonly string[]): string => (items.length <= 1 ? (item
 /**
  * The schedule in plain words: "Every 2 hours", "Every Monday and Thursday at 09:00", "Every day at 07:30",
  * "When files change in inbox (*.md)", "After each run of "Weekly report" finishes", "When any goal finishes",
- * "When a goal has used 75% of its budget". `nameOf` looks up the cadence a follow-up is chained to (null when it
+ * "When a goal has used 75% of its budget", "When its webhook is called (runs wait for you, notes are kept)". `nameOf` looks up the cadence a follow-up is chained to (null when it
  * was removed).
  */
 export function whenText(when: CadenceWhen, nameOf: (cadenceId: string) => string | null = () => null): string {
+  if (when.type === 'webhook') {
+    const trust = when.trust === 'strict' ? 'every call waits for you' : when.trust === 'allow-all' ? 'calls run on their own' : 'runs wait for you, notes are kept';
+    return `When its webhook is called (${trust})`;
+  }
   if (when.type === 'file') {
     const where = when.folder === '.' ? 'the project' : when.folder;
     return `When files change in ${where}${when.pattern ? ` (${when.pattern})` : ''}`;

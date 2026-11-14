@@ -2,7 +2,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { BrowserWindow, type IpcMainInvokeEvent, app, ipcMain, powerMonitor, powerSaveBlocker, safeStorage, session, shell } from 'electron';
+import { BrowserWindow, type IpcMainInvokeEvent, app, clipboard, ipcMain, powerMonitor, powerSaveBlocker, safeStorage, session, shell } from 'electron';
 import { CommandResultSchema, HIVE_IPC, type HivePush, HiveSnapshotSchema, IPC } from '@insectoids/shared';
 import { buildAppInfo } from './app-info';
 import { AppSettingsStore, checkBrainFolder, limitsFor } from './app-settings';
@@ -22,6 +22,8 @@ import { ServicesStore, type UrlRules } from './services';
 import { type TrayState, createTray } from './tray';
 import { Vault } from './vault';
 import { registerVaultIpc } from './vault-ipc';
+import { registerWebhookIpc } from './webhook-ipc';
+import { type WebhookCadence, WebhookSecrets, WebhookService } from './webhooks';
 
 const APP_NAME = 'The Insectoids';
 const here = dirname(fileURLToPath(import.meta.url));
@@ -57,6 +59,9 @@ let broker: Broker | null = null;
 /** API providers and the broker's LLM route (Phase 2 A4). */
 let providers: ProvidersStore | null = null;
 let llm: LlmRoute | null = null;
+/** Webhooks (Phase 3 A4): the local listener and each webhook's secret, in main only. */
+let webhookSecrets: WebhookSecrets | null = null;
+let webhooks: WebhookService | null = null;
 
 /** e2e only: a fake upstream on http://127.0.0.1 may stand in for a service. Never in a normal run. */
 function testUrlRules(): UrlRules {
@@ -167,7 +172,19 @@ function startBrain(brainDir: string): BrainHost {
 /** Hive pushes go to the window; a "changed" also refreshes the tray and keep-awake. */
 function forwardPush(push: HivePush): void {
   if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send(HIVE_IPC.event, push);
-  if (push.type === 'changed') scheduleTrayUpdate();
+  if (push.type === 'changed') {
+    scheduleTrayUpdate();
+    // A cadence may have been added or removed, or the Brain (re)started: listen only while the project has webhooks.
+    webhooks?.refresh();
+  }
+}
+
+/** The open project's webhook cadences (A4), or null while the Brain isn't ready. */
+async function webhookCadences(): Promise<WebhookCadence[] | null> {
+  const h = brainHost;
+  if (!h || h.status.state !== 'ready') return null;
+  const s = HiveSnapshotSchema.parse(await h.call('snapshot'));
+  return s.cadences.filter((c) => c.when.type === 'webhook').map(({ id, name }) => ({ id, name }));
 }
 
 function scheduleTrayUpdate(): void {
@@ -266,7 +283,19 @@ function registerIpc(): void {
     switchBrainDir,
     ...(testPickedFolder ? { testPickedFolder } : {}),
   });
-  registerHiveIpc({ host: () => brainHost, window: () => mainWindow, assertTrustedSender, push: forwardPush });
+  registerHiveIpc({
+    host: () => brainHost,
+    window: () => mainWindow,
+    assertTrustedSender,
+    push: forwardPush,
+    cadenceDeleted: (id) => {
+      try {
+        webhookSecrets?.remove(id);
+      } catch (err) {
+        console.log(`[webhooks] could not remove a deleted cadence's secret: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    },
+  });
   if (isE2E) {
     // e2e only, main process only (never reachable from the renderer): an agent changes a record while the
     // user edits it, so the Brain screen's conflict view can be tested (Phase 2 B5). The host refuses it
@@ -280,6 +309,7 @@ function registerIpc(): void {
   }
   registerVaultIpc({ vault: vault!, services: services!, broker: broker!, providers: providers!, assertTrustedSender });
   registerProvidersIpc({ providers: providers!, vault: vault!, llm: llm!, assertTrustedSender });
+  registerWebhookIpc({ service: webhooks!, secrets: webhookSecrets!, vault: vault!, webhookCadences, clipboard, assertTrustedSender });
   ipcMain.handle(IPC.brainStatus, (event) => {
     assertTrustedSender(event);
     return brainHost?.status ?? { state: 'starting', message: 'Starting the Brain…' };
@@ -302,6 +332,7 @@ if (!app.requestSingleInstanceLock()) {
   app.on('before-quit', (event) => {
     quitting = true;
     keepAwake?.release();
+    void webhooks?.stop();
     void broker?.close();
     // Let the Brain close its database cleanly before the app exits.
     if (brainHost) {
@@ -335,6 +366,19 @@ if (!app.requestSingleInstanceLock()) {
     llm = new LlmRoute({ providers, reveal: (ref) => v.reveal(ref), hasKey: (ref) => v.has(ref), log: (line) => console.log(line) });
     broker = new Broker({ services, reveal: (ref) => v.reveal(ref), log: (line) => console.log(line), llm });
     await broker.start();
+    webhookSecrets = new WebhookSecrets({ vault, settings });
+    webhooks = new WebhookService({
+      secrets: webhookSecrets,
+      settings,
+      envPort: process.env['INSECTOIDS_WEBHOOK_PORT'],
+      call: async (c) => {
+        const h = brainHost;
+        if (!h || h.status.state !== 'ready') throw new Error(h?.status.message ?? 'The Brain is not running.');
+        return h.call('webhookCall', c);
+      },
+      webhookCadences,
+      log: (line) => console.log(line),
+    });
     registerIpc();
     brainHost = startBrain(settings.brainDir);
     mainWindow = createWindow();

@@ -2,7 +2,8 @@ import { z } from 'zod';
 
 /** What the user is asked to approve (Hive 02-D7, Memory 01-D3, Cadence 05-D3, Workspace 06-D3). */
 /** C3 adds the library's: a learned skill, an imported skill or agent, and retiring a skill (Capabilities 03-D5, D6). */
-export const ApprovalKindSchema = z.enum(['plan', 'risky_action', 'merge', 'decision', 'fact', 'schedule', 'skill_proposal', 'skill_import', 'skill_retirement']);
+/** Phase 3 A4 adds `webhook`: an outside call asking the hive to run a cadence, or a note under strict trust (05-D4). */
+export const ApprovalKindSchema = z.enum(['plan', 'risky_action', 'merge', 'decision', 'fact', 'schedule', 'skill_proposal', 'skill_import', 'skill_retirement', 'webhook']);
 export type ApprovalKind = z.infer<typeof ApprovalKindSchema>;
 
 export const ApprovalStatusSchema = z.enum(['waiting', 'approved', 'denied']);

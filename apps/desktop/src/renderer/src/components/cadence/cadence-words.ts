@@ -1,5 +1,5 @@
-import type { CadenceAutonomy, CadenceRunView, CadenceWhen, HiveEventTrigger } from '@insectoids/shared';
-import { CheckCircle2, Hourglass, PlayCircle, SkipForward, XCircle, type LucideIcon } from 'lucide-react';
+import type { CadenceAutonomy, CadenceRunView, CadenceWhen, HiveEventTrigger, WebhookTrust } from '@insectoids/shared';
+import { Ban, CheckCircle2, Hourglass, NotebookPen, PlayCircle, ShieldX, SkipForward, XCircle, type LucideIcon } from 'lucide-react';
 
 /**
  * Plain words for cadences (Cadence 05; Phase 3 A1). Status is always a word plus an icon, never colour alone.
@@ -34,7 +34,19 @@ export const REASON: Record<CadenceRunView['reason'], string> = {
   manual: 'Run now',
   file: 'Files changed',
   event: 'Hive event',
+  webhook: 'Webhook call',
 };
+
+/** How much a webhook's sender is trusted (A4, Cadence 05-D4), as choices with one plain sentence each. */
+export const TRUST: Record<WebhookTrust, { label: string; sentence: string }> = {
+  strict: { label: 'Strict', sentence: 'Every call waits for you, notes too.' },
+  'communication-only': {
+    label: 'Notes in, runs wait',
+    sentence: 'Notes go into the Brain; anything that asks the hive to act waits for you.',
+  },
+  'allow-all': { label: 'Allow all', sentence: 'Notes are kept and runs start on their own. Only for senders you trust.' },
+};
+export const TRUST_ORDER: readonly WebhookTrust[] = ['strict', 'communication-only', 'allow-all'];
 
 /** The two hive events a cadence can wait for (A3), as choices and as "waits for" words. */
 export const HIVE_EVENTS: Record<HiveEventTrigger, { label: string; waits: string }> = {
@@ -48,6 +60,10 @@ export const OUTCOME: Record<CadenceRunView['outcome'], { label: string; icon: L
   skipped: { label: 'Skipped', icon: SkipForward, className: 'text-muted' },
   deferred: { label: 'Waiting to run', icon: Hourglass, className: 'text-st-waiting' },
   failed: { label: 'Failed', icon: XCircle, className: 'text-st-blocked' },
+  waiting: { label: 'Waiting for you', icon: Hourglass, className: 'text-st-waiting' },
+  noted: { label: 'Note saved', icon: NotebookPen, className: 'text-st-done' },
+  refused: { label: 'Refused', icon: ShieldX, className: 'text-st-blocked' },
+  declined: { label: 'You said no', icon: Ban, className: 'text-muted' },
 };
 
 export const PENDING_ICON = Hourglass;
@@ -82,13 +98,14 @@ export function untilWords(at: number, now: number): string {
   return `in ${days} days`;
 }
 
-/** "Waits for files in inbox" / "Waits for a goal to finish": what a file or event cadence (A3) waits for. */
+/** "Waits for files in inbox" / "Waits for a goal to finish" / "Waits for its webhook to be called": what a file, event (A3) or webhook (A4) cadence waits for. */
 export function waitsWords(when: CadenceWhen): string | null {
   if (when.type === 'file') {
     const where = when.folder === '.' ? 'the project' : when.folder;
     return `Waits for files in ${where}${when.pattern ? ` (${when.pattern})` : ''}`;
   }
   if (when.type === 'event') return HIVE_EVENTS[when.on].waits;
+  if (when.type === 'webhook') return 'Waits for its webhook to be called';
   return null;
 }
 

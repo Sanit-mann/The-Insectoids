@@ -100,6 +100,9 @@ import {
   type EngineUsage,
   type IncidentView,
   type ManagersView,
+  type WebhookCall,
+  WebhookCallSchema,
+  type WebhookReply,
 } from '@insectoids/shared';
 import { Workspace } from '@insectoids/workspace';
 import { meaningSearchOffView } from './meaning-search';
@@ -857,6 +860,8 @@ export class HiveManager {
   async #command(cmd: HiveCommand): Promise<void> {
     // The library's own approvals and commands (C3) work with or without an open project.
     if ((cmd.type === 'approve' || cmd.type === 'deny') && this.#keeper.owns(cmd.approvalId)) return this.#keeper.decide(cmd.approvalId, cmd.type === 'approve');
+    // Webhook calls waiting in Approvals (Cadence 05-D4; Phase 3 A4): the cadence keeper decides them.
+    if ((cmd.type === 'approve' || cmd.type === 'deny') && this.#cadences.owns(cmd.approvalId)) return this.#cadences.decide(cmd.approvalId, cmd.type === 'approve');
     if (cmd.type === 'retireLibraryItem') return this.#keeper.retire(cmd.name);
     if (cmd.type === 'restoreLibraryItem') return this.#keeper.restore(cmd.name);
     if (cmd.type === 'setProject') return this.#setProject(cmd.path);
@@ -1397,6 +1402,14 @@ export class HiveManager {
   /** The computer woke from sleep (Phase 3 A2, 05-D5): runs that came due while it slept happen now, once. */
   wake(): void {
     this.#cadences.wake();
+  }
+
+  /**
+   * An outside app called a webhook (Cadence 05-D4; Phase 3 A4). main checked the secret, size and rate first; the
+   * cadence keeper applies the trust mode, logs the call, and says what to answer the caller.
+   */
+  webhookCall(call: WebhookCall): Promise<WebhookReply> {
+    return this.#cadences.webhook(WebhookCallSchema.parse(call));
   }
 
   /** A cadence's run history, newest first (Phase 3 A1). Runs of a deleted cadence stay readable. */

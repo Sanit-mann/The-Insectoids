@@ -1,7 +1,8 @@
 import { useRef, useState } from 'react';
 import type { ApprovalKind, ApprovalView } from '@insectoids/shared';
-import { BookOpen, Inbox } from 'lucide-react';
-import { KIND_META, KIND_ORDER, LIBRARY_KINDS, ago, decide } from '@/components/approvals/kinds';
+import { BookOpen, Clock, Inbox } from 'lucide-react';
+import { CADENCE_KINDS, KIND_META, KIND_ORDER, LIBRARY_KINDS, ago, decide } from '@/components/approvals/kinds';
+import { openScreen } from '@/components/changes/navigate';
 import { Button } from '@/components/ui/button';
 import { findLibraryItemForApproval, openLibraryItem } from '@/lib/library-nav';
 import { ApprovalCard } from '@/components/kokonutui/ai-tool-approval';
@@ -47,11 +48,22 @@ function OpenInLibrary({ item, onError }: { item: ApprovalView; onError: (m: str
   );
 }
 
+/** "Open Cadence" for webhook calls (A4): the cadence's runs and webhook live there. */
+function OpenInCadence({ item }: { item: ApprovalView }) {
+  if (!CADENCE_KINDS.has(item.kind)) return null;
+  return (
+    <Button className="mt-2 self-start" data-testid="approval-open-cadence" onClick={() => openScreen('cadence')} size="sm" variant="outline">
+      <Clock aria-hidden="true" /> Open Cadence
+    </Button>
+  );
+}
+
 function Detail({ item, onError }: { item: ApprovalView; onError: (m: string) => void }) {
   return (
     <div className="flex flex-col">
       <DetailCard item={item} onError={onError} />
       <OpenInLibrary item={item} onError={onError} />
+      <OpenInCadence item={item} />
     </div>
   );
 }

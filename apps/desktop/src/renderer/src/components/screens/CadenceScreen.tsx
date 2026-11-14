@@ -3,6 +3,7 @@ import { Clock, History, Pencil, Play, Plus, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { type CadenceFields, CadenceForm } from '@/components/cadence/CadenceForm';
 import { CadenceHistory } from '@/components/cadence/CadenceHistory';
+import { WebhookPanel } from '@/components/cadence/WebhookPanel';
 import { AUTONOMY, OUTCOME, PENDING_ICON, nextRunWords, runTime } from '@/components/cadence/cadence-words';
 import { Switch } from '@/components/connections/Switch';
 import { formatTokens } from '@/components/hive/format';
@@ -14,9 +15,10 @@ import { runCommand, useHive } from '@/lib/hive-store';
 import { cn } from '@/lib/utils';
 
 /**
- * Cadence (Cadence 05; App 07; Phase 3 A1): the hive works without being asked. Each cadence is
+ * Cadence (Cadence 05; App 07; Phase 3 A1, A4): the hive works without being asked. Each cadence is
  * when + what + limits on this project; every run goes through the Queen like the user's own goals.
- * The list shows what is set up and when it runs next; the side shows the form or a cadence's runs.
+ * The list shows what is set up and when it runs next; the side shows the form or a cadence's runs (and, for a
+ * webhook cadence, its address and secret).
  */
 
 type Side = { kind: 'none' } | { kind: 'new' } | { kind: 'edit'; id: string } | { kind: 'history'; id: string };
@@ -217,7 +219,10 @@ export function CadenceScreen() {
                 .map((o) => ({ id: o.id, name: o.name }))}
             />
           ) : sideCadence ? (
-            <CadenceHistory cadence={sideCadence} now={now} />
+            <>
+              {sideCadence.when.type === 'webhook' ? <WebhookPanel cadence={sideCadence} key={sideCadence.id} /> : null}
+              <CadenceHistory cadence={sideCadence} now={now} />
+            </>
           ) : null}
         </aside>
       ) : null}

@@ -48,6 +48,19 @@ export const FilePatternSchema = z
 export const HiveEventTriggerSchema = z.enum(['goal-done', 'budget-warning']);
 export type HiveEventTrigger = z.infer<typeof HiveEventTriggerSchema>;
 
+/**
+ * How much a webhook's outside sender is trusted (Cadence 05-D4). A call either asks the hive to act (run the
+ * cadence) or only tells it something (a note for the Brain):
+ * - `strict`: every call waits in Approvals, notes too;
+ * - `communication-only` (the default): notes go straight into the Brain (marked unconfirmed, from outside);
+ *   anything asking the hive to act waits in Approvals;
+ * - `allow-all`: notes are saved and runs start on their own (the cadence's autonomy and budget still apply).
+ * Every call is logged in the cadence's run history, refused ones too.
+ */
+export const WebhookTrustSchema = z.enum(['strict', 'communication-only', 'allow-all']);
+export type WebhookTrust = z.infer<typeof WebhookTrustSchema>;
+export const DEFAULT_WEBHOOK_TRUST: WebhookTrust = 'communication-only';
+
 /** How long file changes settle before a file-watch run starts, so one copy of many files is one run. */
 export const FILE_SETTLE_MS = 5_000;
 /** At most this many files are listed in the run's goal (the rest are counted). */
@@ -78,6 +91,13 @@ export const CadenceWhenSchema = z.discriminatedUnion('type', [
    * triggered by its own goals.
    */
   z.object({ type: z.literal('event'), on: HiveEventTriggerSchema, cadenceId: z.string().min(1).max(200).nullable().default(null) }),
+  /**
+   * When an outside app calls this cadence's local URL (A4): POST http://127.0.0.1:<port>/hooks/<cadenceId> asks
+   * the hive to run it; POST .../hooks/<cadenceId>/note only tells the hive something. Each webhook has its own
+   * secret in the Vault (04-D4) and calls must carry it (see webhook-api.ts). The listener answers on this
+   * computer only (127.0.0.1); reaching it from the internet needs a tunnel the user runs.
+   */
+  z.object({ type: z.literal('webhook'), trust: WebhookTrustSchema.default(DEFAULT_WEBHOOK_TRUST) }),
 ]);
 export type CadenceWhen = z.infer<typeof CadenceWhenSchema>;
 /** Schedules have a next time; file and event cadences wait for something to happen. */
@@ -111,18 +131,22 @@ export type CadenceFields = z.output<typeof CadenceInputSchema>;
 
 /**
  * Why a run was triggered: on schedule, catching up once after the app was closed, after the computer woke from
- * sleep (A2), the user's "Run now", files changing in a watched folder (A3) or a hive event (A3). A4–A5 add
- * 'webhook' and 'maintenance'.
+ * sleep (A2), the user's "Run now", files changing in a watched folder (A3), a hive event (A3) or a webhook call
+ * (A4). A5 adds 'maintenance'.
  */
-export const CadenceRunReasonSchema = z.enum(['schedule', 'catch-up', 'wake', 'manual', 'file', 'event']);
+export const CadenceRunReasonSchema = z.enum(['schedule', 'catch-up', 'wake', 'manual', 'file', 'event', 'webhook']);
 /**
  * What happened when it was due:
  * - `started`: a goal was submitted (goalId set);
  * - `skipped`: the previous run's goal is still going, so this one didn't pile up on it;
  * - `deferred`: it couldn't run now (the hive is paused, or another project is open); it runs once when it can;
- * - `failed`: submitting the goal failed (message says why).
+ * - `failed`: submitting the goal failed (message says why);
+ * - `waiting` (A4): a webhook call waits for the user in Approvals;
+ * - `noted` (A4): a webhook note was saved in the Brain (nothing ran);
+ * - `refused` (A4): a webhook call was turned away (bad or missing secret, too big, too many calls, switched off);
+ * - `declined` (A4): the user said no to a webhook call in Approvals.
  */
-export const CadenceRunOutcomeSchema = z.enum(['started', 'skipped', 'deferred', 'failed']);
+export const CadenceRunOutcomeSchema = z.enum(['started', 'skipped', 'deferred', 'failed', 'waiting', 'noted', 'refused', 'declined']);
 
 export const CadenceRunViewSchema = z.object({
   id: Id,

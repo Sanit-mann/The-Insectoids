@@ -3,6 +3,7 @@ import type { HiveApi } from './hive-api';
 import type { SetupApi } from './setup-api';
 import type { ProvidersApi } from './providers-api';
 import type { VaultApi } from './vault-api';
+import type { WebhookApi } from './webhook-api';
 
 /**
  * Typed contract between the renderer and the main process.
@@ -38,4 +39,6 @@ export interface InsectoidsApi {
   setup: SetupApi;
   vault: VaultApi;
   providers: ProvidersApi;
+  /** Webhook URLs and secrets (Phase 3 A4). */
+  webhooks: WebhookApi;
 }

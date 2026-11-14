@@ -173,6 +173,7 @@ describe('file and event cadences (A3)', () => {
   it('have no next time and never catch up', () => {
     expect(nextOrNull(file('inbox'), 1_000)).toBeNull();
     expect(nextOrNull(event('goal-done'), 1_000)).toBeNull();
+    expect(nextOrNull({ type: 'webhook', trust: 'communication-only' }, 1_000)).toBeNull();
     expect(() => dueCheck(file('inbox'), 0, 1_000)).toThrow(/no schedule/);
   });
 
@@ -184,5 +185,8 @@ describe('file and event cadences (A3)', () => {
     expect(whenText(event('goal-done', 'c1'), (id) => (id === 'c1' ? 'Weekly report' : null))).toBe('After each run of "Weekly report" finishes');
     expect(whenText(event('goal-done', 'gone'), () => null)).toBe('After each run of a removed cadence finishes');
     expect(whenText(event('budget-warning'))).toBe('When a goal has used 75% of its budget');
+    expect(whenText({ type: 'webhook', trust: 'communication-only' })).toBe('When its webhook is called (runs wait for you, notes are kept)');
+    expect(whenText({ type: 'webhook', trust: 'strict' })).toBe('When its webhook is called (every call waits for you)');
+    expect(whenText({ type: 'webhook', trust: 'allow-all' })).toBe('When its webhook is called (calls run on their own)');
   });
 });
