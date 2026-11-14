@@ -46,9 +46,18 @@ export function localInstant(year: number, month: number, day: number, h: number
 /**
  * The first scheduled time strictly after `after`.
  * - interval: `after` + the interval (callers pass the last *scheduled* time, so runs keep their rhythm);
- * - weekly: the next chosen weekday at the local time.
+ * - weekly: the next chosen weekday at the local time;
+ * - file and event cadences: null. They have no time; they wait for something to happen (A3), so they never
+ *   "miss" a run and never catch up.
  */
-export function nextRunAt(when: CadenceWhen, after: number, o: ScheduleOptions = {}): number {
+export function nextRunAt(when: CadenceWhen, after: number, o: ScheduleOptions = {}): number | null {
+  if (when.type === 'file' || when.type === 'event') return null;
+  return scheduledNext(when, after, o);
+}
+
+type Scheduled = Extract<CadenceWhen, { type: 'interval' | 'weekly' }>;
+
+function scheduledNext(when: Scheduled, after: number, o: ScheduleOptions): number {
   if (when.type === 'interval') return after + when.everyMinutes * (o.intervalUnitMs ?? MINUTE_MS);
   const { h, m } = parseTime(when.time);
   const days = new Set(when.days);
@@ -75,6 +84,7 @@ export interface DueCheck {
  * next time keeps the schedule's own rhythm (an interval stays on its phase; weekly goes to the next slot).
  */
 export function dueCheck(when: CadenceWhen, scheduledAt: number, now: number, o: ScheduleOptions = {}): DueCheck {
+  if (when.type === 'file' || when.type === 'event') throw new Error('File and event cadences have no schedule.');
   if (scheduledAt > now) return { due: false, occurrences: 0, nextRunAt: scheduledAt };
   if (when.type === 'interval') {
     const step = when.everyMinutes * (o.intervalUnitMs ?? MINUTE_MS);
@@ -86,9 +96,9 @@ export function dueCheck(when: CadenceWhen, scheduledAt: number, now: number, o:
   // Bounded: a year away is at most 7 × 53 slots.
   while (t <= now && occurrences < 400) {
     occurrences++;
-    t = nextRunAt(when, t, o);
+    t = scheduledNext(when, t, o);
   }
-  if (t <= now) t = nextRunAt(when, now, o);
+  if (t <= now) t = scheduledNext(when, now, o);
   return { due: true, occurrences, nextRunAt: t };
 }
 
@@ -105,8 +115,23 @@ const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? '' : 
 
 const andList = (items: readonly string[]): string => (items.length <= 1 ? (items[0] ?? '') : `${items.slice(0, -1).join(', ')} and ${items.at(-1)}`);
 
-/** The schedule in plain words: "Every 2 hours", "Every Monday and Thursday at 09:00", "Every day at 07:30". */
-export function whenText(when: CadenceWhen): string {
+/**
+ * The schedule in plain words: "Every 2 hours", "Every Monday and Thursday at 09:00", "Every day at 07:30",
+ * "When files change in inbox (*.md)", "After each run of "Weekly report" finishes", "When any goal finishes",
+ * "When a goal has used 75% of its budget". `nameOf` looks up the cadence a follow-up is chained to (null when it
+ * was removed).
+ */
+export function whenText(when: CadenceWhen, nameOf: (cadenceId: string) => string | null = () => null): string {
+  if (when.type === 'file') {
+    const where = when.folder === '.' ? 'the project' : when.folder;
+    return `When files change in ${where}${when.pattern ? ` (${when.pattern})` : ''}`;
+  }
+  if (when.type === 'event') {
+    if (when.on === 'budget-warning') return 'When a goal has used 75% of its budget';
+    if (!when.cadenceId) return 'When any goal finishes';
+    const name = nameOf(when.cadenceId);
+    return name ? `After each run of "${name}" finishes` : 'After each run of a removed cadence finishes';
+  }
   if (when.type === 'interval') {
     const min = when.everyMinutes;
     if (min % (7 * 1440) === 0) return min === 7 * 1440 ? 'Every week' : `Every ${plural(min / (7 * 1440), 'week')}`;

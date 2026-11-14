@@ -1,6 +1,6 @@
 import type { CadenceWhen } from '@insectoids/shared';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { CATCH_UP_AFTER_MS, MINUTE_MS, dueCheck, localInstant, nextRunAt, runReason, whenText } from './schedule';
+import { CATCH_UP_AFTER_MS, MINUTE_MS, type ScheduleOptions, dueCheck, localInstant, nextRunAt as nextOrNull, runReason, whenText } from './schedule';
 
 /**
  * Schedules run on local wall-clock time. These tests pin a daylight-saving zone (New York) for this file only:
@@ -21,6 +21,9 @@ const local = (t: number) => {
   const p = (n: number) => String(n).padStart(2, '0');
   return `${x.getFullYear()}-${p(x.getMonth() + 1)}-${p(x.getDate())} ${p(x.getHours())}:${p(x.getMinutes())} ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][x.getDay()]}`;
 };
+
+/** Schedules always have a next time. */
+const nextRunAt = (w: CadenceWhen, after: number, o?: ScheduleOptions): number => nextOrNull(w, after, o)!;
 
 const weekly = (days: number[], time: string): CadenceWhen => ({ type: 'weekly', days, time });
 const every = (everyMinutes: number): CadenceWhen => ({ type: 'interval', everyMinutes });
@@ -160,5 +163,26 @@ describe('in plain words', () => {
     expect(whenText(weekly([5, 1, 3], '10:15'))).toBe('Every Monday, Wednesday and Friday at 10:15');
     expect(whenText(weekly([0], '18:00'))).toBe('Every Sunday at 18:00');
     expect(whenText(weekly([6, 0], '11:00'))).toBe('Every Saturday and Sunday at 11:00');
+  });
+});
+
+describe('file and event cadences (A3)', () => {
+  const file = (folder: string, pattern: string | null = null): CadenceWhen => ({ type: 'file', folder, pattern });
+  const event = (on: 'goal-done' | 'budget-warning', cadenceId: string | null = null): CadenceWhen => ({ type: 'event', on, cadenceId });
+
+  it('have no next time and never catch up', () => {
+    expect(nextOrNull(file('inbox'), 1_000)).toBeNull();
+    expect(nextOrNull(event('goal-done'), 1_000)).toBeNull();
+    expect(() => dueCheck(file('inbox'), 0, 1_000)).toThrow(/no schedule/);
+  });
+
+  it('say what they wait for, in plain words', () => {
+    expect(whenText(file('inbox', '*.md'))).toBe('When files change in inbox (*.md)');
+    expect(whenText(file('docs/incoming'))).toBe('When files change in docs/incoming');
+    expect(whenText(file('.'))).toBe('When files change in the project');
+    expect(whenText(event('goal-done'))).toBe('When any goal finishes');
+    expect(whenText(event('goal-done', 'c1'), (id) => (id === 'c1' ? 'Weekly report' : null))).toBe('After each run of "Weekly report" finishes');
+    expect(whenText(event('goal-done', 'gone'), () => null)).toBe('After each run of a removed cadence finishes');
+    expect(whenText(event('budget-warning'))).toBe('When a goal has used 75% of its budget');
   });
 });

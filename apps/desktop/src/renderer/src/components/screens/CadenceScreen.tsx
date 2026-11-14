@@ -1,4 +1,4 @@
-import type { CadenceView } from '@insectoids/shared';
+import { type CadenceView, isScheduled } from '@insectoids/shared';
 import { Clock, History, Pencil, Play, Plus, ShieldCheck } from 'lucide-react';
 import { useState } from 'react';
 import { type CadenceFields, CadenceForm } from '@/components/cadence/CadenceForm';
@@ -60,10 +60,15 @@ function CadenceRow({
             {c.whenText}
           </p>
           <p className="m-0 font-mono text-xs text-muted" data-testid="cadence-next">
-            {nextRunWords(c.nextRunAt, c.enabled, now)}
+            {nextRunWords(c.when, c.nextRunAt, c.enabled, now)}
           </p>
         </div>
-        <Switch checked={c.enabled} disabled={busy} label={`Run "${c.name}" on its schedule`} onChange={(on) => void act({ type: 'setCadenceEnabled', id: c.id, enabled: on })} />
+        <Switch
+          checked={c.enabled}
+          disabled={busy}
+          label={isScheduled(c.when) ? `Run "${c.name}" on its schedule` : `Run "${c.name}" when it is triggered`}
+          onChange={(on) => void act({ type: 'setCadenceEnabled', id: c.id, enabled: on })}
+        />
       </div>
 
       <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted">
@@ -207,6 +212,9 @@ export function CadenceScreen() {
               onCancel={() => setSide({ kind: 'none' })}
               onDelete={side.kind === 'edit' && sideCadence ? () => del(sideCadence.id) : undefined}
               onSave={(input) => save(input, side.kind === 'edit' ? side.id : null)}
+              others={cadences
+                .filter((o) => o.when.type !== 'event' && !(side.kind === 'edit' && o.id === side.id))
+                .map((o) => ({ id: o.id, name: o.name }))}
             />
           ) : sideCadence ? (
             <CadenceHistory cadence={sideCadence} now={now} />

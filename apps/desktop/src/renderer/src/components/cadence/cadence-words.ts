@@ -1,4 +1,4 @@
-import type { CadenceAutonomy, CadenceRunView } from '@insectoids/shared';
+import type { CadenceAutonomy, CadenceRunView, CadenceWhen, HiveEventTrigger } from '@insectoids/shared';
 import { CheckCircle2, Hourglass, PlayCircle, SkipForward, XCircle, type LucideIcon } from 'lucide-react';
 
 /**
@@ -32,7 +32,16 @@ export const REASON: Record<CadenceRunView['reason'], string> = {
   'catch-up': 'Catch-up (the app was closed when it was due)',
   wake: 'After waking up (the computer was asleep when it was due)',
   manual: 'Run now',
+  file: 'Files changed',
+  event: 'Hive event',
 };
+
+/** The two hive events a cadence can wait for (A3), as choices and as "waits for" words. */
+export const HIVE_EVENTS: Record<HiveEventTrigger, { label: string; waits: string }> = {
+  'goal-done': { label: 'A goal finishes', waits: 'Waits for a goal to finish' },
+  'budget-warning': { label: 'A goal has used 75% of its budget', waits: 'Waits for a goal to use 75% of its budget' },
+};
+export const HIVE_EVENT_ORDER: readonly HiveEventTrigger[] = ['goal-done', 'budget-warning'];
 
 export const OUTCOME: Record<CadenceRunView['outcome'], { label: string; icon: LucideIcon; className: string }> = {
   started: { label: 'Started', icon: PlayCircle, className: 'text-st-done' },
@@ -73,9 +82,25 @@ export function untilWords(at: number, now: number): string {
   return `in ${days} days`;
 }
 
-/** "next: Mon 09:00, in 2 days", or "Off" when the cadence is switched off. */
-export function nextRunWords(nextRunAt: number | null, enabled: boolean, now: number): string {
-  if (!enabled || nextRunAt === null) return 'Off';
+/** "Waits for files in inbox" / "Waits for a goal to finish": what a file or event cadence (A3) waits for. */
+export function waitsWords(when: CadenceWhen): string | null {
+  if (when.type === 'file') {
+    const where = when.folder === '.' ? 'the project' : when.folder;
+    return `Waits for files in ${where}${when.pattern ? ` (${when.pattern})` : ''}`;
+  }
+  if (when.type === 'event') return HIVE_EVENTS[when.on].waits;
+  return null;
+}
+
+/**
+ * "next: Mon 09:00, in 2 days" for schedules, "Waits for files in inbox" for file and event cadences, or "Off"
+ * when the cadence is switched off.
+ */
+export function nextRunWords(when: CadenceWhen, nextRunAt: number | null, enabled: boolean, now: number): string {
+  if (!enabled) return 'Off';
+  const waits = waitsWords(when);
+  if (waits) return waits;
+  if (nextRunAt === null) return 'Off';
   return `next: ${whenWords(nextRunAt, now)}, ${untilWords(nextRunAt, now)}`;
 }
 

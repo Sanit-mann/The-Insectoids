@@ -1,4 +1,4 @@
-import type { CadenceRunView, CadenceView } from '@insectoids/shared';
+import { type CadenceRunView, type CadenceView, isScheduled } from '@insectoids/shared';
 import { History } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
@@ -39,7 +39,9 @@ export function CadenceHistory({ cadence, now }: { cadence: CadenceView; now: nu
       </header>
       {error ? <InlineAlert message={error} title="Couldn't read the runs" tone="error" /> : null}
       {runs === null && !error ? <p className="m-0 text-sm text-muted">Reading the runs…</p> : null}
-      {runs !== null && runs.length === 0 ? <p className="m-0 text-sm text-muted">No runs yet. It runs on its schedule, or use Run now.</p> : null}
+      {runs !== null && runs.length === 0 ? <p className="m-0 text-sm text-muted">
+          {isScheduled(cadence.when) ? 'No runs yet. It runs on its schedule, or use Run now.' : 'No runs yet. It runs when it is triggered, or use Run now.'}
+        </p> : null}
       {runs !== null && runs.length > 0 ? (
         <ol className="m-0 flex list-none flex-col gap-2 p-0">
           {runs.map((r) => {

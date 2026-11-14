@@ -5,8 +5,8 @@ import { type CadenceAutonomy, type CadenceWhen, CadenceWhenSchema } from '@inse
  * Cadences and their run log (Cadence 05; Phase 3 A1), in the Brain's database behind its single writer.
  * The store keeps rows; when a cadence is due, and what a run does, is the host's job (harness `cadence/`).
  */
-/** Why a run happened; the same words as the shared contract's CadenceRunReasonSchema (A2 added 'wake'). */
-export type CadenceRunReason = 'schedule' | 'catch-up' | 'wake' | 'manual';
+/** Why a run happened; the same words as the shared contract's CadenceRunReasonSchema (A2 added 'wake', A3 'file' and 'event'). */
+export type CadenceRunReason = 'schedule' | 'catch-up' | 'wake' | 'manual' | 'file' | 'event';
 export type CadenceRunOutcome = 'started' | 'skipped' | 'deferred' | 'failed';
 
 export interface CadenceFields {

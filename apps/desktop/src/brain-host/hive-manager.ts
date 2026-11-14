@@ -215,7 +215,8 @@ export interface HiveManagerOptions {
    * Cadences (Phase 3 A1). `intervalUnitMs`: milliseconds per interval minute (e2e: INSECTOIDS_E2E_CADENCE_SECONDS=1
    * passes 1 000). `recheckMs`: the longest wait between scheduler checks (default 60 s).
    */
-  cadence?: { intervalUnitMs?: number; recheckMs?: number };
+  /** Cadence clock (tests and the e2e hook): interval "minute", safety re-check, and how long file changes settle (A3). */
+  cadence?: { intervalUnitMs?: number; recheckMs?: number; settleMs?: number };
   now?: () => number;
   /** Seed for the Treasurer's learning router (tests). Default: the clock. */
   seed?: number;
@@ -384,11 +385,15 @@ export class HiveManager {
       now: () => this.#now(),
       shelf: () => this.#project?.view.shelf ?? null,
       blocked: () => this.#cadenceBlocked(),
-      submit: (c) => this.#submitCadenceGoal(c),
+      submit: (c, _reason, trigger) => this.#submitCadenceGoal(c, trigger),
+      root: () => this.#project?.view.path ?? null,
+      // The app's own data (worktrees, settings) is never watched, even if it lives inside a project.
+      ignore: () => [o.userDataDir],
       note: (text) => this.#note('cadence', text),
       changed: () => this.#changed('cadence'),
       ...(o.cadence?.intervalUnitMs ? { intervalUnitMs: o.cadence.intervalUnitMs } : {}),
       ...(o.cadence?.recheckMs ? { recheckMs: o.cadence.recheckMs } : {}),
+      ...(o.cadence?.settleMs !== undefined ? { settleMs: o.cadence.settleMs } : {}),
       ...(o.log ? { log: o.log } : {}),
     });
     // The Treasurer (Phase 2 A5): limits steer the router, outcomes teach it.
@@ -1036,7 +1041,7 @@ export class HiveManager {
   }
 
   /** A cadence run becomes a goal through the same path as the user's own goals (05-D1); resolves to its id. */
-  async #submitCadenceGoal(c: Cadence): Promise<string> {
+  async #submitCadenceGoal(c: Cadence, trigger?: string): Promise<string> {
     const p = this.#mustProject();
     if (!this.#engines.defaultEngine()) {
       const view = this.#engineView();
@@ -1045,7 +1050,7 @@ export class HiveManager {
     const before = new Set(this.#o.brain.goals.list().filter((g) => g.cadenceId === c.id).map((g) => g.id));
     // The goal is created at once; planning carries on in the background, as with the submitGoal command.
     this.#track(
-      p.hive.submitGoal(c.goal, { title: c.name, budgetTokens: c.budgetTokens, cadenceId: c.id, cadenceName: c.name, autonomy: c.autonomy }).catch((err: unknown) => {
+      p.hive.submitGoal(trigger ? `${c.goal}\n\nWhat triggered this run:\n${trigger}` : c.goal, { title: c.name, budgetTokens: c.budgetTokens, cadenceId: c.id, cadenceName: c.name, autonomy: c.autonomy }).catch((err: unknown) => {
         if (this.#disposed) return;
         this.#note('error', `The Queen could not plan the cadence run "${c.name}": ${err instanceof Error ? err.message : String(err)}`);
         this.#changed('plan-failed');
@@ -1697,6 +1702,18 @@ export class HiveManager {
   // ---- events → read model ---------------------------------------------------------------------
 
   #onHiveEvent(e: HiveEvent): void {
+    // Hive events a cadence can wait for (A3); the keeper applies the loop guard.
+    if (e.type === 'goal-done' && e.goalId) {
+      const goalId = e.goalId;
+      const merged = e.message === 'Merged into main.' ? true : e.message === 'Finished; not merged.' ? false : undefined;
+      queueMicrotask(() => this.#cadences.hiveEvent({ on: 'goal-done', goalId, ...(merged === undefined ? {} : { merged }) }));
+    }
+    if (e.type === 'budget-warning' && e.goalId) {
+      const goalId = e.goalId;
+      queueMicrotask(() => this.#cadences.hiveEvent({ on: 'budget-warning', goalId }));
+    }
+    // A goal ended: a file or event cadence that waited for its last run can run now.
+    if (e.type === 'goal-done' || e.type === 'goal-cancelled' || e.type === 'goal-stuck') queueMicrotask(() => void this.#cadences.check());
     // A card merged into the goal branch, or a goal merged into (or out of) main: the files changed.
     if (e.type === 'card-verified' || e.type === 'goal-done' || e.type === 'merge-undone' || e.type === 'merge-redone') this.#codeMapSoon();
     if (e.type === 'engine') {

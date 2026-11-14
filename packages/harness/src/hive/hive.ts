@@ -140,7 +140,9 @@ export interface HiveEvent {
     | 'watchdog'
     | 'card-held'
     | 'foreman'
-    | 'scout';
+    | 'scout'
+    // Phase 3 A3: a goal first reached the Treasurer's warn level (75% of its token budget). Once per goal per run of the app.
+    | 'budget-warning';
   goalId?: string;
   cardId?: string;
   agentId?: string;
@@ -196,6 +198,8 @@ export class Hive {
   #ants = 0;
   #runs = 0;
   readonly #deciding = new Set<string>();
+  /** Goals already warned at 75% of their budget (A3: once per goal). */
+  readonly #budgetWarned = new Set<string>();
   #paused = false;
   /** "Ask" rules the user approved, per card (Hive 02-D7). */
   readonly #approved = new Map<string, string[]>();
@@ -850,6 +854,19 @@ export class Hive {
     this.#emit({ type: 'wave-posted', goalId, message: `Wave ${wave} posted.` });
   }
 
+  /** The Treasurer's 75% warning (02-D9, Cadence A3), once per goal: one plain line, and a hive event cadences can wait for. */
+  #maybeWarnBudget(goalId: string): void {
+    if (this.#budgetWarned.has(goalId)) return;
+    const g = this.#o.brain.goals.get(goalId);
+    if (!g || budgetState(g.spentTokens, g.budgetTokens) === 'ok') return;
+    this.#budgetWarned.add(goalId);
+    this.#emit({
+      type: 'budget-warning',
+      goalId,
+      message: `"${g.title}" has used ${g.spentTokens.toLocaleString('en-US')} of its ${g.budgetTokens?.toLocaleString('en-US')} token budget (75% or more).`,
+    });
+  }
+
   #dispatch(goal: Goal): void {
     const { brain } = this.#o;
     const state = budgetState(goal.spentTokens, goal.budgetTokens);
@@ -1291,7 +1308,10 @@ ${brief}`,
         }
       }
     }
-    if (goalId) this.#o.brain.goals.addSpend(goalId, tokens, result.costUsd);
+    if (goalId) {
+      this.#o.brain.goals.addSpend(goalId, tokens, result.costUsd);
+      this.#maybeWarnBudget(goalId);
+    }
     this.#recordOutcome(info.runId, goalId, cardId, req, result);
     if (result.error === 'quota') {
       const until = result.resetAt ?? null;

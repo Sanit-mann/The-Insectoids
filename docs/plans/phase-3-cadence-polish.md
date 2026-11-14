@@ -132,3 +132,31 @@ Three milestones, each ending in something the user can try.
     - **Status in words:** "Off: the computer sleeps as usual", "On: the hive is idle…", or "On: keeping the computer awake now, because the hive is working". It updates live from hive changes.
     - **e2e:** the status really changes while a goal runs and again when it's done, checked against the real blocker. The choice is kept.
   - **Where it lives:** both run in main, because Electron's power APIs only exist there. The tray refresh now also updates keep-awake, and keeps working without a tray.
+- **A3 File watch and hive events: done (2026-11-14).** Built by two parallel workers against a contract extension. Unit tests: 967 pass, with no unhandled errors. e2e: 152 passed, 3 skipped; the trigger spec passed 3 runs in a row. Lint and typecheck are clean.
+  - **File cadences** ("When files change in a folder"): a folder inside the project, with an optional name pattern (`*.md`).
+    - **Watching:** one recursive `fs.watch` per enabled file cadence of the open project, in the Brain host. It follows enable, disable, edit, delete and project switches.
+    - **What counts:** files added or changed; deletions and non-matching names never trigger. `.git`, `node_modules` and the app's data folder are ignored.
+    - **Settling:** changes settle for 5 s (capped under a steady stream) and become ONE run. Its goal ends with "What triggered this run:" and up to 20 file paths.
+    - **The folder:** a missing folder is refused in words when saving. If it disappears later, one failed run is recorded, and watching resumes when it's back.
+  - **Event cadences** ("When something happens in the hive"):
+    - **A goal finishes** (after its merge decision, so a follow-up works on merged results), optionally only goals from a chosen cadence.
+    - **A goal has used 75% of its budget**, once per goal: a new Treasurer `budget-warning` event, emitted with an activity line.
+    - **The run is told what happened:** which goal finished and whether it merged, or the goal and its spend.
+  - **Loop guard:**
+    - goals started by an event cadence trigger nothing;
+    - a cadence never fires on its own goals;
+    - a follow-up can't follow itself, a missing cadence, or another event cadence (refused in words).
+  - **Same rules as schedules:** busy runs skip, but the files or event are kept for the next run; a paused hive defers and runs once on resume; runs are one at a time. Run now works for every type ("You ran it now.").
+  - **UI:**
+    - **Form:** four "When" choices, the folder and pattern fields with a hint, the event choice with an "Only goals from cadence" select, and the loop-guard note. Backend errors show inline.
+    - **List:** "Waits for files in inbox (*.md)" or "Waits for a goal to finish" instead of a next time.
+    - **History:** "Files changed" and "Hive event".
+  - **e2e:** `cadence-triggers.spec.ts`:
+    - a missing folder and `../` are refused;
+    - two `.md` files make one run listing both, and a `.txt` file doesn't trigger;
+    - event cadence words and editing;
+    - the full chain: a cadence's goal gets its plan and merge approved, then the follow-up starts.
+  - **Notes:**
+    - **Not checked on Linux yet:** Node's recursive `fs.watch` is implemented in JavaScript there and is heavier on big trees; CI will be its first real check.
+    - **After a restart:** a pending file or event run still runs once, but the trigger details were kept in memory only, so they're lost.
+    - **Merges:** a merge that changes a watched folder triggers a run. Loops can only go through merges the user approves, and busy runs skip.
