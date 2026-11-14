@@ -207,9 +207,10 @@ function createWindow(): BrowserWindow {
   win.on('show', arriving);
   win.on('restore', arriving);
 
-  // Closing the window keeps the hive running in the tray (App 07-D7).
+  // Closing the window keeps the hive running in the tray (App 07-D7). Tests quit on close, except the Phase 3 demo
+  // (INSECTOIDS_E2E_TRAY_CLOSE=1), which closes to the tray like the real app.
   win.on('close', (event) => {
-    if (!quitting && tray && !isE2E) {
+    if (!quitting && tray && (!isE2E || process.env['INSECTOIDS_E2E_TRAY_CLOSE'] === '1')) {
       event.preventDefault();
       win.hide();
     }
