@@ -62,13 +62,16 @@ Three milestones, each ending in something the user can try.
 |---|---|---|---|
 | C1 | **Accessibility pass (WCAG 2.2 AA):** an automated axe check of every screen in both themes, plus keyboard-only and screen-reader passes on the main flows; fix what they find | `desktop` | axe finds no serious issues on any screen; keyboard paths covered by e2e |
 | C2 | **Obsidian export** (01-D11): the Brain as a folder of Markdown notes with frontmatter and `[[links]]`, written to a folder the user picks; secrets are never written | `brain`, `desktop` | The export opens as an Obsidian vault with working links; a planted secret never appears |
-| C3 | **Installers:** Windows, macOS and Linux installers built by CI from a version tag and attached to the GitHub release. Code signing depends on the user's decision below | CI, `desktop` | A CI build produces all three; the Windows installer installs and starts on this PC |
+| C3 | **Installers:** Windows, macOS and Linux installers built by CI from a version tag and attached to the GitHub release. Windows builds are signed through SignPath once it approves the project; until then, and on macOS, they are unsigned, and the README says how to open them | CI, `desktop` | A CI build produces all three; the Windows installer installs and starts on this PC |
 | C4 | **Update checks** (09-D4): the app checks GitHub Releases for a newer version (it sends nothing about the user), shows it in Settings with an off switch, and offers "restart to update" where the platform allows it. Never forced | `desktop` | Tested against a fake release feed: newer, same and older versions |
 | C5 | **Phase 3 demo** | — | A weekly report runs from the tray with the window closed, and the morning digest shows it; real engine runs need the user's consent and a cost estimate first |
 
 ## Decisions for the user
 
-1. **Code signing.** Unsigned installers work but warn people: Windows SmartScreen says "unknown publisher", and macOS blocks the app until it's opened with right-click → Open. Signing costs money and needs an account in the user's name, so it's the user's call.
+1. **Code signing: decided 2026-11-14.**
+   - **Windows:** free signing through the SignPath Foundation, which signs open-source projects; the user applies. The project fits its rules: an MIT license, a public repository, CI builds, and earlier releases. The application needs two-factor sign-in on GitHub.
+   - **macOS:** stays unsigned (no paid Apple Developer account).
+   - **Until SignPath approves:** installers are built unsigned, so C3 doesn't wait on it.
 2. **New tools (asked when each step starts):**
    - `electron-builder` to make installers (C3);
    - `@axe-core/playwright` for the accessibility check (C1);
