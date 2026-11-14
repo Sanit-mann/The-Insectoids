@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sanit-mann/The-Insectoids/releases/tag/v0.0.1">v0.0.1 · developer preview</a> ·
+  <a href="https://github.com/Sanit-mann/The-Insectoids/releases/tag/v0.0.2">v0.0.2 · developer preview</a> ·
   <a href="LICENSE">MIT license</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="functions/README.md">Design specs</a>
@@ -26,38 +26,46 @@
 The Insectoids is a desktop app that turns AI coding agents into an organised team you can trust with a real project.
 
 - **The Queen** turns your goal into a plan of small task cards, grouped in waves. You approve the plan.
-- **Insects** (Coder, Tester, and more castes later) pick up cards for their caste. Each one works in **its own git worktree**, a separate copy of your project, so they can work in parallel without touching your files.
+- **Insects** of eight castes (Coder, Tester, Reviewer, Documenter and more) pick up cards for their caste. Each one works in **its own git worktree**, a separate copy of your project, so they can work in parallel without touching your files.
 - **The Inspector** checks every card against its "done means" list, with evidence such as tests run and diffs read, before the hive accepts it.
 - **You approve the merge** into your branch. Undo is one click (with approval) and keeps the history; you can merge again later.
 - **The Brain** is one local memory that every agent shares: decisions, tasks, facts and outcomes, with trust levels and version history. It lives in a SQLite file on your computer and is never uploaded.
 
-It runs on the AI subscription you already have. Phase 1 uses **Claude Code** as its engine; more engines come in Phase 2.
+It runs on the AI subscription you already have. **Claude Code** is the main engine; **OpenCode** can run a free model on your own computer (Ollama or LM Studio) or an API provider you add. Light work goes to the free model first, and a card that struggles moves up to a stronger one.
 
-## Status: v0.0.1 (Phase 1 "First Spark")
+## Status: v0.0.2 (Phase 2 "The Full Hive")
 
 This is an early developer preview, built and tested on Windows. There is no installer yet: you run it from source (see [Run it](#run-it)).
 
 **What works today:**
 
 - The full loop: goal → plan approval → parallel insects in worktrees → Inspector verification → merge approval → undo → merge again.
-- Six live screens: Queen chat, Approval inbox, Taskboard, Hive monitor (live agent output), Changes & undo (diffs), and a Brain reader.
-- A first-run setup wizard: Brain folder, Claude Code check, a short "about you", safety presets (Careful / Balanced / Hands-off).
-- The Brain service with two doors for agents: an **MCP server** and a **`brain` command-line tool**.
-- A command guard in front of every agent action (details under [Safety](#safety)).
+- **Eight insect castes** (coder, tester, reviewer, documenter, designer, researcher, writer, analyst) and the managers: Scout, Foreman, Librarian, Treasurer and Watchdog.
+- **Two engines:** Claude Code, and OpenCode with a local model or an API provider. A first-run step installs either one, but only after you see the exact command and say yes.
+- **A cost-aware router (the Treasurer):** it picks each run's engine, model and effort, says why in plain words, and learns from which runs pass.
+- **The Vault and secret broker:** you type keys into the app once; agents call services through the broker and never see a key.
+- **A library that learns:** skills switch on per card. Repeated successful work becomes a proposed skill you approve. Imported skills are safety-scanned first.
+- **The Brain grows up:** local meaning search (a small model on your computer), ranking and fading, lessons from failures, a health score, a graph view and a dashboard, plus a code map of your project.
+- **Screens:** Queen chat, Approvals, Taskboard, Hive (lanes and a living honeycomb), Brain, Changes & undo, Library, Connections, Budgets, and a full setup wizard with an optional sample goal.
+- A command guard in front of every agent action (details under [Safety](#safety)), and a Watchdog that warns, pauses or stops an agent that keeps failing.
 
-**Real end-to-end demo** (Claude Code, sample project `tiny-text`, goal "add `slugify(text)` with tests and docs"):
+**Real end-to-end demo** (sample project `tiny-text`; goal: add `truncate` and `capitalize` with tests, then three usage example pages):
 
-| | Run 1 | Run 2 |
-|---|---|---|
-| Result | Passed | Passed |
-| Time, goal to merged | 1.8 min | 1.6 min |
-| Tokens / cost reported by Claude Code | 83k / $0.53 | 82k / $0.51 |
-| Cards, retries | 2 cards, 0 retries | 2 cards, 0 retries |
-| Project tests on `main` after merge and after redo | 10/10 pass | 10/10 pass |
+| | Result |
+|---|---|
+| Engines | Claude Code (Opus plans; Sonnet codes, tests and inspects) and OpenCode with qwen3:8b on this computer through Ollama |
+| Plan | 2 waves, 5 cards, 3 castes |
+| Free local model | the Scout and all three doc pages, each passing inspection on the first try |
+| Learned skill | the three doc cards became a proposed skill, `write-function-usage-example-doc`; it scanned clean and was approved |
+| Merge | 6 files into `main`; `node --test` passed on `main` |
+| Meaning search | "shorten long strings" found the truncate work without sharing its words |
+| Time and cost | 10 minutes; about 144k Claude tokens ($0.81 reported) plus 71k free local tokens |
 
-Run 1 found a real gap (insects committing by themselves); it was fixed and confirmed in run 2. The full write-up is in [docs/plans/phase-1-first-spark.md](docs/plans/phase-1-first-spark.md).
+It took three real runs: the first two did all the work but showed that the repeated-work check was too strict on real briefs, and then too loose about which skills already cover it. Both were fixed with tests. The full write-up is in [docs/plans/phase-2-full-hive.md](docs/plans/phase-2-full-hive.md).
 
-**Tests:** 434 unit tests and 36 end-to-end tests (Playwright driving the real Electron app). A scripted engine runs the whole flow without spending tokens.
+![Budgets: spend by goal, role and subscription, and how the Treasurer routed each run between Claude Code and the free local model](design/screenshots/phase-2-demo-10-budgets-routing.png)
+
+**Tests:** 916 unit tests and 141 end-to-end tests (Playwright driving the real Electron app). A scripted engine runs every flow without spending tokens.
 
 ## What makes it different
 
@@ -135,7 +143,7 @@ pnpm check
 pnpm test:e2e
 ```
 
-**The Phase 1 demo**, without tokens (scripted engine) or with real Claude Code. Real runs use your subscription; the two runs above cost about $0.50 each. Run either from `apps/desktop`; results go to `demo-runs/`:
+**The demos**, without tokens (scripted engine) or with real engines. Real runs use your subscription: the Phase 1 demo costs about $0.50, the Phase 2 demo about 150–200k Claude tokens. Run them from `apps/desktop`; results go to `demo-runs/`:
 
 ```bash
 INSECTOIDS_DEMO=fake pnpm exec playwright test e2e/phase1-demo.spec.ts
@@ -143,6 +151,16 @@ INSECTOIDS_DEMO=fake pnpm exec playwright test e2e/phase1-demo.spec.ts
 
 ```bash
 INSECTOIDS_DEMO=real pnpm exec playwright test e2e/phase1-demo.spec.ts
+```
+
+The Phase 2 demo also needs OpenCode (2.2.6 or newer) and a tool-capable model in Ollama; name it with `INSECTOIDS_DEMO2_LOCAL_MODEL`:
+
+```bash
+INSECTOIDS_DEMO2=fake pnpm exec playwright test e2e/phase2-demo.spec.ts
+```
+
+```bash
+INSECTOIDS_DEMO2=real INSECTOIDS_DEMO2_LOCAL_MODEL="qwen3:8b" pnpm exec playwright test e2e/phase2-demo.spec.ts
 ```
 
 ## Where things are
@@ -155,8 +173,11 @@ INSECTOIDS_DEMO=real pnpm exec playwright test e2e/phase1-demo.spec.ts
 | [`packages/brain`](packages/brain/) | The Brain: records, versions, trust, secrets guard, full-text search, taskboard, goals, approvals |
 | [`packages/brain-service`](packages/brain-service/) | The single-writer Brain service and its client |
 | [`packages/brain-mcp`](packages/brain-mcp/) · [`packages/brain-cli`](packages/brain-cli/) | The Brain's doors for agents: MCP server and `brain` command |
-| [`packages/harness`](packages/harness/) | The hive runtime (Queen, Foreman, insects, Inspector, Treasurer router) and the Claude Code adapter |
+| [`packages/harness`](packages/harness/) | The hive runtime (Queen, managers, insects, Inspector, Treasurer router), the engine adapters (Claude Code, OpenCode, Gemini CLI) and the library |
 | [`packages/workspace`](packages/workspace/) | Git worktrees per card, the single committer, merge, undo |
+| [`packages/codemap`](packages/codemap/) | The code map: symbols, imports and calls per file (tree-sitter in WebAssembly, no AI) |
+| [`packages/embeddings`](packages/embeddings/) | Local meaning search: a small model run on your computer; nothing leaves it |
+| [`packages/hive-tools-mcp`](packages/hive-tools-mcp/) · [`packages/services-mcp`](packages/services-mcp/) | Guarded file and shell tools for engines whose own hooks cannot fail closed, and outside services through the secret broker |
 | [`packages/reflexes`](packages/reflexes/) | The command guard and the Claude Code pre-action hook |
 | [`packages/shared`](packages/shared/) | Types, schemas and the typed IPC contracts |
 | [`library/`](library/) | Agents, skills and tools the hive uses, plus a dormant catalog |
@@ -165,7 +186,7 @@ INSECTOIDS_DEMO=real pnpm exec playwright test e2e/phase1-demo.spec.ts
 ## Roadmap
 
 - **Phase 1 "First Spark" (done, v0.0.1):** the safe end-to-end loop with one engine.
-- **Phase 2 "The Full Hive":** all 8 castes and the manager agents, more engines (Codex, Gemini CLI, OpenCode with OpenRouter, Ollama, LM Studio), a cost-aware router, the Vault and secret broker, meaning search and a graph view for the Brain.
+- **Phase 2 "The Full Hive" (done, v0.0.2):** all 8 castes and the manager agents, OpenCode with local models and API providers, a cost-aware router, the Vault and secret broker, a library that learns, meaning search and a graph view for the Brain. Gemini CLI is built but waits on Google (it no longer serves personal plans); Codex is planned.
 - **Phase 3 "Cadence & Polish":** schedules and triggers, a "while you were away" digest, installers and auto-update.
 - **Phase 4 "Expansion":** more connections, a container sandbox mode, more Brain views.
 
@@ -178,8 +199,8 @@ The Insectoids is open source and early, and there's a lot of interesting work l
 - **Try it** on a small project and open an issue with what worked and what didn't.
 - **Test on macOS and Linux.** It's built and tested on Windows; CI runs all three, but real use there is new.
 - **Break the guard.** Find a command that slips past the safety rules (report it privately, see [SECURITY.md](SECURITY.md)).
-- **Add an engine:** Codex, Gemini CLI or OpenCode adapters (Phase 2).
-- **Improve the Brain:** meaning search (embeddings in the same SQLite file), ranking, the graph view.
+- **Add an engine:** a Codex adapter, or test OpenCode with more local models and providers.
+- **Improve the Brain:** better meaning search, ranking and the graph view.
 - **Sharpen the library:** better agent and skill instructions, measured by real runs.
 - **UI and accessibility:** keyboard flows, screen readers, the living-hive view.
 

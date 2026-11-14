@@ -1,6 +1,6 @@
 # Contributing to The Insectoids
 
-Thank you for wanting to help. The Insectoids is early (v0.0.1), so your ideas, bug reports and code can shape it a lot.
+Thank you for wanting to help. The Insectoids is early (v0.0.2), so your ideas, bug reports and code can shape it a lot.
 
 ## Ways to help
 
@@ -9,7 +9,7 @@ Thank you for wanting to help. The Insectoids is early (v0.0.1), so your ideas, 
 - **Propose ideas** in an issue first for anything big, so we can agree on the approach before you write a lot of code. The design lives in [`functions/`](functions/README.md); changes to a decision there go through a short discussion and a change-log entry.
 - **Pick up work.** Good areas right now:
   - macOS and Linux testing;
-  - new engine adapters (Codex, Gemini CLI, OpenCode);
+  - new engine adapters (Codex), or OpenCode tested with more local models and providers;
   - Brain meaning search;
   - accessibility;
   - library quality;
