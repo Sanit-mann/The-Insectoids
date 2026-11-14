@@ -1,0 +1,143 @@
+# Installers (Phase 3 C3). Builds the Windows, macOS and Linux installers on each OS and, for a version tag,
+# attaches them to a DRAFT GitHub release. Nothing is published from here: a person checks the draft and publishes it.
+#
+# - Push a tag like v0.0.3: build on all three OSes, then create (or update) the draft release for that tag.
+# - Run it by hand (workflow_dispatch): a dry run that only uploads the installers as workflow artifacts.
+#
+# Signing: macOS stays unsigned (no paid Apple account). Windows is unsigned until the SignPath Foundation approves
+# the project; the placeholder step below shows where signing goes. No secrets are needed today.
+name: Release
+
+on:
+  push:
+    tags: ['v*.*.*']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build installers (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: --win
+          - os: macos-latest
+            target: --mac
+          - os: ubuntu-latest
+            target: --linux
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Enable pnpm (version pinned in package.json)
+        run: corepack enable pnpm
+
+      - name: Check the tag matches the app version
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          version="$(node -p "require('./apps/desktop/package.json').version")"
+          if [ "${GITHUB_REF_NAME}" != "v${version}" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} does not match apps/desktop/package.json version ${version}. Bump the version or fix the tag."
+            exit 1
+          fi
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Build the doors
+        run: pnpm build:doors
+
+      - name: Build the app
+        run: pnpm --filter @insectoids/desktop build
+
+      - name: Never sign on macOS (no Apple account)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+
+      - name: Build the installers for this OS
+        run: pnpm --filter @insectoids/desktop exec electron-builder --config electron-builder.yml ${{ matrix.target }} --publish never
+
+      # Windows signing: added once SignPath approves the project.
+      # It will submit the unsigned installer to SignPath and replace it with the signed one before the upload below.
+      # (Signing changes the file, so latest.yml, if produced, must be regenerated or its sha512 updated afterwards.)
+      # - name: Sign the Windows installer (SignPath)
+      #   if: runner.os == 'Windows'
+      #   uses: signpath/github-action-submit-signing-request@<pinned version>
+      #   with:
+      #     # organization, project and signing-policy ids, and the API token, go here once SignPath approves.
+      #     github-artifact-id: <id of the unsigned installer artifact>
+      #     wait-for-completion: true
+      #     output-artifact-directory: apps/desktop/release
+
+      - name: Upload the installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: installers-${{ runner.os }}
+          path: |
+            apps/desktop/release/The-Insectoids-Setup-*.exe
+            apps/desktop/release/The-Insectoids-*.dmg
+            apps/desktop/release/The-Insectoids-*.AppImage
+            apps/desktop/release/the-insectoids_*.deb
+            apps/desktop/release/latest*.yml
+          if-no-files-found: error
+          retention-days: 14
+
+  draft-release:
+    name: Draft GitHub release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the installers
+        uses: actions/download-artifact@v4
+        with:
+          pattern: installers-*
+          path: dist
+          merge-multiple: true
+
+      - name: Compute SHA256SUMS.txt
+        working-directory: dist
+        run: |
+          sha256sum -- * > ../SHA256SUMS.txt
+          mv ../SHA256SUMS.txt SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
+      - name: Create or update the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          if gh release view "$TAG" > /dev/null 2>&1; then
+            if [ "$(gh release view "$TAG" --json isDraft --jq .isDraft)" != "true" ]; then
+              echo "::error::The release for $TAG is already published. This workflow only touches drafts; nothing was changed."
+              exit 1
+            fi
+            gh release upload "$TAG" dist/* --clobber
+          else
+            cat > notes.md <<EOF
+          Installers for The Insectoids $TAG. See the Install section of the README for which file to pick,
+          how to open an unsigned installer, and how to check a file against SHA256SUMS.txt.
+
+          These builds are not signed yet: Windows signing comes once the SignPath Foundation approves the project,
+          and macOS builds stay unsigned.
+          EOF
+            gh release create "$TAG" dist/* --draft --verify-tag --title "The Insectoids $TAG" --notes-file notes.md
+          fi

@@ -1,0 +1,4 @@
+{
+  "//": "Ships next to tree-sitter.js (C3): it is CommonJS, and without this Node would take the type from whatever package.json sits above the install folder.",
+  "type": "commonjs"
+}

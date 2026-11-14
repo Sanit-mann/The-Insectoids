@@ -6,13 +6,13 @@ import type { DoorPaths } from '../brain-host/messages';
  * (`pnpm build:doors`). Door processes run on the app's own executable as Node (ELECTRON_RUN_AS_NODE),
  * so users need no separate Node install.
  *
- * TODO(Phase 3, packaging): ship the bundles in resources/doors and resolve them from process.resourcesPath.
+ * Packaged (Phase 3 C3): electron-builder.yml copies the bundles to resources/doors, and they resolve from process.resourcesPath.
  */
 export function resolveDoorPaths(o: { mainDir: string; isPackaged: boolean; resourcesPath: string; execPath: string }): DoorPaths {
   const runtime = { command: o.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } };
   if (o.isPackaged) {
     const dir = join(o.resourcesPath, 'doors');
-    // TODO(Phase 3, packaging): ship onnxruntime-web's ort-wasm-simd-threaded.{wasm,mjs} in resources/ort, and
+    // Packaged (C3, electron-builder.yml): onnxruntime-web's ort-wasm-simd-threaded.{wasm,mjs} are in resources/ort, and
     // @vscode/tree-sitter-wasm's wasm/ folder (tree-sitter.js, tree-sitter.wasm, the grammars) in resources/tree-sitter.
     return { runtime, guardHook: join(dir, 'guard-hook.mjs'), brainMcp: join(dir, 'brain-mcp.mjs'), brainCli: join(dir, 'brain.mjs'), hiveTools: join(dir, 'hive-tools-mcp.mjs'), servicesMcp: join(dir, 'services-mcp.mjs'), ortWasmDir: join(o.resourcesPath, 'ort'), codemapWasmDir: join(o.resourcesPath, 'tree-sitter') };
   }
@@ -34,7 +34,7 @@ export function resolveDoorPaths(o: { mainDir: string; isPackaged: boolean; reso
 
 /**
  * The agents/skills library the hive builds prompts from. Dev: the repo's `library/` folder.
- * TODO(Phase 3, packaging): ship it in resources/library.
+ * Packaged (Phase 3 C3): electron-builder.yml copies it to resources/library.
  */
 export function resolveLibraryDir(o: { mainDir: string; isPackaged: boolean; resourcesPath: string }): string {
   return o.isPackaged ? join(o.resourcesPath, 'library') : join(o.mainDir, '..', '..', '..', '..', 'library');

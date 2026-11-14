@@ -1,0 +1,93 @@
+# Installers (Phase 3 C3). Built by `pnpm --filter @insectoids/desktop dist` (after `pnpm build:doors` at the repo root),
+# locally or by the release workflow from a version tag. Nothing is published from here: CI attaches the files to a
+# draft GitHub release, and a person publishes it.
+#
+# Signing: Windows builds are signed through the SignPath Foundation once it approves the project; until then they are
+# unsigned, like the macOS builds (no paid Apple account). The README says how to open an unsigned installer.
+appId: app.insectoids.desktop
+productName: The Insectoids
+copyright: Copyright © 2026 The Insectoids contributors
+directories:
+  output: release
+  buildResources: resources
+
+# The app is fully bundled by electron-vite (main, Brain host, preload, renderer), so it ships no node_modules.
+files:
+  - out/**/*
+  - package.json
+asar: true
+
+# Laid out the way src/main/doors.ts resolves them when packaged (process.resourcesPath/...).
+extraResources:
+  - from: resources
+    to: .
+    filter: [icon.ico, icon.png, tray.png, tray@2x.png]
+  - from: ../../packages/reflexes/dist/guard-hook.mjs
+    to: doors/guard-hook.mjs
+  - from: ../../packages/brain-mcp/dist/brain-mcp.mjs
+    to: doors/brain-mcp.mjs
+  - from: ../../packages/brain-cli/dist/brain.mjs
+    to: doors/brain.mjs
+  - from: ../../packages/hive-tools-mcp/dist/hive-tools-mcp.mjs
+    to: doors/hive-tools-mcp.mjs
+  - from: ../../packages/services-mcp/dist/services-mcp.mjs
+    to: doors/services-mcp.mjs
+  # Meaning search (Phase 2 B1): the onnxruntime-web build the Brain host loads.
+  - from: ../../packages/embeddings/node_modules/onnxruntime-web/dist
+    to: ort
+    filter: [ort-wasm-simd-threaded.wasm, ort-wasm-simd-threaded.mjs]
+  # The code map (Phase 2 B4): tree-sitter and its grammars.
+  - from: ../../packages/codemap/node_modules/@vscode/tree-sitter-wasm/wasm
+    to: tree-sitter
+  - from: packaging/tree-sitter.package.json
+    to: tree-sitter/package.json
+  # The agents and skills library the hive builds prompts from.
+  - from: ../../library
+    to: library
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.ico
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: The Insectoids
+  artifactName: The-Insectoids-Setup-${version}-${arch}.${ext}
+
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+  icon: resources/icon.png
+  category: public.app-category.productivity
+  # No paid Apple account (the user's decision), so no Developer ID: ad-hoc signed ("-"), which Apple silicon needs to
+  # run at all. Gatekeeper still asks once; the README says how to open it. Hardened runtime off: with ad-hoc signing it
+  # would reject the pre-signed Electron frameworks.
+  identity: "-"
+  hardenedRuntime: false
+dmg:
+  artifactName: The-Insectoids-${version}-${arch}.${ext}
+
+linux:
+  target:
+    - target: AppImage
+      arch: [x64]
+    - target: deb
+      arch: [x64]
+  icon: resources/icon.png
+  executableName: the-insectoids
+  category: Development
+  maintainer: The Insectoids contributors
+  synopsis: A local-first AI OS modelled on a hive.
+appImage:
+  artifactName: The-Insectoids-${version}-${arch}.${ext}
+deb:
+  packageName: the-insectoids
+  artifactName: the-insectoids_${version}_${arch}.${ext}
+
+publish: null

@@ -31,6 +31,8 @@ export interface LaunchOptions {
   repo?: string;
   /** Extra environment for the app. */
   env?: Record<string, string>;
+  /** Run an installed or unpacked build (C3) instead of the dev app: the path to its executable. */
+  executablePath?: string;
 }
 
 const git = (cwd: string, ...args: string[]): string =>
@@ -62,8 +64,9 @@ export async function launchApp(opts: LaunchOptions = {}): Promise<LaunchedApp> 
   // GitHub's Linux runners block Chromium's OS sandbox; disable it there only, for tests.
   const ciLinux = Boolean(process.env['CI']) && process.platform === 'linux';
   const app = await electron.launch({
-    args: ciLinux ? ['.', '--no-sandbox'] : ['.'],
-    cwd: appDir,
+    ...(opts.executablePath
+      ? { executablePath: opts.executablePath, args: ciLinux ? ['--no-sandbox'] : [] }
+      : { args: ciLinux ? ['.', '--no-sandbox'] : ['.'], cwd: appDir }),
     env: {
       ...process.env,
       INSECTOIDS_E2E: '1',

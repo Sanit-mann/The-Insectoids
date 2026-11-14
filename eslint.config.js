@@ -9,6 +9,8 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/out/**',
       '**/dist/**',
+      // Installer builds (C3): copies of bundled and third-party code.
+      '**/release/**',
       '**/test-results/**',
       '**/playwright-report/**',
       'library/**',

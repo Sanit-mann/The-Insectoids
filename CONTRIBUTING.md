@@ -46,6 +46,36 @@ pnpm test:e2e
 
 `pnpm check` runs lint, typecheck and the unit tests; `pnpm test:e2e` builds the app and drives it with Playwright. Both must pass. The e2e tests use a scripted engine, so they cost no tokens.
 
+## Building installers
+
+Installers are built with electron-builder (settings in [`apps/desktop/electron-builder.yml`](apps/desktop/electron-builder.yml)). From the repo root:
+
+```bash
+pnpm install --frozen-lockfile
+```
+
+```bash
+pnpm build:doors
+```
+
+```bash
+pnpm --filter @insectoids/desktop dist
+```
+
+That builds the installers for the OS you are on. To pick one OS, build the app first, then name it with `--win`, `--mac` or `--linux`:
+
+```bash
+pnpm --filter @insectoids/desktop build
+```
+
+```bash
+pnpm --filter @insectoids/desktop exec electron-builder --config electron-builder.yml --win
+```
+
+The files land in `apps/desktop/release/`: a Windows `.exe` (NSIS), macOS `.dmg` files (Apple silicon and Intel) and a Linux `.AppImage` and `.deb`. Nothing is signed yet, and nothing is uploaded from your computer.
+
+**How releases are made:** a maintainer sets the version in `apps/desktop/package.json` and pushes a matching tag (`vX.Y.Z`). The [release workflow](.github/workflows/release.yml) builds the installers on Windows, macOS and Linux and attaches them, with a `SHA256SUMS.txt`, to a **draft** GitHub release. Nothing is published automatically: a person downloads and checks the draft, then publishes it. Running the workflow by hand is a dry run that only keeps the installers as workflow artifacts.
+
 ## How we work
 
 - **Small, focused pull requests.** One change per PR, with a clear description of what and why.

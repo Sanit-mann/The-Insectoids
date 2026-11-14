@@ -35,7 +35,7 @@ It runs on the AI subscription you already have. **Claude Code** is the main eng
 
 ## Status: v0.0.2 (Phase 2 "The Full Hive")
 
-This is an early developer preview, built and tested on Windows. There is no installer yet: you run it from source (see [Run it](#run-it)).
+This is an early developer preview, built and tested on Windows. v0.0.2 has no installer: you run it from source (see [Run it](#run-it)). Installers for Windows, macOS and Linux start with the next release (see [Install](#install)).
 
 **What works today:**
 
@@ -106,6 +106,80 @@ Compared with the projects that inspired it (credited below), it adds strict wor
 ```
 
 ![Hive monitor: each agent run with the model and effort that actually ran, tokens, cost and live output](design/screenshots/phase-1-demo-09-hive-done.png)
+
+## Install
+
+Installers are on the [Releases page](https://github.com/Sanit-mann/The-Insectoids/releases). Open the newest release and, under **Assets**, download the file for your computer:
+
+| Your computer | File to download |
+|---|---|
+| Windows 10 or 11 (64-bit) | `The-Insectoids-Setup-<version>-x64.exe` |
+| Mac with Apple silicon (M1 or newer) | `The-Insectoids-<version>-arm64.dmg` |
+| Mac with an Intel chip | `The-Insectoids-<version>-x64.dmg` |
+| Linux (64-bit), any distribution | `The-Insectoids-<version>-x86_64.AppImage` |
+| Debian, Ubuntu and similar | `the-insectoids_<version>_amd64.deb` (or the AppImage) |
+
+For real runs you still need **git** and **Claude Code** (signed in), as when running from source.
+
+### Opening it the first time
+
+The installers are **not signed yet**. Windows builds will be signed through the SignPath Foundation once it approves the project; macOS builds stay unsigned (there is no paid Apple account). So your computer warns you the first time. Check the file first (see [Check the download](#check-the-download)), then:
+
+- **Windows:** run the `.exe`. If SmartScreen says "Windows protected your PC", click **More info**, then **Run anyway**. The installer asks where to install; it doesn't need admin rights.
+- **macOS:** open the `.dmg` and drag The Insectoids into Applications. The first time, right-click (or Control-click) the app in Applications and choose **Open**, then **Open** again. If macOS only offers to move it to the Bin, close that message, open **System Settings → Privacy & Security**, scroll down and click **Open Anyway** next to The Insectoids. After that it opens normally.
+- **Linux (AppImage):** make the file runnable, then start it:
+
+  ```bash
+  chmod +x The-Insectoids-<version>-x86_64.AppImage
+  ./The-Insectoids-<version>-x86_64.AppImage
+  ```
+
+  If it says FUSE is missing, install `libfuse2` (on Ubuntu 24.04 and newer: `libfuse2t64`).
+- **Linux (.deb):** install it with apt, which also pulls in what it needs:
+
+  ```bash
+  sudo apt install ./the-insectoids_<version>_amd64.deb
+  ```
+
+### Check the download
+
+Each release has a `SHA256SUMS.txt` with a checksum for every file. Work out the checksum of the file you downloaded and make sure it matches its line in `SHA256SUMS.txt`. If it doesn't match, don't open the file; download it again.
+
+Windows (PowerShell):
+
+```powershell
+(Get-FileHash .\The-Insectoids-Setup-<version>-x64.exe -Algorithm SHA256).Hash.ToLower()
+```
+
+macOS:
+
+```bash
+shasum -a 256 The-Insectoids-<version>-arm64.dmg
+```
+
+Linux (checks every file from the list that you downloaded into this folder):
+
+```bash
+sha256sum --ignore-missing -c SHA256SUMS.txt
+```
+
+### Where your data lives
+
+The app keeps its data in your user folder, never next to the program:
+
+- **Windows:** `%APPDATA%\The Insectoids`
+- **macOS:** `~/Library/Application Support/The Insectoids`
+- **Linux:** `~/.config/The Insectoids`
+
+In it: the Brain (the `brain` folder), daily backups (`backups`), the hive's working copies of your projects (`hive`) and the app's settings. You can move the Brain under **Settings → Brain folder** (it shows where the Brain is now) and choose the backups folder under **Settings → Backups**. Your project folders stay where they are; the app never moves them.
+
+### Uninstall
+
+- **Windows:** **Settings → Apps → Installed apps**, find The Insectoids, then **Uninstall**.
+- **macOS:** quit the app (also from the menu bar icon), then drag it from Applications to the Bin.
+- **Linux:** delete the AppImage file, or remove the .deb with `sudo apt remove the-insectoids`.
+
+Uninstalling keeps your data, so a reinstall picks up where you left off. To remove everything, also delete the data folder above (and the Brain or backups folder, if you moved them). Deleting the Brain can't be undone, so keep a backup if you might want it later.
 
 ## Run it
 
