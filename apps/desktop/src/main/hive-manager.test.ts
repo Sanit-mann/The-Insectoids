@@ -116,7 +116,7 @@ describe('projects', () => {
     expect(await m.command({ type: 'submitGoal', text: 'Do things' })).toEqual({ ok: false, error: 'Pick a project folder first.' });
     expect(await m.command({ type: 'setProject', path: repo })).toEqual({ ok: true });
     expect(snap(m).project).toMatchObject({ name: 'my site', shelf: 'my-site', branch: 'main' });
-    expect(JSON.parse(readFileSync(join(root, 'userData', 'settings.json'), 'utf8'))).toEqual({ projectPath: expect.stringContaining('my site') });
+    expect(JSON.parse(readFileSync(join(root, 'userData', 'settings.json'), 'utf8'))).toMatchObject({ projectPath: expect.stringContaining('my site'), digestSeenAt: expect.any(Number) });
 
     await m.dispose();
     const again = make();

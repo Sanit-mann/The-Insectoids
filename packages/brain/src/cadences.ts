@@ -169,6 +169,18 @@ export class CadenceStore {
     return this.runs(cadenceId, 1)[0] ?? null;
   }
 
+  /**
+   * Runs of every cadence (deleted ones too) after `since` (exclusive), newest first, at most `limit`. Optionally
+   * leaves out runs with the given reasons (e.g. 'manual'). For the "while you were away" digest (Phase 3 B1).
+   */
+  runsSince(since: number, opts: { excludeReasons?: readonly CadenceRunReason[]; limit?: number } = {}): CadenceRun[] {
+    const skip = [...new Set(opts.excludeReasons ?? [])];
+    const notIn = skip.length ? ` AND reason NOT IN (${skip.map(() => '?').join(', ')})` : '';
+    const limit = Math.max(1, Math.min(10_000, opts.limit ?? 2_000));
+    const rows = this.db.prepare(`SELECT * FROM cadence_runs WHERE at > ?${notIn} ORDER BY at DESC, rowid DESC LIMIT ?`).all(since, ...skip, limit);
+    return (rows as unknown as RunRow[]).map(toRun);
+  }
+
   #must(id: string): Cadence {
     const c = this.get(id);
     if (!c) throw new Error(`No cadence ${id}`);

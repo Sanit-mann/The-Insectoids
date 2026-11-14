@@ -1,5 +1,6 @@
 import { type ReactNode, useEffect, useState } from 'react';
 import type { AppInfo } from '@insectoids/shared';
+import { AwayDigestDialog } from '@/components/digest/AwayDigestDialog';
 import { PlaceholderScreen } from '@/components/PlaceholderScreen';
 import { Rail } from '@/components/Rail';
 import { ApprovalsScreen } from '@/components/screens/ApprovalsScreen';
@@ -80,6 +81,7 @@ export function App() {
         {LIVE[screenId]?.() ?? <PlaceholderScreen screen={screen} />}
       </main>
       {screenId === 'queen' && <SidePanel />}
+      <AwayDigestDialog />
     </div>
     </SetupGate>
   );

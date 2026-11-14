@@ -381,6 +381,10 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX cadence_runs_cadence ON cadence_runs (cadence_id, at);
   ALTER TABLE goals ADD COLUMN cadence_id TEXT;
   `,
+  // v14: runs across every cadence by time, for the "while you were away" digest (Phase 3 B1).
+  `
+  CREATE INDEX cadence_runs_at ON cadence_runs (at);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

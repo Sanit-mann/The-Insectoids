@@ -103,6 +103,12 @@ function createWindow(): BrowserWindow {
   });
 
   win.once('ready-to-show', () => win.show());
+  // The user arriving (shown from the tray, restored from the taskbar) lets the digest open by itself (B1). Window focus
+  // isn't used here: other windows (and tests running side by side) move focus around without the user arriving;
+  // the page's own focus events cover switching back from another app.
+  const arriving = (): void => forwardPush({ type: 'window-shown' });
+  win.on('show', arriving);
+  win.on('restore', arriving);
 
   // Closing the window keeps the hive running in the tray (App 07-D7).
   win.on('close', (event) => {

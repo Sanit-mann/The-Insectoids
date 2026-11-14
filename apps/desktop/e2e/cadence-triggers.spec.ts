@@ -2,7 +2,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { type Page, expect, test } from '@playwright/test';
 import type { HiveApi } from '@insectoids/shared';
-import { type LaunchedApp, launchApp, repoGit } from './support/launch';
+import { type LaunchedApp, dismissDigest, launchApp, repoGit } from './support/launch';
 
 /**
  * Cadence triggers (Phase 3 A3): a cadence that starts when files land in a project folder, and one that starts
@@ -108,6 +108,7 @@ test('files landing in a watched folder start one run that lists them; other fil
   expect(goal.text).toContain('b.md');
   expect(goal.text).not.toContain('todo.txt');
 
+  await dismissDigest(win);
   await row.getByRole('button', { name: 'Runs' }).click();
   const history = win.getByTestId('cadence-history');
   await expect(history.getByTestId('cadence-run').first()).toContainText('Files changed');

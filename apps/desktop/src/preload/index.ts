@@ -21,6 +21,7 @@ import {
   ChangesViewSchema,
   CodeLookupResultSchema,
   CommandResultSchema,
+  DigestViewSchema,
   HIVE_IPC,
   IntegrationViewSchema,
   type HiveApi,
@@ -79,6 +80,7 @@ const hive: HiveApi = {
   libraryImport: async () => LibraryImportResultSchema.parse(await invoke(HIVE_IPC.libraryImport)),
   budgets: async () => BudgetsViewSchema.parse(await invoke(HIVE_IPC.budgets)),
   cadenceRuns: async (req) => CadenceRunViewSchema.array().parse(await invoke(HIVE_IPC.cadenceRuns, req)),
+  digest: async () => DigestViewSchema.parse(await invoke(HIVE_IPC.digest)),
   engineInstall: async (engineId) => EngineInstallResultSchema.parse(await invoke(HIVE_IPC.engineInstall, engineId)),
   pickProject: async () => ProjectViewSchema.nullable().parse(await invoke(HIVE_IPC.pickProject)),
   onEvent: (listener) => {

@@ -73,6 +73,25 @@ describe('cadence store', () => {
     expect(() => brain.cadences.delete(c.id)).toThrow(/No cadence/);
   });
 
+  it('lists runs of every cadence after a time, newest first, deleted cadences too, leaving out reasons on request', () => {
+    const a = brain.cadences.create(fields());
+    const b = brain.cadences.create(fields({ name: 'Other', shelf: 'api' }));
+    brain.cadences.recordRun({ cadenceId: a.id, reason: 'schedule', outcome: 'started', goalId: 'G-1', message: 'Old.' });
+    clock = 2_000;
+    brain.cadences.recordRun({ cadenceId: a.id, reason: 'schedule', outcome: 'skipped', message: 'At the line.' });
+    clock = 3_000;
+    brain.cadences.recordRun({ cadenceId: b.id, reason: 'webhook', outcome: 'refused', message: 'Bad secret.' });
+    brain.cadences.recordRun({ cadenceId: a.id, reason: 'manual', outcome: 'started', goalId: 'G-2', message: 'Run now.' });
+    clock = 4_000;
+    brain.cadences.recordRun({ cadenceId: a.id, reason: 'catch-up', outcome: 'failed', message: 'No engine.' });
+    brain.cadences.delete(b.id);
+    // Exclusive of `since`: the run at exactly 2 000 is out.
+    expect(brain.cadences.runsSince(2_000).map((r) => r.message)).toEqual(['No engine.', 'Run now.', 'Bad secret.']);
+    expect(brain.cadences.runsSince(1_999, { excludeReasons: ['manual'] }).map((r) => r.message)).toEqual(['No engine.', 'Bad secret.', 'At the line.']);
+    expect(brain.cadences.runsSince(0, { limit: 2 })).toHaveLength(2);
+    expect(brain.cadences.runsSince(4_000)).toEqual([]);
+  });
+
   it('goals remember the cadence that started them', () => {
     const c = brain.cadences.create(fields());
     expect(brain.goals.create({ title: 'g', text: 'g', shelf: 'site', cadenceId: c.id }).cadenceId).toBe(c.id);

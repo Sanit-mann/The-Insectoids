@@ -25,6 +25,7 @@ import {
   CodeLookupRequestSchema,
   CodeLookupResultSchema,
   CommandResultSchema,
+  DigestViewSchema,
   HIVE_IPC,
   HiveCommandSchema,
   HiveSnapshotSchema,
@@ -160,6 +161,9 @@ export function registerHiveIpc(d: Deps): void {
 
   // Phase 3 A1: a cadence's run history (read-only).
   handle(HIVE_IPC.cadenceRuns, async (arg) => CadenceRunViewSchema.array().parse(await host().call('cadenceRuns', CadenceRunsRequestSchema.parse(arg))));
+
+  // Phase 3 B1: the "while you were away" digest (read-only; "Got it" is the markDigestSeen command).
+  handle(HIVE_IPC.digest, async () => DigestViewSchema.parse(await host().call('digest')));
 
   // C4: one-click engine install with consent (04-D6). The command comes from the engine's adapter (via its
   // card in the host), never from the renderer. Under e2e no real installer ever runs.

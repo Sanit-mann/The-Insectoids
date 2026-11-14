@@ -62,6 +62,8 @@ export type HostMethod =
   | 'budgets'
   // Cadence run history (Phase 3 A1), read-only.
   | 'cadenceRuns'
+  // The "while you were away" digest (Phase 3 B1), read-only; result DigestView.
+  | 'digest'
   // The computer woke from sleep (Phase 3 A2): main tells the host so owed cadence runs happen at once.
   | 'wake'
   // A webhook call (Cadence 05-D4; Phase 3 A4): main checked the secret, size and rate; params WebhookCall,

@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { type ElectronApplication, type Page, _electron as electron } from '@playwright/test';
+import { type ElectronApplication, type Page, _electron as electron, expect } from '@playwright/test';
 import type { InsectoidsApi } from '@insectoids/shared';
 
 /** For code inside win.evaluate(): the e2e tsconfig has no DOM, so use (globalThis as unknown as AppWindow).insectoids. */
@@ -97,3 +97,21 @@ export async function noKeyStoreOnLinux(win: Page): Promise<boolean> {
   return !(await win.evaluate(() => (globalThis as unknown as AppWindow).insectoids.vault.status())).available;
 }
 export const NO_KEY_STORE = 'This Linux machine has no OS key store, so the Vault (rightly) stores no keys.';
+
+/**
+ * Unattended cadence runs open the "while you were away" digest by itself (Phase 3 B1), and its dialog covers the
+ * screen. UI steps that come after such runs say "Got it" first (it also marks the digest read in the hive).
+ */
+export async function dismissDigest(win: Page): Promise<void> {
+  await win.evaluate(() => (globalThis as unknown as { insectoids: InsectoidsApi }).insectoids.hive.command({ type: 'markDigestSeen' }));
+  const dialog = win.getByRole('dialog', { name: 'While you were away' });
+  await expect
+    .poll(
+      async () => {
+        if (await dialog.isVisible()) await dialog.getByRole('button', { name: 'Got it', exact: true }).click().catch(() => undefined);
+        return dialog.isVisible();
+      },
+      { timeout: 10_000 },
+    )
+    .toBe(false);
+}

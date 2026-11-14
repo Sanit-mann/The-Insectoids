@@ -11,7 +11,7 @@ import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'no
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
-import { type Brain, type BoardCard, type Cadence, type Goal, ConflictError, STOP_WORDS, SecretError, brainHealth, writeBackup } from '@insectoids/brain';
+import { type ApprovalItem, type Brain, type BoardCard, type Cadence, type Goal, ConflictError, STOP_WORDS, SecretError, brainHealth, writeBackup } from '@insectoids/brain';
 import {
   approvalFor,
   auditSummary,
@@ -60,10 +60,10 @@ import {
 import { LibraryKeeper, scanOf } from './library-keeper';
 import { CadenceKeeper, isBuiltIn } from './cadence-keeper';
 import { CadenceProposer } from './cadence-proposals';
+import { approvalView, buildDigest } from './digest';
 import {
   type ActivityView,
   type AgentView,
-  type ApprovalView,
   type BrainHealth,
   type CasteView,
   type LibraryImportResult,
@@ -75,6 +75,7 @@ import {
   type BrainDashboardView,
   type BudgetsView,
   type CadenceRunView,
+  type DigestView,
   BudgetsViewSchema,
   CasteSchema,
   type BrainEditRequest,
@@ -253,6 +254,8 @@ interface HostSettings {
   librarian?: { lastReviewAt: number | null; since: number; cardsSince: number };
   /** The managers' brain side (C2): the user's settings, the review clock and the last review. */
   managers?: ManagerSettings;
+  /** When the user last read the "while you were away" digest (Phase 3 B1); the first start sets it to then. */
+  digestSeenAt?: number;
 }
 
 interface ManagerSettings {
@@ -377,6 +380,8 @@ export class HiveManager {
   readonly #cadences: CadenceKeeper;
   /** Spots repeated goals and proposes a cadence for them (Cadence 05-D3; Phase 3 A5). */
   readonly #proposer: CadenceProposer;
+  /** When the user last read the "while you were away" digest (Phase 3 B1), from the settings file. */
+  #digestSeenAt: number;
   /** Where the `backup` job writes (main sets it with host RPC setBackupDir; Phase 3 A5). Null until then. */
   #backupDir: string | null = null;
   /** Resolves once main has said where backups go (a backup due right at start waits a little for it). */
@@ -395,6 +400,9 @@ export class HiveManager {
     this.#limitHits = settings.limitHits ?? {};
     this.#review = settings.librarian ?? { lastReviewAt: null, since: this.#now(), cardsSince: 0 };
     this.#managers = settings.managers ?? { ...DEFAULT_MANAGERS };
+    // The digest (B1) covers what happens from the very first start on, never older history.
+    this.#digestSeenAt = settings.digestSeenAt ?? this.#now();
+    if (settings.digestSeenAt === undefined) this.#writeSettings({ digestSeenAt: this.#digestSeenAt });
     this.#userLib = new UserLibrary(o.userLibraryDir ?? join(o.userDataDir, 'library'));
     this.#keeper = new LibraryKeeper({
       brain: o.brain,
@@ -1004,6 +1012,12 @@ export class HiveManager {
     if ((cmd.type === 'approve' || cmd.type === 'deny') && this.#proposer.owns(cmd.approvalId)) return this.#proposer.decide(cmd.approvalId, cmd.type === 'approve');
     if (cmd.type === 'retireLibraryItem') return this.#keeper.retire(cmd.name);
     if (cmd.type === 'restoreLibraryItem') return this.#keeper.restore(cmd.name);
+    if (cmd.type === 'markDigestSeen') {
+      // "Got it" (B1): what happened so far no longer counts as unseen. command() fires the change.
+      this.#digestSeenAt = this.#now();
+      this.#writeSettings({ digestSeenAt: this.#digestSeenAt });
+      return;
+    }
     if (cmd.type === 'setProject') return this.#setProject(cmd.path);
     if (cmd.type === 'pause') return this.#pause(cmd.reason ?? 'Paused by you.');
     if (cmd.type === 'resume') return this.#resume();
@@ -1431,7 +1445,8 @@ export class HiveManager {
     this.#cardSkills = this.#latestSkills(boardCards.map((c) => c.id));
     const cards = boardCards.map((c) => this.#cardView(c));
     this.#cardSkills = null;
-    const approvals = brain.approvals.list().filter((a) => a.goalId === null || goalIds.has(a.goalId));
+    const allApprovals = brain.approvals.list();
+    const approvals = allApprovals.filter((a) => a.goalId === null || goalIds.has(a.goalId));
     const waiting = approvals.filter((a) => a.status === 'waiting');
     const decided = approvals
       .filter((a) => a.status !== 'waiting')
@@ -1452,15 +1467,11 @@ export class HiveManager {
       incidents: this.#incidentViews(goalIds),
       managers: this.#managersView(goalIds),
       hive: { paused: this.#paused, pausedReason: this.#pausedReason, insectCap: this.#limits.insectCap, working: this.#working() },
+      digest: (({ unseen, since, headline }) => ({ unseen, since, headline }))(this.#digest(allApprovals.filter((a) => a.status === 'waiting'))),
       cadences: this.#cadences.views(),
       goals: goals.map((g) => this.#goalView(g)),
       cards,
-      approvals: [...waiting, ...decided].map(
-        (a): ApprovalView => ({
-          id: a.id, goalId: a.goalId, kind: a.kind, title: a.title, from: a.from, whyItNeedsYou: a.whyItNeedsYou,
-          ifYouSayYes: a.ifYouSayYes, destructive: a.destructive, status: a.status, createdAt: a.createdAt, decidedAt: a.decidedAt,
-        }),
-      ),
+      approvals: [...waiting, ...decided].map(approvalView),
       agents: [...running.sort((a, b) => a.startedAt - b.startedAt), ...finished],
       activity: [...this.#activity],
     };
@@ -1560,6 +1571,16 @@ export class HiveManager {
    */
   webhookCall(call: WebhookCall): Promise<WebhookReply> {
     return this.#cadences.webhook(WebhookCallSchema.parse(call));
+  }
+
+  /** The "while you were away" digest (Phase 3 B1): unattended work since the user last read it. */
+  digest(): DigestView {
+    return this.#digest();
+  }
+
+  /** `waiting`: every waiting approval, when the caller already read them (the snapshot). */
+  #digest(waiting?: ApprovalItem[]): DigestView {
+    return buildDigest({ brain: this.#o.brain, since: this.#digestSeenAt, until: this.#now(), shelf: this.#project?.view.shelf ?? null, ...(waiting ? { waiting } : {}) });
   }
 
   /** A cadence's run history, newest first (Phase 3 A1). Runs of a deleted cadence stay readable. */
@@ -2102,6 +2123,7 @@ export class HiveManager {
         limitHits?: unknown;
         librarian?: unknown;
         managers?: unknown;
+        digestSeenAt?: unknown;
       };
       const ids = (v: unknown): EngineId[] =>
         Array.isArray(v) ? v.flatMap((x) => (EngineIdSchema.safeParse(x).success ? [x as EngineId] : [])) : [];
@@ -2112,6 +2134,7 @@ export class HiveManager {
         limitHits: readHits(raw.limitHits),
         ...readReviewClock(raw.librarian),
         ...readManagers(raw.managers),
+        ...(typeof raw.digestSeenAt === 'number' && Number.isFinite(raw.digestSeenAt) ? { digestSeenAt: raw.digestSeenAt } : {}),
       };
     } catch {
       return {};

@@ -198,6 +198,8 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
     case 'cadenceRuns':
       // Validated in main against CadenceRunsRequestSchema.
       return hive.cadenceRuns(params as Parameters<HiveManager['cadenceRuns']>[0]);
+    case 'digest':
+      return hive.digest();
     case 'wake':
       hive.wake();
       return null;

@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { type Page, expect, test } from '@playwright/test';
 import type { HiveApi, WebhookTrust } from '@insectoids/shared';
-import { type AppWindow, type LaunchedApp, NO_KEY_STORE, launchApp, noKeyStoreOnLinux } from './support/launch';
+import { type AppWindow, type LaunchedApp, NO_KEY_STORE, dismissDigest, launchApp, noKeyStoreOnLinux } from './support/launch';
 
 /**
  * Webhooks and trust (Phase 3 A4, Cadence 05-D2, D4): an outside app calls a cadence's local URL on 127.0.0.1.
@@ -245,6 +245,7 @@ test('the Cadence screen shows the webhook URL, copies the secret, and words the
   expect((await call(noteUrl, 'Disk is nearly full.', secret)).status).toBe(202);
   await expect.poll(() => outcomes(win, strictId), { timeout: 15_000 }).toEqual(expect.arrayContaining(['webhook:refused', 'webhook:waiting']));
 
+  await dismissDigest(win);
   await win.getByRole('navigation', { name: 'Main' }).getByRole('button', { name: 'Cadence' }).click();
   await expect(win.getByRole('heading', { level: 1, name: 'Cadence' })).toBeVisible();
   const row = win.getByTestId('cadence-row').filter({ hasText: STRICT_NAME });

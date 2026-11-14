@@ -7,6 +7,7 @@ import { Housekeeping, ScheduleEditor, isBuiltIn } from '@/components/cadence/Ho
 import { WebhookPanel } from '@/components/cadence/WebhookPanel';
 import { AUTONOMY, OUTCOME, PENDING_ICON, nextRunWords, runTime } from '@/components/cadence/cadence-words';
 import { Switch } from '@/components/connections/Switch';
+import { CadenceDigest } from '@/components/digest/CadenceDigest';
 import { formatTokens } from '@/components/hive/format';
 import { useNow } from '@/components/hive/useNow';
 import { EmptyState } from '@/components/kokonutui/empty-state';
@@ -191,6 +192,7 @@ export function CadenceScreen() {
           </div>
         ) : null}
         {actionError ? <InlineAlert message={actionError} onDismiss={() => setActionError(null)} title="That didn't work" tone="error" /> : null}
+        <CadenceDigest />
 
         {!hasProject ? (
           <div className="flex items-center justify-center py-6">

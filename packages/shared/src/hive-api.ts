@@ -37,6 +37,8 @@ export const HIVE_IPC = {
   engineInstall: 'hive:engine-install',
   /** A cadence's run history (Phase 3 A1), newest first. */
   cadenceRuns: 'hive:cadence-runs',
+  /** The "while you were away" digest (Phase 3 B1). */
+  digest: 'hive:digest',
   /** Opens the folder picker in main; returns the chosen project or null if cancelled. */
   pickProject: 'hive:pick-project',
   /** main -> renderer push. */
@@ -438,6 +440,88 @@ export const ManagersViewSchema = z.object({
 });
 export type ManagersView = z.infer<typeof ManagersViewSchema>;
 
+// ---- the "while you were away" digest (Cadence 05-D8; Phase 3 B1) ------------------------------------
+
+/**
+ * Unattended work = cadence runs the user didn't start themselves: reasons schedule, catch-up, wake, file, event
+ * and webhook (never `manual`), plus the built-in maintenance jobs. The digest covers everything since the user
+ * last said "Got it" (`markDigestSeen`; on the very first start that moment is "now", so old history never shows).
+ *
+ * It opens by itself on the first visit after unattended work that matters: a user cadence ran (started, failed,
+ * waited, was refused…) or a maintenance job failed. Routine maintenance (`done`) alone is listed but never opens
+ * it, so a health check every 6 hours doesn't pop it up every morning.
+ */
+export const DigestBadgeSchema = z.object({
+  /** True when unattended work that matters happened since the user last read the digest: the app opens it. */
+  unseen: z.boolean(),
+  /** The moment the user last read it (or the first start). */
+  since: z.number(),
+  /** One line, e.g. "While you were away: 3 runs, 2 done, 1 waits for you. 41,200 tokens.", or null when nothing happened. */
+  headline: z.string().nullable(),
+});
+export type DigestBadge = z.infer<typeof DigestBadgeSchema>;
+
+/** One goal a cadence started while the user was away, as it stands now. */
+export const DigestGoalSchema = z.object({
+  goalId: Id,
+  title: z.string(),
+  status: GoalStatusSchema,
+  /** In words: "Done and merged", "Waiting for you to approve its merge", "Stuck: <reason>", "Still running". */
+  outcome: z.string(),
+  /** What the user's yes would unblock, or null. */
+  waitingFor: z.enum(['plan', 'merge', 'approval']).nullable(),
+  spentTokens: z.number(),
+  spentUsd: z.number(),
+  startedAt: z.number(),
+});
+export type DigestGoal = z.infer<typeof DigestGoalSchema>;
+
+/** One cadence (user-made or built-in) that did something while the user was away. */
+export const DigestCadenceSchema = z.object({
+  cadenceId: Id,
+  name: z.string(),
+  builtIn: z.boolean(),
+  /** Run-log counts in the period by outcome (only non-zero ones need be present). */
+  outcomes: z.record(z.string(), z.number().int()),
+  goals: z.array(DigestGoalSchema),
+  /** The newest few run-log lines worth reading (failures first; maintenance `done` messages), at most 5. */
+  lines: z.array(z.object({ at: z.number(), outcome: z.string(), message: z.string() })),
+});
+export type DigestCadence = z.infer<typeof DigestCadenceSchema>;
+
+export const DigestViewSchema = z.object({
+  since: z.number(),
+  until: z.number(),
+  /** Same as the badge's. */
+  unseen: z.boolean(),
+  headline: z.string().nullable(),
+  totals: z.object({
+    /** Unattended runs that started a goal. */
+    runs: z.number().int(),
+    goalsDone: z.number().int(),
+    /** Stuck or cancelled. */
+    goalsFailed: z.number().int(),
+    /** Still planning, waiting or running. */
+    goalsOpen: z.number().int(),
+    /** Runs that failed, were refused or were skipped/deferred. */
+    problems: z.number().int(),
+    /** Maintenance jobs that ran. */
+    jobs: z.number().int(),
+    tokens: z.number(),
+    costUsd: z.number(),
+  }),
+  /** User cadences first (by most recent activity), then built-in jobs. */
+  cadences: z.array(DigestCadenceSchema),
+  /** Everything waiting for the user right now (not only from this period). */
+  waiting: z.object({
+    total: z.number().int(),
+    byKind: z.record(z.string(), z.number().int()),
+    /** The oldest few waiting approvals, at most 5. */
+    items: z.array(ApprovalViewSchema),
+  }),
+});
+export type DigestView = z.infer<typeof DigestViewSchema>;
+
 export const HiveSnapshotSchema = z.object({
   /** null until the user picks a project folder. */
   project: ProjectViewSchema.nullable(),
@@ -468,6 +552,8 @@ export const HiveSnapshotSchema = z.object({
     /** Agents working right now. */
     working: z.number().int(),
   }),
+  /** Whether a "while you were away" digest waits to be read (B1); the full digest is `HiveApi.digest()`. */
+  digest: DigestBadgeSchema.default({ unseen: false, since: 0, headline: null }),
   /** This project's cadences (Phase 3 A1), in creation order. */
   cadences: z.array(CadenceViewSchema).default([]),
   /** Newest first. */
@@ -538,6 +624,8 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   /** Asks for approval to merge again after an undo ("redo"). */
   z.object({ type: z.literal('requestRedoMerge'), goalId: Id }),
   ...CadenceCommandSchemas,
+  /** The user read the digest ("Got it"): what happened so far no longer counts as unseen (B1). */
+  z.object({ type: z.literal('markDigestSeen') }),
 ]);
 export type HiveCommand = z.infer<typeof HiveCommandSchema>;
 
@@ -871,6 +959,8 @@ export const HivePushSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('agent-output'), runId: z.string(), lines: z.array(z.string()) }),
   /** Live output of an engine install the user approved (C4, 04-D6). */
   z.object({ type: z.literal('install-output'), engineId: z.string(), lines: z.array(z.string()) }),
+  /** The window was shown (from the tray) or restored: the user is arriving (B1 digest). */
+  z.object({ type: z.literal('window-shown') }),
 ]);
 export type HivePush = z.infer<typeof HivePushSchema>;
 
@@ -894,6 +984,8 @@ export interface HiveApi {
   budgets(): Promise<BudgetsView>;
   /** A cadence's run history, newest first (Phase 3 A1). */
   cadenceRuns(req: CadenceRunsRequest): Promise<CadenceRunView[]>;
+  /** What happened unattended since the user last said "Got it" (Phase 3 B1). */
+  digest(): Promise<DigestView>;
   /**
    * Runs the engine's own official install command (the one its card shows), after the user agreed in the app.
    * Output streams as 'install-output' pushes; the engine is checked again at the end.
