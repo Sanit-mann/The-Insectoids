@@ -193,7 +193,7 @@ export function WebhookPanel({ cadence }: { cadence: CadenceView }) {
             </summary>
             <div className="flex flex-col gap-2 pt-2 text-xs text-muted">
               <p className="m-0">Send a POST with the secret. A simple sender can put it in a header:</p>
-              <pre className="m-0 overflow-x-auto rounded-[8px] border border-line bg-surface p-2 font-mono text-[11px] text-text">
+              <pre aria-label="Example command" className="m-0 overflow-x-auto rounded-[8px] border border-line bg-surface p-2 font-mono text-[11px] text-text" tabIndex={0}>
                 {'curl -X POST <run address> \\\n  -H "Authorization: Bearer <your secret>" \\\n  -d "New invoice from Acme"'}
               </pre>
               <p className="m-0">

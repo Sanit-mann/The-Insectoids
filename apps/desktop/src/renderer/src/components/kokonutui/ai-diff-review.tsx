@@ -136,7 +136,7 @@ function FileRow({ file, open, onToggle }: { file: ReviewFile; open: boolean; on
       </button>
       <Collapse id={diffId} open={open} reduce={reduce}>
         <div className="px-2 pb-2">
-          <div className="overflow-x-auto rounded-lg border border-line bg-ground">
+          <div aria-label="Line changes" className="overflow-x-auto rounded-lg border border-line bg-ground" role="region" tabIndex={0}>
             {!hasBody && <p className="m-0 px-3 py-2 text-xs text-muted">No line changes to show for this file.</p>}
             {file.diff?.binary && <p className="m-0 px-3 py-2 text-xs text-muted">Binary file: contents not shown.</p>}
             {file.diff?.hunks.map((h, i) => <Hunk hunk={h} key={i} />)}

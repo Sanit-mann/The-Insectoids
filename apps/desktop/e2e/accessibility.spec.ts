@@ -35,6 +35,8 @@ const findings: Finding[] = [];
 test.beforeAll(async () => {
   t = await launchApp();
   const { win } = t;
+  // A smaller window, like CI screens: narrow layouts scroll sideways, and those regions must be keyboard-reachable.
+  await t.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1024, 720));
   // Content worth checking: a goal whose plan waits for approval, and a cadence.
   await expect(win.getByLabel('Message the Queen')).toBeEnabled({ timeout: 30_000 });
   expect(await win.evaluate(() => (globalThis as unknown as Win).insectoids.hive.command({ type: 'submitGoal', text: 'Say hello from the hive' }))).toEqual({ ok: true });

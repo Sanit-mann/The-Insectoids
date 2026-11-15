@@ -324,7 +324,7 @@ export function BudgetsScreen() {
         {b.routing.length === 0 ? (
           <p className="m-0 text-sm text-muted">No runs yet.</p>
         ) : (
-          <div className="overflow-x-auto">
+          <div aria-label="Routing history" className="overflow-x-auto" role="region" tabIndex={0}>
             <table className="w-full min-w-[760px] border-collapse text-xs">
               <caption className="sr-only">Routing history, newest first</caption>
               <thead>

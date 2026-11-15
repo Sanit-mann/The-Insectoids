@@ -139,6 +139,10 @@ test('a newer version: Check now offers it, Download fetches it, Restart to upda
   await expect(u.status).toContainText(newer);
   expect(feed.installerRequests(), 'nothing downloads until asked').toBe(0);
 
+  // Downloading needs the platform's real updater: NSIS on Windows works from a dev build, but the Linux one only
+  // works inside an AppImage and the macOS one needs a signed app, so the rest of this flow is checked on Windows.
+  if (process.platform !== 'win32') return;
+
   // Download -> "downloading" -> "ready" (the installer's sha512 checks out).
   await recordStatuses(win);
   await u.download.click();

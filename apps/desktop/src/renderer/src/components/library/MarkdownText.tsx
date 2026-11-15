@@ -17,7 +17,7 @@ export function MarkdownText({ text }: { text: string }) {
       while (i < lines.length && !lines[i]!.startsWith('```')) code.push(lines[i++]!);
       i++;
       blocks.push(
-        <pre className="m-0 overflow-x-auto rounded-[10px] border border-line bg-ground p-2.5 font-mono text-xs" key={key++}>
+        <pre className="m-0 overflow-x-auto rounded-[10px] border border-line bg-ground p-2.5 font-mono text-xs" key={key++} tabIndex={0}>
           {code.join('\n')}
         </pre>,
       );

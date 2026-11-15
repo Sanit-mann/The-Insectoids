@@ -106,6 +106,8 @@ test('the first-run setup wizard passes axe at every step, in both themes', asyn
   const t = await launchApp({ onboarded: false, project: 'none' });
   try {
     const { win } = t;
+    // A smaller window, like CI screens: narrow layouts scroll sideways, and those regions must be keyboard-reachable.
+    await t.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1024, 720));
     const step = win.getByTestId('setup-step-label');
     await expect(win.getByRole('heading', { name: 'Welcome to The Insectoids' })).toBeVisible({ timeout: 20_000 });
     await check(win, 'Setup 1 · Welcome');
@@ -169,6 +171,8 @@ test('panels, forms, detail views and dialogs pass axe in both themes', async ()
   const t = await launchApp({ env: { INSECTOIDS_E2E_BRAIN_SEED: '1', INSECTOIDS_E2E_FAKE_INSTALL: 'ok' } });
   try {
     const { win } = t;
+    // A smaller window, like CI screens: narrow layouts scroll sideways, and those regions must be keyboard-reachable.
+    await t.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1024, 720));
     await expect(win.getByLabel('Message the Queen')).toBeEnabled({ timeout: 30_000 });
     await expect(win.getByTestId('brain-status')).toHaveAttribute('data-state', 'ready', { timeout: 30_000 });
     expect(await command(win, { type: 'setManagers', scoutBeforePlanning: false })).toEqual({ ok: true });
