@@ -35,6 +35,12 @@ export interface EngineRun {
 
 export interface Engine {
   run(req: EngineRequest): EngineRun;
+  /**
+   * The display name of the engine a route names (e.g. "GitHub Copilot CLI"), so messages like "… is signed
+   * out" name the engine that failed. Optional: a single-engine runner may not know; the hive then says
+   * "The AI engine".
+   */
+  name?(id: Route['engine']): string | undefined;
 }
 
 /** Claude Code engine: each run is a headless Claude Code process with the guard hook in front of every tool. */

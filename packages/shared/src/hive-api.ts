@@ -110,6 +110,11 @@ export const EngineCardSchema = z.object({
   guard: z.enum(['hook', 'policy-and-tools', 'read-only']).nullable(),
   /** Whether the engine reports cost itself; otherwise the hive estimates it from tokens. */
   reportsCost: z.boolean(),
+  /**
+   * Paid by the user's plan (Claude, Copilot, …): no per-token price, runs count toward the plan's limits.
+   * Estimates say "your subscription" for it. Optional so older cards still parse; absent means no.
+   */
+  subscription: z.boolean().optional(),
   /** The engine's model names by tier. */
   models: z.object({ strongest: z.string(), standard: z.string(), light: z.string() }).nullable(),
   /** Official install command, shown for the user to copy or run with consent (04-D6). */

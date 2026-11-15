@@ -109,7 +109,7 @@ export function registerSetupIpc(d: SetupDeps): void {
     const engine =
       snap && (snap.engine.state === 'ready' || snap.engine.state === 'fake') ? (snap.engines.find((e) => e.name === snap.engine.name) ?? null) : null;
     const busy = (snap?.goals ?? []).some((g) => g.status === 'planning' || g.status === 'awaiting_approval' || g.status === 'running');
-    return SampleEstimateSchema.parse(estimateSample({ runs, engine: engine ? { id: engine.id, name: engine.name, state: engine.state } : null, busy, practicePath }));
+    return SampleEstimateSchema.parse(estimateSample({ runs, engine: engine ? { id: engine.id, name: engine.name, state: engine.state, subscription: engine.subscription === true } : null, busy, practicePath }));
   };
 
   const result = async (error?: string | null): Promise<SetupResult> =>

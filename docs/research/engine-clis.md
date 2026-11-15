@@ -14,6 +14,16 @@ How to read it:
 
 ## 1. GitHub Copilot CLI (`copilot`)
 
+**Checked on this PC in Phase 4 B2 (2026-11-15, Copilot CLI 1.0.105)**, first offline (its documented BYOK mode: `COPILOT_OFFLINE=true` + `COPILOT_PROVIDER_BASE_URL` pointed at a local fake model, no account, nothing spent), then with one real signed-in run the user approved. These replace the unknowns below:
+- Events (`--output-format json`): `assistant.message` (whole text, `data.content`), `assistant.message_delta`, `tool.execution_start` / `tool.execution_complete` (`toolName`, `toolCallId`, `arguments`), `session.error` (`errorType`, `message`), and a last `result` line with `exitCode`, `sessionId` and `usage.premiumRequests`. No token counts in the stream: `--usage-output-file <file>` writes them per model (`modelMetrics.<model>.usage`). Its `inputTokens` already include cache reads and writes.
+- Built-in tool names: `powershell` (plus `read_/stop_/list_powershell`), `view`, `create`, `edit`, `grep`, `glob`, `task`, `skill`, `sql`, `session_store_sql`, `read_agent`, `list_agents`, `write_agent`, `run_dynamic_workflow`, `dynamic_workflows_manage`, `fetch_copilot_cli_documentation`. MCP tools are named `<server>-<tool>`.
+- `--available-tools` takes exact names only (no wildcards, no server name), comma-separated; a name that matches nothing leaves the model no tools at all. A hidden tool the model calls anyway fails with "does not exist". Headless (with `-p` or a stdin prompt), a visible but unapproved tool is denied. Deny rules beat every allow.
+- The MCP config's `cwd` and `env` are honoured per server; `--additional-mcp-config=@file` adds servers for one run.
+- A bad or missing sign-in prints plain text on stderr and exits 1 before any JSON ("Authentication token found but could not be validated", "/login").
+- `--model=auto` refuses `--reasoning-effort` ("Model "auto" does not support reasoning effort configuration"); `--auto-tier=efficiency` was accepted. The real run: Auto (efficiency) picked `gpt-6-luna`, answered in 1.4 s, 2,965 input tokens (2,962 of them cache writes) and 5 output, 1 premium request.
+- No sign-in status command was found (`copilot login` has none); sign-in problems show on the first run.
+- VS Code puts its own `copilot` stand-in (`…\Microsoft VS Code\bin\copilot-shim\copilot.exe`) on PATH ahead of npm's; it isn't the CLI. npm's `copilot.cmd` runs `npm-loader.js`, which only starts the native `copilot.exe` from `@github/copilot-<platform>-<arch>`.
+
 **Install, version, licence**
 - Install: `npm install -g @github/copilot` (needs Node 22+), `winget install GitHub.Copilot`, `brew install --cask copilot-cli`, or the script `curl -fsSL https://gh.io/copilot-install | bash` [1]. You need an active Copilot subscription [1].
 - Current version: 1.0.112, published to npm on 2026-11-13 [2][3].

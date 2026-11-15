@@ -52,8 +52,6 @@ export function citedSources(sources: readonly AskSourceInput[], cited: readonly
 export const FALLBACK_TOKENS = { low: 3_000, high: 8_000 } as const;
 /** Librarian runs needed before the hive trusts its own numbers. */
 export const MIN_ASK_RUNS = 3;
-/** Engines on a subscription: no per-token price, the run counts toward the plan's limits (as in the sample estimate). */
-const SUBSCRIPTION = new Set(['claude', 'gemini', 'codex']);
 
 export interface AskPastRun {
   role: string;
@@ -87,8 +85,11 @@ export function askTokenRange(runs: readonly AskPastRun[], engine: string | null
 
 export function askEstimate(i: {
   project: boolean;
-  /** The engine the Treasurer routes the Librarian's role to, or null when none can take it. */
-  engine: { id: string; name: string; free: boolean } | null;
+  /**
+   * The engine the Treasurer routes the Librarian's role to, or null when none can take it. `subscription` is
+   * the engine's own capability (a plan engine: no per-token price, the run counts toward the plan's limits).
+   */
+  engine: { id: string; name: string; free: boolean; subscription: boolean } | null;
   /** Recent runs of every role (the routing history), for the token range and a per-token price. */
   runs: readonly AskPastRun[];
 }): BrainAskEstimate {
@@ -102,7 +103,7 @@ export function askEstimate(i: {
   let message: string;
   if (e.id === 'fake') message = `The scripted test engine answers on ${e.name}: it spends no tokens and costs nothing.`;
   else if (e.free) message = `Free: about ${range}, a model on this computer.`;
-  else if (SUBSCRIPTION.has(e.id)) message = `About ${range} (your subscription).`;
+  else if (e.subscription) message = `About ${range} (your subscription).`;
   else {
     // An API provider bills per token: price it from this engine's own past runs when they reported a cost.
     const priced = i.runs.filter((r) => r.engine === e.id && r.costUsd > 0 && r.tokens > 0);

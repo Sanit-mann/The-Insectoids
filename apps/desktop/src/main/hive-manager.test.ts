@@ -50,7 +50,7 @@ function make(extra: Partial<Options> & { realEngine?: boolean } = {}): HiveMana
     // Never the machine's real Gemini CLI: it may be installed and signed in, and would spend real quota.
     geminiDetect: async () => ({ status: 'missing' }),
     // Real-engine tests never look for a real OpenCode on the test machine either.
-    ...(realEngine ? { opencodeDetect: async () => ({ status: 'missing' as const }) } : {}),
+    ...(realEngine ? { opencodeDetect: async () => ({ status: 'missing' as const }), copilotDetect: async () => ({ status: 'missing' as const }) } : {}),
     ...rest,
   });
   return manager;
@@ -188,6 +188,7 @@ describe('engine registry (Phase 2 A1)', () => {
       ['gemini', 'missing'],
       ['codex', 'unsupported'],
       ['opencode', 'missing'],
+      ['copilot', 'missing'],
     ]);
     expect(s.engines[1]!.message).toMatch(/Not checked/);
     // Gemini CLI is a real engine since A2; with the scripted engine it is listed but never checked or run.
@@ -200,7 +201,7 @@ describe('engine registry (Phase 2 A1)', () => {
     const m = make({ engine: 'claude', realEngine: true, project: repo, detect: async () => install, auth: async () => ({ loggedIn: true }) });
     await m.init();
     await until('ready', () => snap(m).engine.state === 'ready');
-    expect(snap(m).engines.map((e) => e.id)).toEqual(['claude', 'gemini', 'codex', 'opencode']);
+    expect(snap(m).engines.map((e) => e.id)).toEqual(['claude', 'gemini', 'codex', 'opencode', 'copilot']);
     expect(snap(m).engines[0]).toMatchObject({ state: 'ready', guard: 'hook', reportsCost: true, models: { strongest: 'opus' } });
   });
 
@@ -214,8 +215,25 @@ describe('engine registry (Phase 2 A1)', () => {
     const again = make({ engine: 'claude', realEngine: true, project: repo, detect: async () => install, auth: async () => ({ loggedIn: true }) });
     await again.init();
     const s = snap(again);
-    expect(s.engines.map((e) => e.id)).toEqual(['opencode', 'claude', 'gemini', 'codex']);
+    expect(s.engines.map((e) => e.id)).toEqual(['opencode', 'claude', 'gemini', 'codex', 'copilot']);
     expect(s.engines.find((e) => e.id === 'gemini')!.enabled).toBe(false);
+  });
+
+  it('Copilot CLI (Phase 4 B2) starts switched off, even when ready; switching it on persists', async () => {
+    const copilot = async () => ({ status: 'installed' as const, command: 'copilot.exe', args: [], version: '1.0.105' });
+    const opts = { engine: 'claude' as const, realEngine: true, project: repo, detect: async () => install, auth: async () => ({ loggedIn: true }) };
+    const m = make({ ...opts, copilotDetect: copilot });
+    await m.init();
+    await until('copilot checked', () => snap(m).engines.find((e) => e.id === 'copilot')?.state === 'ready');
+    expect(snap(m).engines.find((e) => e.id === 'copilot')).toMatchObject({ enabled: false, name: 'GitHub Copilot CLI' });
+    expect(await m.command({ type: 'setEngineEnabled', engineId: 'claude', enabled: false })).toEqual({ ok: true });
+    expect(snap(m).engine.name).not.toBe('GitHub Copilot CLI');
+    expect(await m.command({ type: 'setEngineEnabled', engineId: 'copilot', enabled: true })).toEqual({ ok: true });
+    await m.dispose();
+    const again = make({ ...opts, copilotDetect: copilot });
+    await again.init();
+    expect(snap(again).engines.find((e) => e.id === 'copilot')!.enabled).toBe(true);
+    expect(snap(again).engines.find((e) => e.id === 'claude')!.enabled).toBe(false);
   });
 
   it('with every engine switched off, goals are refused with a clear reason', async () => {

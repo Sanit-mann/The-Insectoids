@@ -1,10 +1,10 @@
 import { spawn } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import type { Effort } from '../claude/args';
 import { type RunError, type RunHandle, type RunResult, killTree } from '../claude/run';
 import type { ClaudeEvent, Usage } from '../claude/stream';
-import { buildCommandInvocation } from './args';
+import { USAGE_FILE, buildCommandInvocation } from './args';
 import type { CommandEvent, CommandPreset, HiveMcpServers } from './preset';
 
 export interface CommandRunOptions {
@@ -145,6 +145,20 @@ export function runCommand(o: CommandRunOptions): RunHandle {
       o.onEvent?.({ kind: 'text', text: `${p.name} error: ${e.message}` });
     }
   };
+  // A CLI that writes its token counts to a file at the end (Copilot): read before the run folder goes.
+  const readUsageFile = (): void => {
+    if (!p.usageFile) return;
+    let json: unknown;
+    try {
+      json = JSON.parse(readFileSync(join(o.runDir, USAGE_FILE), 'utf8'));
+    } catch {
+      return;
+    }
+    const got = safeUsage(p.usageFile.parse, json);
+    if (!got) return;
+    take({ kind: 'usage', usage: got.usage, ...(got.costUsd !== undefined ? { costUsd: got.costUsd } : {}) });
+    for (const m of got.models ?? []) models.add(m);
+  };
   const lines = (chunk: string[]): void => {
     if (p.output.format === 'jsonl') {
       for (const l of chunk) if (l.trim()) for (const e of safeParse(p.output.parse, l.trim())) take(e);
@@ -184,6 +198,7 @@ export function runCommand(o: CommandRunOptions): RunHandle {
       if (timer) clearTimeout(timer);
       if (buf.trim()) lines([buf]);
       buf = '';
+      readUsageFile();
       cleanup();
       const f = final as Extract<CommandEvent, { kind: 'final' }> | null;
       const text = f?.text || texts.join('\n');
@@ -246,6 +261,14 @@ export function runCommand(o: CommandRunOptions): RunHandle {
       killTree(child);
     },
   };
+}
+
+function safeUsage<T>(parse: (json: unknown) => T | null, json: unknown): T | null {
+  try {
+    return parse(json);
+  } catch {
+    return null;
+  }
 }
 
 function safeParse(parse: (line: string) => CommandEvent[], line: string): CommandEvent[] {

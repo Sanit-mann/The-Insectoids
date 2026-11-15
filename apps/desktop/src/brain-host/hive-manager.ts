@@ -37,8 +37,11 @@ import {
   fakeAdapter,
   geminiAdapter,
   opencodeAdapter,
+  COPILOT_PRESET,
+  commandAdapter,
   type LlmAccess,
   type OpenCodeInstall,
+  type CommandInstall,
   type ReadyProvider,
   headlineFrom,
   plannedAdapters,
@@ -223,6 +226,8 @@ export interface HiveManagerOptions {
   geminiAuth?: () => GeminiAuth;
   /** Tests: replace OpenCode detection and the machine-wide config check. */
   opencodeDetect?: () => Promise<OpenCodeInstall>;
+  /** Tests: replace Copilot CLI's detection (else the real program on this computer is checked). */
+  copilotDetect?: () => Promise<CommandInstall>;
   opencodeSystemConfig?: () => string | null;
   /** Tests: a custom engine instead of the demo or Claude. */
   engineOverride?: Engine;
@@ -258,7 +263,7 @@ interface EngineLimits {
 /** The host's own settings file (the project and engine choices); app-wide settings live in main's app.json. */
 interface HostSettings {
   projectPath?: string;
-  engines?: { order: EngineId[]; disabled: EngineId[] };
+  engines?: { order: EngineId[]; disabled: EngineId[]; enabled?: EngineId[] };
   /** Soft caps per engine (Treasurer v2, Phase 2 A5). */
   limits?: Partial<Record<EngineId, EngineLimits>>;
   /** Vendor limits hit: engine -> when the hive may use it again (epoch ms). */
@@ -538,14 +543,23 @@ export class HiveManager {
       ...(this.#o.opencodeDetect ? { detect: this.#o.opencodeDetect } : {}),
       ...(this.#o.opencodeSystemConfig ? { systemConfig: this.#o.opencodeSystemConfig } : {}),
     });
-    if (!scripted) return [claude, gemini, ...plannedAdapters(), opencode];
-    const listedOnly = (a: EngineAdapter): EngineAdapter => ({
+    // GitHub Copilot CLI (Phase 4 B2): its own tools hidden by flag, file and shell work through the hive tools.
+    const copilot = commandAdapter(COPILOT_PRESET, {
+      hiveTools: doors?.hiveTools ?? null,
+      runtime: doors?.runtime ?? { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
+      runBase: join(this.#o.userDataDir, 'hive', 'copilot-runs'),
+      ...(this.#o.copilotDetect ? { detect: this.#o.copilotDetect } : {}),
+    });
+    if (!scripted) return [claude, gemini, ...plannedAdapters(), opencode, copilot];
+    // An engine with no detection (unsupported here, e.g. unguarded) stays as it is, reason and all.
+    const listedOnly = (a: EngineAdapter): EngineAdapter => !a.detect ? a : ({
       id: a.id,
       name: a.name,
       vendor: a.vendor,
       capabilities: a.capabilities,
       models: a.models,
       availableIn: a.availableIn,
+      ...(a.startsOff ? { startsOff: true } : {}),
       install: a.install,
       signIn: a.signIn,
       privacyNote: a.privacyNote,
@@ -560,7 +574,7 @@ export class HiveManager {
             : { state: 'missing', version: null, message: 'Not checked: the scripted engine runs everything here.' },
     });
     // In tests, OpenCode is real only when the test gave it its own detection (a stand-in binary).
-    return [scripted, listedOnly(claude), listedOnly(gemini), ...plannedAdapters(), this.#o.opencodeDetect ? opencode : listedOnly(opencode)];
+    return [scripted, listedOnly(claude), listedOnly(gemini), ...plannedAdapters(), this.#o.opencodeDetect ? opencode : listedOnly(opencode), listedOnly(copilot)];
   }
 
   /** Restore the project and start checking the engine. Never throws: problems become activity lines. */
@@ -1796,12 +1810,17 @@ export class HiveManager {
 
   /** What one question roughly costs and where it runs (the Treasurer's route for the Librarian's role). */
   brainAskEstimate(): BrainAskEstimate {
-    let engine: { id: string; name: string; free: boolean } | null = null;
+    let engine: { id: string; name: string; free: boolean; subscription: boolean } | null = null;
     if (this.#engines.canRoute('librarian')) {
       // The same route the question's run takes, so the engine named here is the one that answers.
       const route = this.#engines.route(ASK_ROUTE, routeCard);
       const a = this.#engines.adapter(route.engine);
-      engine = { id: route.engine, name: a?.name ?? route.engine, free: route.engine === 'fake' || a?.capabilities.free === true };
+      engine = {
+        id: route.engine,
+        name: a?.name ?? route.engine,
+        free: route.engine === 'fake' || a?.capabilities.free === true,
+        subscription: a?.capabilities.subscription === true,
+      };
     }
     const runs = this.#o.brain.outcomes
       .recent(500)
@@ -2300,7 +2319,7 @@ export class HiveManager {
     try {
       const raw = JSON.parse(readFileSync(this.#settingsPath(), 'utf8')) as {
         projectPath?: unknown;
-        engines?: { order?: unknown; disabled?: unknown };
+        engines?: { order?: unknown; disabled?: unknown; enabled?: unknown };
         limits?: unknown;
         limitHits?: unknown;
         librarian?: unknown;
@@ -2311,7 +2330,7 @@ export class HiveManager {
         Array.isArray(v) ? v.flatMap((x) => (EngineIdSchema.safeParse(x).success ? [x as EngineId] : [])) : [];
       return {
         ...(typeof raw.projectPath === 'string' ? { projectPath: raw.projectPath } : {}),
-        ...(raw.engines && typeof raw.engines === 'object' ? { engines: { order: ids(raw.engines.order), disabled: ids(raw.engines.disabled) } } : {}),
+        ...(raw.engines && typeof raw.engines === 'object' ? { engines: { order: ids(raw.engines.order), disabled: ids(raw.engines.disabled), enabled: ids(raw.engines.enabled) } } : {}),
         limits: readLimits(raw.limits),
         limitHits: readHits(raw.limitHits),
         ...readReviewClock(raw.librarian),

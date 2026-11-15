@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { commandAdapter } from '../command/adapter';
+import { fakeCommandPreset } from '../command/fake-preset';
 import { FakeEngine } from '../hive/engine';
 import { type EngineCandidate, pickEngine, routeCard } from '../hive/router';
 import { claudeAdapter, fakeAdapter, plannedAdapters } from './adapters';
@@ -39,6 +41,18 @@ describe('engine registry (Connections 04-D2, Phase 2 A1)', () => {
     expect(r.order).toEqual(['gemini', 'claude']);
     expect(r.isEnabled('claude')).toBe(false);
     expect(r.prefs()).toEqual({ order: ['gemini', 'claude'], disabled: ['claude'] });
+  });
+
+  it('an engine that starts off stays off until switched on, and being on is remembered (Phase 4 B2)', () => {
+    const copilot = { ...adapter('copilot', ready), startsOff: true };
+    const r = new EngineRegistry([adapter('claude', ready), copilot]);
+    expect(r.isEnabled('copilot')).toBe(false);
+    expect(r.prefs()).toEqual({ order: ['claude', 'copilot'], disabled: ['copilot'] });
+    r.setEnabled('copilot', true);
+    expect(r.prefs()).toEqual({ order: ['claude', 'copilot'], disabled: [], enabled: ['copilot'] });
+    expect(new EngineRegistry([adapter('claude', ready), copilot], r.prefs()).isEnabled('copilot')).toBe(true);
+    // Saved before Copilot existed: still off.
+    expect(new EngineRegistry([adapter('claude', ready), copilot], { order: ['claude'], disabled: [] }).isEnabled('copilot')).toBe(false);
   });
 
   it('shows "checking" before the first detection and "unsupported" for engines without an adapter', async () => {
@@ -95,6 +109,30 @@ describe('engine registry (Connections 04-D2, Phase 2 A1)', () => {
     r.setEnabled('gemini', false);
     expect(await r.engine().run(req('gemini')).done).toMatchObject({ ok: false, stderrTail: 'gemini engine is switched off.' });
     expect(b.calls.length).toBe(1);
+  });
+
+  it('names each engine for the hive, so a signed-out pause names the right one', () => {
+    const r = new EngineRegistry([adapter('claude', ready), adapter('gemini', ready)]);
+    const engine = r.engine();
+    expect(engine.name?.('gemini')).toBe('gemini engine');
+    expect(engine.name?.('copilot')).toBeUndefined();
+  });
+
+  it('cards carry the subscription capability from the adapter (no list of ids)', () => {
+    const plan = { ...adapter('copilot', ready), capabilities: { ...adapter('copilot', ready).capabilities, subscription: true } };
+    const claude = claudeAdapter({ hook: { command: 'node', args: [] }, promptDir: '.', detect: async () => ({ status: 'missing' }) });
+    const r = new EngineRegistry([plan, adapter('opencode', ready), claude, ...plannedAdapters()]);
+    expect(r.cards().map((c) => [c.id, c.subscription])).toEqual([['copilot', true], ['opencode', false], ['claude', true], ['codex', true]]);
+  });
+
+  it('a command preset says whether it is a subscription, guarded or listed only', () => {
+    const o = { hiveTools: null, runtime: { command: 'node' }, runBase: '.' };
+    expect(commandAdapter(fakeCommandPreset({ subscription: true }), o).capabilities.subscription).toBe(true);
+    expect(commandAdapter(fakeCommandPreset(), o).capabilities.subscription).toBe(false);
+    // An unguarded preset is listed only, and still says how it is paid for.
+    const unguarded = commandAdapter(fakeCommandPreset({ subscription: true, guard: null }), o);
+    expect(unguarded.detect).toBeUndefined();
+    expect(unguarded.capabilities.subscription).toBe(true);
   });
 
   it('a scripted engine is ready at once and never needs a sign-in', async () => {

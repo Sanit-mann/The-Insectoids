@@ -88,6 +88,9 @@ const main = (prompt, how) => {
     process.exit(0);
   }
   out({ type: 'text', text: 'Done.\nSTATUS: DONE' });
+  // Like Copilot: token counts in a file at the end, when the hive asks for one.
+  const usageFile = flag('--usage-file');
+  if (usageFile) writeFileSync(usageFile, JSON.stringify({ tokens: { in: 700, out: 30 }, model: 'fake-from-file' }));
   out({ type: 'result', ok: true, session: 's-1', turns: 2, ...(process.env.FAKE_COMMAND_COST ? { cost: Number(process.env.FAKE_COMMAND_COST) } : {}) });
   process.exit(0);
 };

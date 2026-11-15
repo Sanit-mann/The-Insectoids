@@ -66,11 +66,12 @@ type Found = { command: string; args: string[] } | { unsupported: string; comman
 export function findCommand(p: CommandPreset, d: Pick<CommandDetectDeps, 'exists' | 'readFile' | 'env' | 'platform'>): Found | null {
   const win = d.platform === 'win32';
   let shim: string | null = null;
+  const ignored = (path: string): boolean => p.ignorePaths?.test(path) ?? false;
   for (const dir of pathDirs(d)) {
     const exe = join(dir, win ? `${p.executable}.exe` : p.executable);
-    if (d.exists(exe)) return { command: exe, args: [] };
+    if (d.exists(exe) && !ignored(exe)) return { command: exe, args: [] };
     const cmd = join(dir, `${p.executable}.cmd`);
-    if (win && !shim && d.exists(cmd)) shim = cmd;
+    if (win && !shim && d.exists(cmd) && !ignored(cmd)) shim = cmd;
   }
   if (!shim) return null;
   let resolved: { command: string; args: string[] } | null;
@@ -78,6 +79,12 @@ export function findCommand(p: CommandPreset, d: Pick<CommandDetectDeps, 'exists
     resolved = resolveCmdShim(d.readFile(shim), join(shim, '..'), d);
   } catch {
     resolved = null;
+  }
+  // An npm launcher whose script only starts a native program (Copilot): start that program directly.
+  const script = resolved?.args[0];
+  if (resolved && script && p.resolveScript) {
+    const native = p.resolveScript(script, d.exists, d.platform);
+    if (native && d.exists(native) && !ignored(native)) resolved = { command: native, args: [] };
   }
   return (
     resolved ?? {

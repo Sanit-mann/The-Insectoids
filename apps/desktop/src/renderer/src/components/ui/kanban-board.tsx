@@ -155,7 +155,7 @@ export function KanbanBoard<T>({ columns, getId, getLabel, renderCard, selectedI
                       variants={cardVariants}
                       initial={reduce ? false : 'initial'}
                       animate="animate"
-                      exit={reduce ? undefined : 'exit'}
+                      {...(reduce ? {} : { exit: 'exit' })}
                       transition={{ ...gentleSpring, layout: springTransition }}
                     >
                       <button

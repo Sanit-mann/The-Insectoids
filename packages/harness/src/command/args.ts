@@ -29,6 +29,8 @@ export interface CommandArgsInput {
 /** Windows command lines stop at 32,767 characters; a prompt this long goes on stdin or in a file instead. */
 export const MAX_PROMPT_ARG = 30_000;
 export const PROMPT_FILE = 'prompt.md';
+/** Where a CLI with a usage file writes its token counts (in the run folder). */
+export const USAGE_FILE = 'usage.json';
 
 /**
  * Builds one run's command line from the preset. Throws (with plain words) instead of building anything
@@ -50,10 +52,14 @@ export function buildCommandInvocation(p: CommandPreset, o: CommandArgsInput): C
     return v;
   };
   const args = [...p.headlessArgs, ...p.guard.disableBuiltinTools, ...(wiring.args ?? [])];
-  if (p.model && o.model) args.push(p.model.flag, value('model', o.model));
-  const effort = o.effort && p.effort?.values[o.effort];
+  if (p.model && o.model) {
+    if (p.model.args) for (const a of p.model.args(value('model', o.model))) args.push(a);
+    else args.push(p.model.flag, value('model', o.model));
+  }
+  const effort = o.effort && !(o.model && p.effort?.skipFor?.(o.model)) && p.effort?.values[o.effort];
   if (p.effort && effort) args.push(p.effort.flag, value('effort', effort));
   if (p.maxTurnsFlag && o.maxTurns) args.push(p.maxTurnsFlag, String(Math.max(1, Math.floor(o.maxTurns))));
+  if (p.usageFile) args.push(p.usageFile.flag, join(o.runDir, USAGE_FILE));
   const bad = args.find((a) => isForbiddenArg(a, p.forbiddenArgs));
   if (bad) throw new Error(`Refusing "${bad}": it would approve every action without the command guard.`);
 

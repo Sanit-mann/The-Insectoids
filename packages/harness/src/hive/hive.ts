@@ -231,6 +231,15 @@ export class Hive {
     return this.#o.route ? this.#o.route(input) : routeCard(input, this.#o.models);
   }
 
+  /**
+   * Why the hive pauses when a run's engine is signed out. It names the engine the run was routed to, since
+   * with several engines "Claude Code is signed out" would send the user to the wrong login.
+   */
+  #signedOutReason(route: Route | undefined): string {
+    const name = (route && this.#o.engine.name?.(route.engine)) || 'The AI engine';
+    return `${name} is signed out. Sign in, then resume the hive.`;
+  }
+
   get paused(): boolean {
     return this.#paused;
   }
@@ -1067,7 +1076,7 @@ export class Hive {
       if (!result.ok) {
         if (result.error === 'auth') {
           brain.taskboard.block(card.id, agentId, 'The AI engine is signed out.');
-          this.pause('Claude Code is signed out. Sign in, then resume the hive.');
+          this.pause(this.#signedOutReason(route));
           return;
         }
         if (result.error === 'quota') {
@@ -1127,6 +1136,8 @@ export class Hive {
         result: card.result ?? '',
         changedFiles: diff.files.map((f) => `${f.path} (${f.status})`),
       });
+      // Kept so a signed-out pause can name the engine this check ran on.
+      const route = this.#route({ role: 'inspector', priority: card.priority, attempts: 0 });
       const result = await this.#runEngine(goal.id, card.id, {
         role: 'inspector',
         agentId: 'Inspector',
@@ -1134,12 +1145,12 @@ export class Hive {
         cwd: cardPath,
         system: prompt.system,
         task: prompt.task,
-        route: this.#route({ role: 'inspector', priority: card.priority, attempts: 0 }),
+        route,
         guard: { workspace: cardPath, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
       }, (stop) => (stopRun = stop));
 
       if (!result.ok && result.error === 'auth') {
-        this.pause('Claude Code is signed out. Sign in, then resume the hive.');
+        this.pause(this.#signedOutReason(route));
         return;
       }
       if (!result.ok && result.error === 'quota') {

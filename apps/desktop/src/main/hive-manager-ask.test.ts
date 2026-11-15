@@ -207,13 +207,20 @@ describe('the ask estimate (plain code)', () => {
   const run = (engine: string, tokens: number, costUsd = 0, role = 'librarian') => ({ role, engine, tokens, costUsd });
 
   it("gives a range around the median of the engine's own Librarian runs", () => {
-    const e = askEstimate({ project: true, engine: { id: 'claude', name: 'Claude Code', free: false }, runs: [run('claude', 4_000), run('claude', 6_000), run('claude', 5_000), run('claude', 90_000, 0, 'queen')] });
+    const e = askEstimate({ project: true, engine: { id: 'claude', name: 'Claude Code', free: false, subscription: true }, runs: [run('claude', 4_000), run('claude', 6_000), run('claude', 5_000), run('claude', 90_000, 0, 'queen')] });
     expect(e).toMatchObject({ canAsk: true, free: false, tokensLow: 2_500, tokensHigh: 7_500, costUsdHigh: null, message: 'About 2,500–7,500 tokens per question on Claude Code (your subscription).' });
   });
 
   it('prices a per-token engine from its own past runs', () => {
-    const e = askEstimate({ project: true, engine: { id: 'opencode', name: 'OpenCode', free: false }, runs: [run('opencode', 10_000, 0.1, 'builder')] });
+    const e = askEstimate({ project: true, engine: { id: 'opencode', name: 'OpenCode', free: false, subscription: false }, runs: [run('opencode', 10_000, 0.1, 'builder')] });
     expect(e).toMatchObject({ tokensLow: 3_000, tokensHigh: 8_000, costUsdHigh: 0.08, message: 'About 3,000–8,000 tokens per question on OpenCode, up to about $0.08 (billed by your API provider).' });
+  });
+
+  it('says "your subscription" for any engine whose capabilities say so, not a fixed list of ids', () => {
+    const copilot = askEstimate({ project: true, engine: { id: 'copilot', name: 'GitHub Copilot CLI', free: false, subscription: true }, runs: [] });
+    expect(copilot).toMatchObject({ costUsdHigh: null, message: 'About 3,000–8,000 tokens per question on GitHub Copilot CLI (your subscription).' });
+    const unmarked = askEstimate({ project: true, engine: { id: 'claude', name: 'Claude Code', free: false, subscription: false }, runs: [] });
+    expect(unmarked.message).toBe('About 3,000–8,000 tokens per question on Claude Code (billed by your API provider per token).');
   });
 
   it('says why when nothing can answer', () => {

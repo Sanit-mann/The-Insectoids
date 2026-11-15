@@ -3,7 +3,7 @@ import { SAMPLE_GOAL_TEXT } from './practice-project';
 import { MIN_RUNS_PER_ROLE, type PastRun, TYPICAL_SMALL_GOAL, estimateSample } from './setup-sample';
 
 /** The sample goal's estimate (Onboarding 08-D8; Phase 2 C5): shown before anything runs. */
-const claude = { id: 'claude' as const, name: 'Claude Code', state: 'ready' as const };
+const claude = { id: 'claude' as const, name: 'Claude Code', state: 'ready' as const, subscription: true };
 const base = { engine: claude, busy: false, practicePath: '/data/practice-project' };
 const runs = (role: string, tokens: number[], engine = 'claude', costUsd = 0): PastRun[] => tokens.map((t) => ({ role, engine, tokens: t, costUsd }));
 
@@ -31,6 +31,16 @@ describe('sample goal estimate', () => {
     const e = estimateSample({ ...base, runs: [] });
     expect([e.costUsdLow, e.costUsdHigh]).toEqual([null, null]);
     expect(e.note).toBe('Uses your Claude Code subscription; no extra charge, it counts toward its usage limits.');
+  });
+
+  it('reads the subscription from the engine, not from a list of ids', () => {
+    // A new plan engine (e.g. a Copilot preset) gets the subscription wording with no change here.
+    const copilot = estimateSample({ ...base, engine: { id: 'copilot', name: 'GitHub Copilot CLI', state: 'ready', subscription: true }, runs: [] });
+    expect(copilot.note).toBe('Uses your GitHub Copilot CLI subscription; no extra charge, it counts toward its usage limits.');
+    expect([copilot.costUsdLow, copilot.costUsdHigh]).toEqual([null, null]);
+    // And an engine that does not say it is on a plan is never assumed to be, even with a familiar id.
+    const unmarked = estimateSample({ ...base, engine: { id: 'claude', name: 'Claude Code', state: 'ready' }, runs: [] });
+    expect(unmarked.note).toMatch(/Billed by your API provider per token/);
   });
 
   it("prices an API provider engine from its own past runs' reported cost", () => {

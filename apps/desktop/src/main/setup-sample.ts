@@ -18,8 +18,6 @@ const LOW_FACTOR = 0.8;
 const HIGH_FACTOR = 2.5;
 /** Past runs needed per role (Queen, insect, Inspector) before the hive trusts its own numbers. */
 export const MIN_RUNS_PER_ROLE = 2;
-/** Engines on a subscription: no per-token price, the run counts toward the plan's limits. */
-const SUBSCRIPTION = new Set(['claude', 'gemini', 'codex']);
 const CASTES = new Set<string>(CasteSchema.options);
 
 const median = (xs: number[]): number => {
@@ -32,8 +30,11 @@ const cents = (usd: number): number => Math.round(usd * 100) / 100;
 
 export function estimateSample(i: {
   runs: readonly PastRun[];
-  /** The hive's default engine card, or null when none is ready. */
-  engine: Pick<EngineCard, 'id' | 'name' | 'state'> | null;
+  /**
+   * The hive's default engine card, or null when none is ready. `subscription` comes from the engine's own
+   * capabilities (a plan engine: no per-token price, the run counts toward the plan's limits).
+   */
+  engine: Pick<EngineCard, 'id' | 'name' | 'state' | 'subscription'> | null;
   /** A goal is planning, waiting for approval or running. */
   busy: boolean;
   practicePath: string;
@@ -63,7 +64,7 @@ export function estimateSample(i: {
   let note: string;
   if (!engine) note = 'No AI engine is ready yet, so nothing can run.';
   else if (engine.state === 'fake' || engine.id === 'fake') note = 'The scripted test engine runs this: it spends no tokens and costs nothing.';
-  else if (SUBSCRIPTION.has(engine.id)) note = `Uses your ${engine.name} subscription; no extra charge, it counts toward its usage limits.`;
+  else if (engine.subscription === true) note = `Uses your ${engine.name} subscription; no extra charge, it counts toward its usage limits.`;
   else {
     // API providers bill per token: price it from this engine's own past runs when they reported a cost.
     const priced = used.filter((r) => r.engine === engine.id && r.costUsd > 0);

@@ -20,6 +20,11 @@ export interface EngineCapabilities {
    * first (02-D9 P1: the cheapest model that can do it).
    */
   free?: boolean;
+  /**
+   * Paid by the user's plan (Claude, Copilot, …): no extra charge per run, it counts toward the plan's usage
+   * limits. Estimates say "your subscription" instead of a price.
+   */
+  subscription?: boolean;
 }
 
 /** Result of checking an engine on this computer. */
@@ -40,6 +45,11 @@ export interface EngineAdapter {
   models: ModelTiers | null;
   /** e.g. "Phase 2 · step A2" when this build has no adapter yet. Such engines are never detected or run. */
   availableIn: string | null;
+  /**
+   * Off until the user switches it on in Connections (engines added after the first release, e.g. Copilot):
+   * installing a CLI for something else must never quietly hand it the hive's work or the user's allowance.
+   */
+  startsOff?: boolean;
   /** Why it can't run, in plain words, shown instead of the generic "not supported yet" line (e.g. no guard). */
   unavailableReason?: string;
   install: { command: string; note: string } | null;
@@ -70,6 +80,8 @@ export interface EnginePrefs {
   order: EngineId[];
   /** Engines the user switched off. */
   disabled: EngineId[];
+  /** Engines that start off (`startsOff`) and the user switched on. */
+  enabled?: EngineId[];
 }
 
 const isReady = (state: EngineCard['state']): boolean => state === 'ready' || state === 'fake';
@@ -91,6 +103,7 @@ export class EngineRegistry {
     for (const a of adapters) this.#adapters.set(a.id, a);
     this.#order = adapters.map((a) => a.id);
     if (prefs.order) this.setOrder(prefs.order);
+    for (const a of adapters) if (a.startsOff && !prefs.enabled?.includes(a.id)) this.#disabled.add(a.id);
     for (const id of prefs.disabled ?? []) if (this.#adapters.has(id)) this.#disabled.add(id);
     for (const a of adapters) if (a.detect) this.#checking.add(a.id);
   }
@@ -100,7 +113,8 @@ export class EngineRegistry {
   }
 
   prefs(): EnginePrefs {
-    return { order: this.order, disabled: this.#order.filter((id) => this.#disabled.has(id)) };
+    const enabled = this.#order.filter((id) => this.#adapters.get(id)?.startsOff && !this.#disabled.has(id));
+    return { order: this.order, disabled: this.#order.filter((id) => this.#disabled.has(id)), ...(enabled.length ? { enabled } : {}) };
   }
 
   adapter(id: EngineId): EngineAdapter | undefined {
@@ -243,6 +257,8 @@ export class EngineRegistry {
         availableIn: a.availableIn,
         guard: a.capabilities.guard,
         reportsCost: a.capabilities.reportsCost,
+        // From the adapter, so the estimates know a plan engine without a hard-coded list of ids.
+        subscription: a.capabilities.subscription === true,
         models: a.models,
         install: a.install,
         signIn: a.signIn,
@@ -266,6 +282,11 @@ export class EngineRegistry {
 /** Dispatches each run to the adapter named in its route; a not-ready engine fails the run as signed out. */
 export class RegistryEngine implements Engine {
   constructor(private readonly registry: EngineRegistry) {}
+
+  /** The adapter's name, so the hive's pause message names the engine the failing run was routed to. */
+  name(id: EngineId): string | undefined {
+    return this.registry.adapter(id)?.name;
+  }
 
   run(req: EngineRequest): EngineRun {
     const id = req.route.engine;

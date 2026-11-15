@@ -32,7 +32,8 @@ export function claudeAdapter(o: ClaudeAdapterOptions): EngineAdapter {
     id: 'claude',
     name: 'Claude Code',
     vendor: 'Anthropic',
-    capabilities: { guard: 'hook', mcp: true, effort: EFFORTS, reportsCost: true },
+    // Runs on the user's Claude plan: no per-run charge, it counts toward the plan's limits.
+    capabilities: { guard: 'hook', mcp: true, effort: EFFORTS, reportsCost: true, subscription: true },
     models: { strongest: 'opus', standard: 'sonnet', light: 'haiku' },
     availableIn: null,
     install: {
@@ -100,7 +101,8 @@ export function geminiAdapter(o: GeminiAdapterOptions): EngineAdapter {
     name: 'Gemini CLI',
     vendor: 'Google',
     get capabilities() {
-      return { guard: hasTools() ? ('policy-and-tools' as const) : ('read-only' as const), mcp: true, effort: EFFORTS, reportsCost: false };
+      // Counted as a subscription (as before): estimates say "your subscription", not a per-token price.
+      return { guard: hasTools() ? ('policy-and-tools' as const) : ('read-only' as const), mcp: true, effort: EFFORTS, reportsCost: false, subscription: true };
     },
     models: { strongest: 'pro', standard: 'flash', light: 'flash-lite' },
     availableIn: null,
@@ -187,7 +189,8 @@ export function plannedAdapters(): EngineAdapter[] {
       id: 'codex',
       name: 'Codex CLI',
       vendor: 'OpenAI',
-      capabilities: { guard: null, mcp: true, effort: EFFORTS, reportsCost: false },
+      // Runs on the user's ChatGPT plan once supported.
+      capabilities: { guard: null, mcp: true, effort: EFFORTS, reportsCost: false, subscription: true },
       models: null,
       availableIn: 'a later Phase 2 step (needs a ChatGPT plan to test with)',
       install: { command: 'npm install -g @openai/codex', note: "OpenAI's official package." },

@@ -28,7 +28,18 @@ test('lists every engine: the scripted one ready, Claude Code, Gemini CLI and Op
     ['codex', 'unsupported'],
     // A real engine since A4; in scripted mode it is listed but never checked or run.
     ['opencode', 'missing'],
+    // Phase 4 B2: on the command engine; listed but never checked or run here, and off until switched on.
+    ['copilot', 'missing'],
   ]);
+  expect(s.engines.find((e) => e.id === 'copilot')).toMatchObject({
+    name: 'GitHub Copilot CLI',
+    vendor: 'GitHub',
+    enabled: false,
+    guard: 'policy-and-tools',
+    reportsCost: false,
+    install: { command: 'npm install -g @github/copilot@1.0.105' },
+    signIn: { command: 'copilot login' },
+  });
   const gemini = s.engines.find((e) => e.id === 'gemini')!;
   // A real engine since A2: guarded by the per-run policy plus the hive tools; never checked or run in scripted mode.
   expect(gemini).toMatchObject({ vendor: 'Google', availableIn: null, guard: 'policy-and-tools', reportsCost: false, models: { strongest: 'pro', standard: 'flash', light: 'flash-lite' } });
@@ -42,7 +53,7 @@ test('switching engines off and on, and reordering them', async () => {
   expect(await command({ type: 'setEngineEnabled', engineId: 'gemini', enabled: false })).toEqual({ ok: true });
   expect(await command({ type: 'setEngineOrder', order: ['fake', 'opencode'] })).toEqual({ ok: true });
   let s = await snap();
-  expect(s.engines.map((e) => e.id)).toEqual(['fake', 'opencode', 'claude', 'gemini', 'codex']);
+  expect(s.engines.map((e) => e.id)).toEqual(['fake', 'opencode', 'claude', 'gemini', 'codex', 'copilot']);
   expect(s.engines.find((e) => e.id === 'gemini')!.enabled).toBe(false);
   expect(await command({ type: 'setEngineEnabled', engineId: 'gemini', enabled: true })).toEqual({ ok: true });
   s = await snap();

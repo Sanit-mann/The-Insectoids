@@ -72,6 +72,13 @@ export interface CommandPreset {
   vendor: string;
   /** Program name on PATH, without extension (e.g. "copilot"). */
   executable: string;
+  /** Programs of that name that aren't this CLI (e.g. VS Code's `copilot` stand-in): skipped when searching PATH. */
+  ignorePaths?: RegExp;
+  /**
+   * The native program behind the CLI's npm launcher script, when it has one: the hive then starts it
+   * directly (no Node.js hop in between). Null: start the script with Node.js as usual.
+   */
+  resolveScript?: (script: string, exists: (path: string) => boolean, platform: NodeJS.Platform) => string | null;
   /** e.g. { args: ['--version'], pattern: /(\d+\.\d+\.\d+)/, minimum: '1.2.0' }; the pattern's group 1 is the version. */
   version: { args: readonly string[]; pattern: RegExp; minimum: string };
   /** The official install command, shown for the user to copy (or run with consent). */
@@ -82,12 +89,25 @@ export interface CommandPreset {
   prompt: PromptPassing;
   /** Always-on flags for a headless, non-interactive run (never anything that auto-approves without the guard). */
   headlessArgs: readonly string[];
-  /** The model flag and the CLI's model names by tier; null when it has no model choice. */
-  model: { flag: string; tiers: ModelTiers } | null;
+  /**
+   * The model flag and the CLI's model names by tier; null when it has no model choice. `args`, when set,
+   * turns a tier's name into the arguments themselves (e.g. "auto:balance" → --model auto --auto-tier balance).
+   */
+  model: { flag: string; tiers: ModelTiers; args?: (model: string) => string[] } | null;
   /** The effort flag and the CLI's word for each of the hive's levels (a level left out passes nothing). */
-  effort?: { flag: string; values: Partial<Record<Effort, string>> };
+  effort?: {
+    flag: string;
+    values: Partial<Record<Effort, string>>;
+    /** Models that take no effort flag (Copilot's Auto refuses one): nothing is passed for them. */
+    skipFor?: (model: string) => boolean;
+  };
   /** A turn-limit flag, if the CLI has one. */
   maxTurnsFlag?: string;
+  /**
+   * A CLI that writes its token counts to a file at the end instead of in its output: the flag that names the
+   * file (in the run folder) and how to read it. Null from parse = nothing usable.
+   */
+  usageFile?: { flag: string; parse: (json: unknown) => { usage: Partial<Usage>; models?: string[]; costUsd?: number } | null };
   /** How to read stdout: plain text, or JSON lines through the preset's own parser. */
   output: { format: 'text' } | { format: 'jsonl'; parse: (line: string) => CommandEvent[] };
   /**
@@ -99,6 +119,8 @@ export interface CommandPreset {
   /** Flags that auto-approve or bypass safety; the run is refused if any argument is one of them. */
   forbiddenArgs: readonly string[];
   reportsCost: boolean;
+  /** Runs are paid by the user's plan (no extra charge; they count toward its usage limits). */
+  subscription?: boolean;
   /** When it reports no cost: USD per million tokens for the hive's estimate (absent: 0, marked estimated). */
   pricePerMTok?: { input: number; output: number };
   /** Text in its output or errors that means it is signed out. */

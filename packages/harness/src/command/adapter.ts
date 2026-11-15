@@ -41,12 +41,14 @@ export function commandAdapter(preset: CommandPreset, o: CommandAdapterOptions):
     install: preset.install,
     signIn: preset.signIn,
     privacyNote: preset.privacyNote,
+    // Every engine on the command engine came after the first release: off until the user switches it on.
+    startsOff: true,
   };
   const why = unguardedReason(preset);
   if (why) {
     return {
       ...base,
-      capabilities: { guard: null, mcp: Boolean(preset.guard?.wireMcp), effort, reportsCost: preset.reportsCost, free: false },
+      capabilities: { guard: null, mcp: Boolean(preset.guard?.wireMcp), effort, reportsCost: preset.reportsCost, free: false, subscription: preset.subscription === true },
       availableIn: CONTAINER_MODE,
       unavailableReason: why,
     };
@@ -60,7 +62,7 @@ export function commandAdapter(preset: CommandPreset, o: CommandAdapterOptions):
   return {
     ...base,
     get capabilities(): EngineCapabilities {
-      return { guard: canWire && hasTools() ? 'policy-and-tools' : 'read-only', mcp: canWire, effort, reportsCost: preset.reportsCost, free: false };
+      return { guard: canWire && hasTools() ? 'policy-and-tools' : 'read-only', mcp: canWire, effort, reportsCost: preset.reportsCost, free: false, subscription: preset.subscription === true };
     },
     availableIn: null,
     async detect(): Promise<EngineDetection> {

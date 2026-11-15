@@ -9,7 +9,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { type EngineRequest, FakeEngine, type FakeReply } from './engine';
 import { Hive, type HiveEvent } from './hive';
 import { Library } from './prompts';
+import { routeCard } from './router';
 
+const MODELS = { strongest: 'opus', standard: 'sonnet', light: 'haiku' };
 const library = new Library(fileURLToPath(new URL('../../../../library', import.meta.url)));
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 const read = (p: string) => readFileSync(p, 'utf8').replace(/\r\n/g, '\n');
@@ -319,7 +321,50 @@ describe('Foreman, Treasurer and Watchdog reflexes', () => {
     await hive.submitGoal('g');
     await hive.runUntilIdle();
     expect(hive.paused).toBe(true);
-    expect(events.some((e) => e.type === 'paused')).toBe(true);
+    // A runner that can't name its engines gets the neutral wording, never "Claude Code".
+    expect(events.find((e) => e.type === 'paused')?.message).toBe('The AI engine is signed out. Sign in, then resume the hive.');
     expect(brain.taskboard.list({ status: 'blocked' })).toHaveLength(1);
+  });
+
+  it('names the engine the signed-out insect run was routed to', async () => {
+    const engine = Object.assign(
+      new FakeEngine((req) => (req.role === 'queen' ? planReply([[card('C-01', 'coder')]]) : { text: 'not logged in', ok: false, error: 'auth' })),
+      { name: (id: string) => (id === 'copilot' ? 'GitHub Copilot CLI' : id === 'claude' ? 'Claude Code' : undefined) },
+    );
+    // The Queen plans on Claude Code; the coder's card goes to Copilot, which is signed out.
+    const hive = makeHive(engine, {
+      route: (i) => routeCard(i, MODELS, i.role === 'queen' ? 'claude' : 'copilot'),
+    });
+    await hive.submitGoal('g');
+    await hive.runUntilIdle();
+    expect(hive.paused).toBe(true);
+    expect(events.find((e) => e.type === 'paused')?.message).toBe('GitHub Copilot CLI is signed out. Sign in, then resume the hive.');
+  });
+
+  it('names the engine the signed-out Inspector run was routed to', async () => {
+    const engine = Object.assign(
+      new FakeEngine((req) => {
+        if (req.role === 'queen') return planReply([[card('C-01', 'coder')]]);
+        if (req.role === 'inspector') return { text: 'please log in', ok: false, error: 'auth' };
+        return { text: 'STATUS: DONE', effects: (cwd) => writeFileSync(join(cwd, 'x.txt'), 'x') };
+      }),
+      { name: (id: string) => (id === 'gemini' ? 'Gemini CLI' : 'Claude Code') },
+    );
+    const hive = makeHive(engine, { route: (i) => routeCard(i, MODELS, i.role === 'inspector' ? 'gemini' : 'claude') });
+    await hive.submitGoal('g');
+    await hive.runUntilIdle();
+    expect(hive.paused).toBe(true);
+    expect(events.find((e) => e.type === 'paused')?.message).toBe('Gemini CLI is signed out. Sign in, then resume the hive.');
+  });
+
+  it('falls back to "The AI engine" when the runner does not know the routed engine', async () => {
+    const engine = Object.assign(
+      new FakeEngine((req) => (req.role === 'queen' ? planReply([[card('C-01', 'coder')]]) : { text: 'nope', ok: false, error: 'auth' })),
+      { name: () => undefined },
+    );
+    const hive = makeHive(engine);
+    await hive.submitGoal('g');
+    await hive.runUntilIdle();
+    expect(events.find((e) => e.type === 'paused')?.message).toBe('The AI engine is signed out. Sign in, then resume the hive.');
   });
 });
