@@ -5,17 +5,17 @@
  * ones are faded. Lines come only from real links. Filters by shelf, kind and date; pan, zoom, a
  * keyboard path through the nodes, and the same records as a plain list.
  *
- * Reuses: shadcn `button` (zoom controls), our connections `Switch` (include archived) and
+ * Reuses: shadcn `button` (zoom controls), the shared filters (GraphFilters: our connections `Switch`) and
  * `InlineError`. Custom: the graph itself and its layout (force-layout.ts).
  */
 import { Brain, List, Maximize, Minus, Network, Plus, RefreshCw } from 'lucide-react';
 import { type KeyboardEvent, type PointerEvent, useEffect, useMemo, useRef, useState } from 'react';
-import type { BrainGraphNode, BrainGraphRequest, BrainGraphView, RecordKind } from '@insectoids/shared';
+import type { BrainGraphNode, BrainGraphView } from '@insectoids/shared';
 import { InlineError } from '@/components/changes/CardChanges';
-import { Switch } from '@/components/connections/Switch';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { type Point, bounds, forceLayout } from './force-layout';
+import { GraphFilters, KindMark, useGraphFilters } from './GraphFilters';
 import { KINDS, KIND_MARK, TRUST, kindInfo, shapePath } from './kinds';
 import { useLive } from './useLive';
 
@@ -25,20 +25,6 @@ const MIN_K = 0.2;
 const MAX_K = 4;
 /** Titles drawn next to the most important nodes; the rest show theirs on hover or focus. */
 const LABELLED = 10;
-const DAY = 24 * 60 * 60_000;
-
-type Scope = NonNullable<BrainGraphRequest['scope']>;
-const SCOPES: Array<{ id: Scope; label: string }> = [
-  { id: 'project', label: 'This project' },
-  { id: 'global', label: 'Global' },
-  { id: 'all', label: 'All' },
-];
-const DATES: Array<{ days: number; label: string }> = [
-  { days: 0, label: 'Any time' },
-  { days: 7, label: 'Last 7 days' },
-  { days: 30, label: 'Last 30 days' },
-  { days: 90, label: 'Last 90 days' },
-];
 
 interface Transform {
   x: number;
@@ -58,22 +44,8 @@ const short = (s: string, max = 26): string => {
   return `${space > max / 2 ? cut.slice(0, space) : cut}…`;
 };
 
-/** A small mark for the legend and the list: the kind's shape in its colour. */
-export function KindMark({ kind, dashed = false, size = 16 }: { kind: RecordKind; dashed?: boolean; size?: number }) {
-  const m = KIND_MARK[kind];
-  return (
-    <svg aria-hidden="true" className="shrink-0" height={size} viewBox="-10 -10 20 20" width={size}>
-      <path
-        d={shapePath(m.shape, 6.5)}
-        fill={m.color}
-        fillOpacity={dashed ? 0.25 : 0.9}
-        stroke={m.color}
-        strokeDasharray={dashed ? '2.5 2' : undefined}
-        strokeWidth={dashed ? 1.6 : 1}
-      />
-    </svg>
-  );
-}
+/** Re-exported for the dashboard, which imports it from here. */
+export { KindMark };
 
 /** The SVG keeps its aspect ratio ("meet"): one viewBox unit per `1/u` pixels, centred in the box. */
 function geometry(box: { width: number; height: number }): { u: number; offX: number; offY: number } {
@@ -90,89 +62,24 @@ function fit(points: Map<string, Point>, r: (id: string) => number): Transform {
 }
 
 export function GraphView({ openId, onOpen, refreshKey }: { openId: string | null; onOpen: (id: string) => void; refreshKey: number }) {
-  const [scope, setScope] = useState<Scope>('project');
-  const [kinds, setKinds] = useState<RecordKind[]>([]);
-  const [days, setDays] = useState(0);
-  const [archived, setArchived] = useState(false);
+  const f = useGraphFilters();
   const [asList, setAsList] = useState(false);
-  // "since" is fixed when the date filter is picked, so the request (and the layout) stays stable.
-  const [since, setSince] = useState<number | undefined>(undefined);
-
-  const req: BrainGraphRequest = {
-    scope,
-    ...(kinds.length ? { kinds } : {}),
-    ...(since !== undefined ? { since } : {}),
-    ...(archived ? { includeArchived: true } : {}),
-  };
+  const req = f.req;
   const key = JSON.stringify([req, refreshKey]);
   const { live, reload } = useLive<BrainGraphView>(key, () => window.insectoids.hive.brainGraph(req));
 
-  const toggleKind = (k: RecordKind): void => setKinds((ks) => (ks.includes(k) ? ks.filter((x) => x !== k) : [...ks, k]));
-  const pickDays = (d: number): void => {
-    setDays(d);
-    setSince(d ? Date.now() - d * DAY : undefined);
-  };
-
   return (
     <section aria-label="Brain graph" className="flex min-w-0 flex-col gap-3" data-testid="brain-graph">
-      <div className="flex flex-wrap items-center gap-3">
-        <div aria-label="Which shelf" className="flex gap-1" role="group">
-          {SCOPES.map((s) => (
-            <button
-              aria-pressed={scope === s.id}
-              className={cn(
-                'min-h-10 rounded-[10px] border px-3 text-sm',
-                scope === s.id ? 'border-honey bg-active font-medium text-honey-text' : 'border-line text-muted hover:text-text',
-              )}
-              key={s.id}
-              onClick={() => setScope(s.id)}
-              type="button"
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-        <label className="flex items-center gap-2 text-sm text-muted">
-          <span>Changed</span>
-          <select
-            className="min-h-10 rounded-[10px] border border-line bg-surface px-2 text-text focus-visible:outline-2 focus-visible:outline-honey"
-            data-testid="graph-date"
-            onChange={(e) => pickDays(Number(e.target.value))}
-            value={days}
-          >
-            {DATES.map((d) => (
-              <option key={d.days} value={d.days}>
-                {d.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <div className="flex items-center gap-2">
-          <Switch checked={archived} label="Include archived" onChange={setArchived} />
-          <span className="text-xs text-muted">Include archived</span>
-        </div>
-        <Button aria-pressed={asList} className="ml-auto" data-testid="graph-list-toggle" onClick={() => setAsList((v) => !v)} size="sm" variant="outline">
-          {asList ? <Network aria-hidden="true" /> : <List aria-hidden="true" />}
-          {asList ? 'Show as graph' : 'Show as list'}
-        </Button>
-      </div>
-      <div aria-label="Filter by kind" className="flex flex-wrap gap-1.5" role="group">
-        {KINDS.map(({ kind, label }) => {
-          const on = kinds.includes(kind);
-          return (
-            <button
-              aria-pressed={on}
-              className={cn('inline-flex min-h-8 items-center gap-1.5 rounded-full border px-3 text-xs', on ? 'border-honey text-honey-text' : 'border-line text-muted hover:text-text')}
-              key={kind}
-              onClick={() => toggleKind(kind)}
-              type="button"
-            >
-              <KindMark kind={kind} size={12} />
-              {label}
-            </button>
-          );
-        })}
-      </div>
+      <GraphFilters
+        dateTestId="graph-date"
+        extra={
+          <Button aria-pressed={asList} className="ml-auto" data-testid="graph-list-toggle" onClick={() => setAsList((v) => !v)} size="sm" variant="outline">
+            {asList ? <Network aria-hidden="true" /> : <List aria-hidden="true" />}
+            {asList ? 'Show as graph' : 'Show as list'}
+          </Button>
+        }
+        f={f}
+      />
 
       {live.state === 'loading' && <div aria-busy="true" className="h-[420px] animate-pulse rounded-2xl border border-line bg-surface" />}
       {live.state === 'error' && <InlineError message={`Could not draw the graph: ${live.message}`} onRetry={reload} />}

@@ -56,6 +56,11 @@ export type HostMethod =
   | 'e2eAgentEdit'
   /** e2e only (C2): plant a record with a secret in its body, past the Brain's guard. */
   | 'e2ePlantSecret'
+  /**
+   * e2e only (Phase 4 A2, the Brain Globe): params { count, linksPerRecord, shelf? }, result { created, links, total, ms }.
+   * Many records with `relates_to` links between them, for the Globe's big-Brain test.
+   */
+  | 'e2eSeedRecords'
   // Library screen (Phase 2 C1): the castes and the catalog, read-only.
   | 'libraryCastes'
   | 'librarySearch'

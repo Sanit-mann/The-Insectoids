@@ -254,6 +254,14 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
       }
       return { id };
     }
+    case 'e2eSeedRecords': {
+      // e2e only (Phase 4 A2): many linked records for the Globe. Refused unless this host runs under INSECTOIDS_E2E=1
+      // (checked again in the HiveManager, which also checks the numbers).
+      if (process.env['INSECTOIDS_E2E'] !== '1') throw new Error('Only available in end-to-end tests.');
+      const p = params as { count?: unknown; linksPerRecord?: unknown; shelf?: unknown } | null;
+      if (typeof p?.count !== 'number' || typeof p.linksPerRecord !== 'number') throw new Error('e2eSeedRecords needs a count and linksPerRecord.');
+      return hive.e2eSeedRecords({ count: p.count, linksPerRecord: p.linksPerRecord, ...(p.shelf === 'global' ? { shelf: 'global' as const } : {}) });
+    }
     // Library screen (Phase 2 C1): requests are validated in main and parsed again in the HiveManager.
     case 'libraryCastes':
       return hive.libraryCastes();

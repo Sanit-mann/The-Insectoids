@@ -167,4 +167,41 @@ describe('graph and dashboard', () => {
     expect(brain.history(fact!.id).at(-1)).toMatchObject({ changedBy: 'e2e-agent' });
     expect(() => m.e2eAgentEdit(fact!.id, 'again')).toThrow(/end-to-end/);
   });
+
+  it('e2e big seed (the Globe): refused outside e2e; in e2e, linked records of mixed kinds that the graph sees', async () => {
+    const m = await make();
+    const prev = process.env['INSECTOIDS_E2E'];
+    delete process.env['INSECTOIDS_E2E'];
+    try {
+      expect(() => m.e2eSeedRecords({ count: 10, linksPerRecord: 1.5 })).toThrow(/end-to-end/);
+      expect(m.brainGraph({ scope: 'all' }).nodes).toHaveLength(0);
+      process.env['INSECTOIDS_E2E'] = '1';
+      expect(() => m.e2eSeedRecords({ count: 0, linksPerRecord: 1 })).toThrow(/count/);
+      expect(() => m.e2eSeedRecords({ count: 5001, linksPerRecord: 1 })).toThrow(/count/);
+      expect(() => m.e2eSeedRecords({ count: 10, linksPerRecord: 9 })).toThrow(/linksPerRecord/);
+      // Two chunks, like main sends them: the second links back into the first.
+      const a = m.e2eSeedRecords({ count: 150, linksPerRecord: 1.5 });
+      const b = m.e2eSeedRecords({ count: 150, linksPerRecord: 1.5 });
+      expect(a).toMatchObject({ created: 150, total: 150 });
+      expect(b).toMatchObject({ created: 150, total: 300 });
+      const links = a.links + b.links;
+      // ~1.5 per record (the first has nothing to link to; a repeated target counts once).
+      expect(links).toBeGreaterThan(300);
+      expect(links).toBeLessThan(500);
+      const g = BrainGraphViewSchema.parse(m.brainGraph({ scope: 'project', limit: 5000 }));
+      expect(g.nodes).toHaveLength(300);
+      expect(g.edges).toHaveLength(links);
+      expect(g.edges.every((e) => e.rel === 'relates_to')).toBe(true);
+      expect(new Set(g.nodes.map((n) => n.kind))).toEqual(new Set(['fact', 'decision', 'task', 'update', 'agent_memory']));
+      expect(g.nodes.map((n) => n.shelf).every((s) => s === 'site')).toBe(true);
+      expect(g.nodes.some((n) => n.title === 'Seed fact 5')).toBe(true);
+      expect(m.brainGraph({ scope: 'project', kinds: ['task'], limit: 5000 }).nodes).toHaveLength(60);
+      // On Global when asked.
+      expect(m.e2eSeedRecords({ count: 5, linksPerRecord: 0, shelf: 'global' })).toMatchObject({ created: 5, links: 0, total: 305 });
+      expect(m.brainGraph({ scope: 'global', limit: 5000 }).nodes).toHaveLength(5);
+    } finally {
+      if (prev === undefined) delete process.env['INSECTOIDS_E2E'];
+      else process.env['INSECTOIDS_E2E'] = prev;
+    }
+  });
 });

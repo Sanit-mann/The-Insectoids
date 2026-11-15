@@ -1,4 +1,4 @@
-import { Brain, Code2, LayoutDashboard, NotebookText, Network, Search } from 'lucide-react';
+import { Brain, Code2, Globe, LayoutDashboard, NotebookText, Network, Search } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { BrainHitView, RecordKind } from '@insectoids/shared';
 import { AskBrain } from '@/components/brain/AskBrain';
@@ -6,6 +6,7 @@ import { BrainCareRow } from '@/components/brain/BrainCare';
 import { BrainReader } from '@/components/brain/BrainReader';
 import { CodeMapView } from '@/components/brain/CodeMapView';
 import { DashboardView } from '@/components/brain/DashboardView';
+import { GlobeView } from '@/components/brain/GlobeView';
 import { GraphView } from '@/components/brain/GraphView';
 import { KINDS, kindInfo } from '@/components/brain/kinds';
 import { HitStatusBadge } from '@/components/brain/HitStatus';
@@ -26,17 +27,18 @@ type Results = { state: 'idle' } | { state: 'loading' } | { state: 'error'; mess
  * filter by kind; read a record with its trust, versions and links. Above them (B3): Brain health, the
  * Librarian and the lessons the hive learned. B5: the graph, the dashboard, and editing in the reader.
  */
-type BrainView = 'notes' | 'graph' | 'dashboard' | 'code';
+type BrainView = 'notes' | 'graph' | 'globe' | 'dashboard' | 'code';
 const VIEWS: Array<{ id: BrainView; label: string; icon: typeof Code2 }> = [
   { id: 'notes', label: 'Notes', icon: NotebookText },
   { id: 'graph', label: 'Graph', icon: Network },
+  { id: 'globe', label: 'Globe', icon: Globe },
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'code', label: 'Code', icon: Code2 },
 ];
 
 /**
- * Notes | Graph | Dashboard | Code (Phase 2 B4, B5): the Brain's records, the graph of how they link,
- * the numbers and timeline, or the code map of the current project. Arrow keys switch.
+ * Notes | Graph | Globe | Dashboard | Code (Phase 2 B4, B5; Phase 4 A2): the Brain's records, the graph of how
+ * they link, the same on a 3D globe, the numbers and timeline, or the code map of the current project. Arrow keys switch.
  */
 function ViewSwitch({ view, onChange }: { view: BrainView; onChange: (v: BrainView) => void }) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -101,12 +103,12 @@ export function BrainScreen() {
       </div>
     );
   }
-  if (view === 'graph' || view === 'dashboard') return <WithReader switcher={<ViewSwitch onChange={setView} view={view} />} view={view} />;
+  if (view === 'graph' || view === 'globe' || view === 'dashboard') return <WithReader switcher={<ViewSwitch onChange={setView} view={view} />} view={view} />;
   return <NotesView openRequest={openRequest} switcher={<ViewSwitch onChange={setView} view={view} />} />;
 }
 
-/** Graph or dashboard on the left, the reader beside it once a record is picked (B5). */
-function WithReader({ view, switcher }: { view: 'graph' | 'dashboard'; switcher: ReactNode }) {
+/** Graph, globe or dashboard on the left, the reader beside it once a record is picked (B5, Phase 4 A2). */
+function WithReader({ view, switcher }: { view: 'graph' | 'globe' | 'dashboard'; switcher: ReactNode }) {
   const [openId, setOpenId] = useState<string | null>(null);
   // Bumped when the reader changes a record, so the graph or the numbers follow at once.
   const [refreshKey, setRefreshKey] = useState(0);
@@ -115,7 +117,13 @@ function WithReader({ view, switcher }: { view: 'graph' | 'dashboard'; switcher:
     <div className="flex flex-1 flex-wrap items-start gap-6 p-6">
       {switcher}
       <div className="min-w-0 flex-[999_1_560px]">
-        {view === 'graph' ? <GraphView onOpen={setOpenId} openId={openId} refreshKey={refreshKey} /> : <DashboardView onOpen={setOpenId} refreshKey={refreshKey} />}
+        {view === 'graph' ? (
+          <GraphView onOpen={setOpenId} openId={openId} refreshKey={refreshKey} />
+        ) : view === 'globe' ? (
+          <GlobeView onOpen={setOpenId} openId={openId} refreshKey={refreshKey} />
+        ) : (
+          <DashboardView onOpen={setOpenId} refreshKey={refreshKey} />
+        )}
       </div>
       {openId && (
         <div className="min-w-0 flex-[1_1_380px]">

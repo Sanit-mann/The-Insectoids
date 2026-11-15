@@ -17,7 +17,8 @@ const CSP = [
   "object-src 'none'",
   "base-uri 'none'",
   "form-action 'none'",
-  "frame-ancestors 'none'",
+  // frame-ancestors is left out: browsers ignore it in a <meta> tag and log an error (Phase 4 A2). Electron windows load only
+  // the app's own files, so there is no page that could frame them.
 ].join('; ');
 
 const cspPlugin: Plugin = {

@@ -69,6 +69,11 @@ type E2EHook = BackgroundE2E & {
   agentEditRecord?: (id: string, body: string) => Promise<void>;
   /** C2: a record whose body holds a secret (past the Brain's guard), for the Obsidian export test. */
   plantSecretRecord?: (title: string, body: string) => Promise<{ id: string }>;
+  /**
+   * Phase 4 A2 (the Brain Globe): `count` records with ~`linksPerRecord` `relates_to` links each, on the open project's
+   * shelf (or Global). Sent to the host in chunks so it keeps answering the window's calls in between.
+   */
+  seedRecords?: (count: number, linksPerRecord: number, shelf?: 'project' | 'global') => Promise<{ created: number; links: number; total: number; ms: number }>;
   /** e2e: what main last put on the clipboard (the clipboard itself is shared with everything on the computer). */
   lastCopiedText?: string;
   /** C4: "Restart to update" was pressed (the app does not quit under e2e). */
@@ -489,6 +494,19 @@ function registerIpc(): void {
     hook.plantSecretRecord = async (title: string, body: string): Promise<{ id: string }> => {
       if (!brainHost) throw new Error('The Brain is not running.');
       return (await brainHost.call('e2ePlantSecret', { title, body })) as { id: string };
+    };
+    hook.seedRecords = async (count: number, linksPerRecord: number, shelf?: 'project' | 'global') => {
+      if (!brainHost) throw new Error('The Brain is not running.');
+      const CHUNK = 250;
+      const sum = { created: 0, links: 0, total: 0, ms: 0 };
+      for (let left = count; left > 0; left -= CHUNK) {
+        const r = (await brainHost.call('e2eSeedRecords', { count: Math.min(CHUNK, left), linksPerRecord, ...(shelf ? { shelf } : {}) })) as typeof sum;
+        sum.created += r.created;
+        sum.links += r.links;
+        sum.total = r.total;
+        sum.ms += r.ms;
+      }
+      return sum;
     };
   }
   registerVaultIpc({ vault: vault!, services: services!, broker: broker!, providers: providers!, assertTrustedSender });

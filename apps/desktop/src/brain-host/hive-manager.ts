@@ -376,6 +376,9 @@ export class HiveManager {
   #cardSkills: Map<string, string[]> | null = null;
   /** e2e only (C4): engines a scripted install marked as installed. */
   readonly #e2eInstalled = new Set<EngineId>();
+  /** e2e only (Phase 4 A2): what e2eSeedRecords wrote so far, so later chunks link to earlier ones; one seeded rng. */
+  readonly #e2eSeeded: string[] = [];
+  readonly #e2eSeedRng = seededRng(0x5eed);
   #lastAuditAt: number | null = null;
   #review: { lastReviewAt: number | null; since: number; cardsSince: number };
   #codeMap: CodeMapBuilder | null = null;
@@ -1832,6 +1835,46 @@ export class HiveManager {
     if (process.env['INSECTOIDS_E2E'] !== '1') throw new Error('Only available in end-to-end tests.');
     this.#o.brain.update(id, { body }, { type: 'agent', id: 'e2e-agent' });
     this.#changed('brain-edit');
+  }
+
+  /**
+   * e2e only (Phase 4 A2, the Brain Globe): writes `count` records quickly (a mix of kinds, titles "Seed fact 123")
+   * on the open project's shelf (Global when none is open, or when `shelf` says 'global'), each linked `relates_to`
+   * to ~`linksPerRecord` records seeded before it (a fractional part is a chance of one more). Random but
+   * deterministic: one seeded rng for the whole run, so the same calls give the same links. The Brain has no public
+   * batch write, so these are plain writes (one small transaction each); main sends big seeds in chunks so the host
+   * keeps answering other calls between them. Refused outside end-to-end tests.
+   */
+  e2eSeedRecords(req: { count: number; linksPerRecord: number; shelf?: 'project' | 'global' }): { created: number; links: number; total: number; ms: number } {
+    if (process.env['INSECTOIDS_E2E'] !== '1') throw new Error('Only available in end-to-end tests.');
+    const { count, linksPerRecord } = req;
+    if (!Number.isInteger(count) || count < 1 || count > 5000) throw new Error('e2eSeedRecords needs a count from 1 to 5000.');
+    if (!Number.isFinite(linksPerRecord) || linksPerRecord < 0 || linksPerRecord > 5) throw new Error('e2eSeedRecords needs linksPerRecord from 0 to 5.');
+    const shelf = req.shelf === 'global' ? 'global' : (this.#project?.view.shelf ?? 'global');
+    const kinds = ['fact', 'decision', 'task', 'update', 'agent_memory'] as const;
+    const b = this.#o.brain;
+    const rng = this.#e2eSeedRng;
+    const user = { type: 'user' as const };
+    const started = Date.now();
+    let created = 0;
+    let links = 0;
+    for (let i = 0; i < count; i++) {
+      const n = this.#e2eSeeded.length + 1;
+      const kind = kinds[n % kinds.length]!;
+      const label = kind === 'agent_memory' ? 'note' : kind;
+      const { id } = b.write({ kind, shelf, title: `Seed ${label} ${n}`, body: `Seeded ${label} number ${n}, for the Brain Globe test.` }, user);
+      const prior = this.#e2eSeeded.length;
+      this.#e2eSeeded.push(id);
+      created++;
+      if (!prior) continue;
+      const want = Math.floor(linksPerRecord) + (rng() < linksPerRecord % 1 ? 1 : 0);
+      const targets = new Set<string>();
+      for (let k = 0; k < want; k++) targets.add(this.#e2eSeeded[Math.floor(rng() * prior)]!);
+      for (const to of targets) b.link(id, to, 'relates_to');
+      links += targets.size;
+    }
+    this.#changed('brain-edit');
+    return { created, links, total: this.#e2eSeeded.length, ms: Date.now() - started };
   }
 
   /**

@@ -798,8 +798,8 @@ export const BrainGraphRequestSchema = z.object({
   /** Only records updated at or after this time (ms). */
   since: z.number().int().nonnegative().optional(),
   includeArchived: z.boolean().optional(),
-  /** Most important first; the rest is counted in `hidden`. */
-  limit: z.number().int().min(1).max(400).default(200),
+  /** Most important first; the rest is counted in `hidden`. The 2D graph asks for 200; the Globe (Phase 4 A2) for up to 5,000. */
+  limit: z.number().int().min(1).max(5000).default(200),
 });
 export const BrainGraphNodeSchema = z.object({
   id: z.string(),
