@@ -69,9 +69,18 @@ Setup can be **rerun from Settings**, and any skipped step stays on a "finish se
 - **D6 (2026-11-12) — First project scan:** the folder is mapped right away with plain code (files, functions, links), which costs no tokens. AI-written summaries are created lazily, when a goal first needs them.
 - **D7 (2026-11-12) — Safety presets:** *Careful* (more approvals, lower budgets), *Balanced* (default), *Hands-off* (more autonomy, higher budgets). No preset can turn off the always-ask list (02-D7: delete, spend, publish, push) or the command guard (06-D5).
 - **D8 (2026-11-12) — Optional "try a sample goal"** on a small practice project in its own folder: the user watches the hive plan, work, get verified and finish, without touching real files. Small token cost, shown before starting.
+- **D9 (2026-11-15, the user's suggestion; planned for Phase 5) — A free local model, set up for the user.** In the Engines step (3), or later from the "finish setup" checklist and Settings:
+  1. **Ask first.** The app offers to download Ollama, naming its version, size and licence. Nothing is downloaded without a yes; "not now" puts it on the checklist.
+  2. **Read the PC.** Graphics card and its memory (NVIDIA, AMD, Apple Silicon's shared memory, or none), RAM, free disk space and the operating system. Nothing about it leaves the computer.
+  3. **Pick a model from the app's own list,** not from live rankings (they conflict, and most scores come from the models' makers). The list maps hardware to a tool-capable model that runs well there, prefers models that fit the graphics memory, then mixture-of-experts models that split well between graphics memory and RAM. It is tested by us, ships with each release, and only names models at least 14 days old. The user sees the choice (name, size, licence, why it fits) and can pick a smaller or larger one from the list.
+  4. **Download with a yes,** with progress; there must be enough free disk space.
+  5. **Check that it works:** a short speed test and one tool call. Too slow or failing → offer the next smaller model.
+  6. **Add it as a provider** (Ollama through OpenCode), with a sensible context length for the PC.
+  The Treasurer already sends light work to the free model first and moves a card to a stronger engine when it struggles (02-D9); its learning shows which work the local model really handles. The model can be removed or swapped from Settings. Goal: less money and fewer subscription limits spent on work a local model can do.
 
 ## Change log
 
 - 2026-11-12 — Created with AIS-OS and Munder Difflin references, draft flow and questions.
 - 2026-11-12 — User accepted all suggestions → D2–D8. The draft flow is now the agreed flow, with steps 2, 4, 6 (beyond the free scan) and 8's tour moved to the checklist where skipped.
 - 2026-11-12 — **Finalized by user.** Further changes go through a new change-log entry.
+- 2026-11-15 — D9 added (the user's suggestion, planned for Phase 5): set up a free local model during setup: download Ollama with consent, read the PC's hardware, pick a model from the app's tested list, download it with a yes, check it works, add it as a provider.

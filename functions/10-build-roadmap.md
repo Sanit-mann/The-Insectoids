@@ -141,6 +141,10 @@ Turn functions 01–09 into an order of work: the smallest version that proves t
 - **Brain:** phase-2 views (globe, dashboard, timeline), ask-the-brain box.
 - **Later:** voice input, phone companion, team shelves, batch rewriting of the dormant library.
 
+### Phase 5 — Local First (proposed by the user, 2026-11-15)
+- **First step: a free local model set up for the user** (08-D9). During setup the app offers to download Ollama, reads the PC's hardware, picks a local model that will run well on it from a list the app ships and tests, downloads it with the user's yes, checks that it works, and adds it as a provider. The Treasurer then gives it the light work it can do (questions, summaries, the Librarian's tidying, small cards) and keeps paid engines for the rest, so the user spends less money and fewer subscription limits.
+- The rest of Phase 5 is planned when it starts.
+
 ## Dependencies on other functions
 
 Sequences everything in 01–09.
@@ -158,6 +162,7 @@ Sequences everything in 01–09.
 - **D3 (2026-11-12) — Claude Code is the only engine in the MVP** (best pre-action hooks for the command guard). Codex, Gemini CLI and OpenCode follow in Phase 2.
 - **D4 (2026-11-12) — Way of working:** Claude builds phase by phase. Each phase is split into small steps that each end in something working, test-first for core services (Brain, taskboard, workspace, guard, broker). Every phase ends with a demo the user checks and approves before the next starts; the user can check in any time.
 - **D5 (2026-11-12) — Dogfooding:** once the MVP works, The Insectoids helps build its own later phases, with Claude supervising.
+- **D7 (2026-11-15) — Phase 5 starts with local model setup** (the user's suggestion; details in 08-D9). It builds on the Treasurer's rule that light work goes to a free local model first (02-D9).
 - **D6 (2026-11-12) — Version control:** git is set up in this folder now, local only, with a first commit of the specs, design and library. A private GitHub repository is created later, only when the user wants it. Nothing is pushed or published without the user.
 
 ## Change log
@@ -166,3 +171,4 @@ Sequences everything in 01–09.
 - 2026-11-12 — User delegated Q1–Q5 → D2–D6. Git repository initialised locally (`main`), with `.gitignore` (excludes Brain databases, vault, env files, worktrees) and `.gitattributes` (LF line endings).
 - 2026-11-12 — First local commit `1fe0aa8`. **Finalized by user;** Phase 0 started on branch `phase-0-foundation`.
 - 2026-11-12 — **Phase 1 "First Spark" complete** (branch `phase-1-first-spark`, see [docs/plans/phase-1-first-spark.md](../docs/plans/phase-1-first-spark.md)). The real end-to-end demo passed twice with Claude Code. The Vault moved from Phase 1 to Phase 2 with the user's agreement, because nothing in Phase 1 stores keys. Published to GitHub as v0.0.1.
+- 2026-11-15 — Phase 5 "Local First" added, starting with the user's suggestion: a free local model set up for the user during first-run setup (D7, 08-D9).
