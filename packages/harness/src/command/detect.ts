@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { delimiter, posix, win32 } from 'node:path';
 import { promisify } from 'node:util';
 import { versionAtLeast } from '../opencode/detect';
 import type { CommandPreset } from './preset';
@@ -41,6 +41,9 @@ const defaultDeps = (): CommandDetectDeps => ({
   platform: process.platform,
 });
 
+/** Path rules of the platform being detected (tests check Windows layouts on any host). */
+const pathOf = (platform: NodeJS.Platform) => (platform === 'win32' ? win32 : posix);
+
 const pathDirs = (d: Pick<CommandDetectDeps, 'env' | 'platform'>): string[] =>
   (d.env['PATH'] ?? d.env['Path'] ?? '').split(d.platform === 'win32' ? ';' : delimiter).filter(Boolean);
 
@@ -53,6 +56,7 @@ export function resolveCmdShim(text: string, shimDir: string, d: Pick<CommandDet
   const targets = [...text.matchAll(/"%(?:~dp0|dp0%)\\?([^"%]+\.(exe|js|cjs|mjs))"/gi)];
   const last = targets.at(-1);
   if (!last) return null;
+  const { join } = pathOf(d.platform);
   const target = join(shimDir, last[1]!);
   if (!d.exists(target)) return null;
   if (last[2]!.toLowerCase() === 'exe') return { command: target, args: [] };
@@ -65,6 +69,7 @@ type Found = { command: string; args: string[] } | { unsupported: string; comman
 /** The preset's program on PATH: a real executable first; on Windows an npm launcher is read, never run. */
 export function findCommand(p: CommandPreset, d: Pick<CommandDetectDeps, 'exists' | 'readFile' | 'env' | 'platform'>): Found | null {
   const win = d.platform === 'win32';
+  const { join } = pathOf(d.platform);
   let shim: string | null = null;
   const ignored = (path: string): boolean => p.ignorePaths?.test(path) ?? false;
   for (const dir of pathDirs(d)) {

@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path';
+import { posix, win32 } from 'node:path';
 import type { HiveMcpName } from '../opencode/config';
 import type { CommandEvent, CommandPreset, HiveMcpServers, McpWiring } from './preset';
 
@@ -120,6 +120,7 @@ export function codexNativeBinary(script: string, exists: (p: string) => boolean
   if (!triple) return null;
   const pkg = `codex-${platform}-${arch}`;
   const exe = platform === 'win32' ? 'codex.exe' : 'codex';
+  const { dirname, join } = platform === 'win32' ? win32 : posix;
   const root = dirname(dirname(script));
   return [join(root, 'node_modules', '@openai', pkg, 'vendor', triple, 'bin', exe), join(root, '..', pkg, 'vendor', triple, 'bin', exe)].find((p) => exists(p)) ?? null;
 }

@@ -1,4 +1,4 @@
-import { dirname, join } from 'node:path';
+import { posix, win32 } from 'node:path';
 import type { Usage } from '../claude/stream';
 import type { HiveMcpName } from '../opencode/config';
 import type { CommandEvent, CommandPreset, HiveMcpServers } from './preset';
@@ -122,6 +122,7 @@ export function copilotNativeBinary(script: string, exists: (p: string) => boole
   if (!/[\\/]@github[\\/]copilot[\\/]npm-loader\.js$/i.test(script)) return null;
   const pkg = `copilot-${platform}-${arch}`;
   const exe = platform === 'win32' ? 'copilot.exe' : 'copilot';
+  const { dirname, join } = platform === 'win32' ? win32 : posix;
   const dir = dirname(script);
   return [join(dir, 'node_modules', '@github', pkg, exe), join(dir, '..', pkg, exe)].find((p) => exists(p)) ?? null;
 }

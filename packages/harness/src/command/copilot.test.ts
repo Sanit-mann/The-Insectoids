@@ -1,6 +1,6 @@
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import { buildCommandInvocation } from './args';
@@ -184,17 +184,17 @@ describe('reading Copilot’s output (lines recorded from Copilot CLI 1.0.105)',
 describe('finding Copilot on this computer', () => {
   const npm = 'C:\\Users\\u\\AppData\\Roaming\\npm';
   const vscode = 'C:\\Users\\u\\AppData\\Local\\Programs\\Microsoft VS Code\\bin\\copilot-shim';
-  const loader = join(npm, 'node_modules\\@github\\copilot\\npm-loader.js');
-  const native = join(npm, 'node_modules\\@github\\copilot\\node_modules\\@github\\copilot-win32-x64\\copilot.exe');
+  const loader = win32.join(npm, 'node_modules\\@github\\copilot\\npm-loader.js');
+  const native = win32.join(npm, 'node_modules\\@github\\copilot\\node_modules\\@github\\copilot-win32-x64\\copilot.exe');
   const shim = '@ECHO off\r\nGOTO start\r\n:start\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@github\\copilot\\npm-loader.js" %*\r\n';
 
   it('skips VS Code’s stand-in and starts the native program behind npm’s launcher directly', async () => {
     const files: Record<string, string> = {
-      [join(vscode, 'copilot.exe')]: '',
-      [join(npm, 'copilot.cmd')]: shim,
+      [win32.join(vscode, 'copilot.exe')]: '',
+      [win32.join(npm, 'copilot.cmd')]: shim,
       [loader]: '',
       [native]: '',
-      [join(npm, 'node.exe')]: '',
+      [win32.join(npm, 'node.exe')]: '',
     };
     const ran: string[] = [];
     const found = await detectCommand(COPILOT_PRESET, {
@@ -215,7 +215,7 @@ describe('finding Copilot on this computer', () => {
     expect(copilotNativeBinary(loader, () => false, 'win32', 'x64')).toBeNull();
     expect(copilotNativeBinary('C:\\other\\cli.js', () => true, 'win32', 'x64')).toBeNull();
     expect(copilotNativeBinary(loader, (p) => p === native, 'win32', 'x64')).toBe(native);
-    const exe = join(npm, 'copilot.exe');
+    const exe = win32.join(npm, 'copilot.exe');
     const r = await detectCommand(COPILOT_PRESET, {
       exists: (f) => f === exe,
       readFile: () => '',

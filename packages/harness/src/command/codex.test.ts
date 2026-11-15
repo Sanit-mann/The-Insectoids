@@ -1,4 +1,4 @@
-import { join } from 'node:path';
+import { win32 } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { commandAdapter } from './adapter';
 import { buildCommandInvocation } from './args';
@@ -84,12 +84,12 @@ describe('the Codex preset (Phase 4 B3)', () => {
 
 describe('finding Codex on this computer', () => {
   const npm = 'C:\\Users\\u\\AppData\\Roaming\\npm';
-  const script = join(npm, 'node_modules\\@openai\\codex\\bin\\codex.js');
-  const native = join(npm, 'node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe');
+  const script = win32.join(npm, 'node_modules\\@openai\\codex\\bin\\codex.js');
+  const native = win32.join(npm, 'node_modules\\@openai\\codex\\node_modules\\@openai\\codex-win32-x64\\vendor\\x86_64-pc-windows-msvc\\bin\\codex.exe');
   const shim = '@ECHO off\r\nGOTO start\r\n:start\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n';
 
   it('starts the native program behind npm’s launcher; signed in only when its own status says so', async () => {
-    const files: Record<string, string> = { [join(npm, 'codex.cmd')]: shim, [script]: '', [native]: '', [join(npm, 'node.exe')]: '' };
+    const files: Record<string, string> = { [win32.join(npm, 'codex.cmd')]: shim, [script]: '', [native]: '', [win32.join(npm, 'node.exe')]: '' };
     const found = await detectCommand(CODEX_PRESET, {
       exists: (f) => f in files,
       readFile: (f) => files[f] ?? '',

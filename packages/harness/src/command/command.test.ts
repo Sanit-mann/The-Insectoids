@@ -1,6 +1,6 @@
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, win32 } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterAll, describe, expect, it } from 'vitest';
 import type { ClaudeEvent } from '../claude/stream';
@@ -159,7 +159,8 @@ describe('a run on the stand-in CLI', () => {
     const rep = r.report();
     expect(rep['how']).toBe('stdin');
     expect(rep['prompt']).toContain('Write hello.txt');
-    expect(rep['cwd'].toLowerCase()).toBe(r.cwd.toLowerCase());
+    // The CLI reports its real folder (on macOS /var is a link to /private/var).
+    expect(realpathSync(rep['cwd']).toLowerCase()).toBe(realpathSync(r.cwd).toLowerCase());
     expect(rep['mcpPath']).toBe(join(r.runDir, 'mcp.json'));
     expect(isInside(rep['mcpPath'], r.cwd)).toBe(false);
     expect(Object.keys(rep['mcp'].servers)).toEqual(['hive', 'brain']);
@@ -334,20 +335,20 @@ describe('detection', () => {
 
   it('missing, outdated, unreadable version, and ready (a real .exe on PATH, no shell)', async () => {
     expect(await detectCommand(p, deps({}, {}))).toEqual({ status: 'missing' });
-    const exe = join('C:\\npm', 'fake-command.exe');
+    const exe = win32.join('C:\\npm', 'fake-command.exe');
     expect(await detectCommand(p, deps({ [exe]: '' }, { [`${exe} --version`]: 'fake-command 1.1.9' }))).toEqual({ status: 'outdated', command: exe, version: '1.1.9', minimum: '1.2.0' });
     expect(await detectCommand(p, deps({ [exe]: '' }, { [`${exe} --version`]: 'hello' }))).toMatchObject({ status: 'unsupported', reason: expect.stringMatching(/couldn't read its version/) });
     expect(await detectCommand(p, deps({ [exe]: '' }, { [`${exe} --version`]: 'fake-command 1.4.2' }))).toEqual({ status: 'installed', command: exe, args: [], version: '1.4.2' });
   });
 
   it('reads an npm .cmd launcher to start its target directly (Node + script, or the .exe), never the launcher', async () => {
-    const shim = join('C:\\npm', 'fake-command.cmd');
-    const script = join('C:\\npm', 'node_modules\\fake-command\\cli.js');
-    const node = join('C:\\npm', 'node.exe');
+    const shim = win32.join('C:\\npm', 'fake-command.cmd');
+    const script = win32.join('C:\\npm', 'node_modules\\fake-command\\cli.js');
+    const node = win32.join('C:\\npm', 'node.exe');
     const text = '@ECHO off\r\nGOTO start\r\n:start\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & "%_prog%"  "%dp0%\\node_modules\\fake-command\\cli.js" %*\r\n';
     const d = deps({ [shim]: text, [script]: '', [node]: '' }, { [`${node} ${script} --version`]: 'fake-command 1.4.2' });
     expect(await detectCommand(p, d)).toEqual({ status: 'installed', command: node, args: [script], version: '1.4.2' });
-    const exe = join('C:\\npm', 'node_modules\\fake\\bin\\fake.exe');
+    const exe = win32.join('C:\\npm', 'node_modules\\fake\\bin\\fake.exe');
     expect(resolveCmdShim('"%dp0%\\node_modules\\fake\\bin\\fake.exe"   %*', 'C:\\npm', { exists: (f) => f === exe, env: winEnv, platform: 'win32' })).toEqual({ command: exe, args: [] });
     expect(await detectCommand(p, deps({ [shim]: '@echo off\r\npowershell -c something %*' }, {}))).toMatchObject({ status: 'unsupported', reason: expect.stringMatching(/never starts programs through a shell/) });
   });

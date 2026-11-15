@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { dirname, join, posix, win32 } from 'node:path';
 import type { Effort } from '../claude/args';
 import { type RunError, type RunHandle, type RunResult, killTree } from '../claude/run';
 import type { ClaudeEvent, Usage } from '../claude/stream';
@@ -40,9 +40,10 @@ const QUOTA_HINT = /(usage limit|rate[ -]?limit|quota|too many requests|\b429\b)
 
 /** True when `inner` is `outer` or inside it (Windows paths ignore case). */
 export function isInside(inner: string, outer: string, platform: NodeJS.Platform = process.platform): boolean {
-  const fold = (p: string): string => (platform === 'win32' ? resolve(p).toLowerCase() : resolve(p));
-  const rel = relative(fold(outer), fold(inner));
-  return rel === '' || (!rel.startsWith('..') && !isAbsolute(rel));
+  const P = platform === 'win32' ? win32 : posix;
+  const fold = (p: string): string => (platform === 'win32' ? P.resolve(p).toLowerCase() : P.resolve(p));
+  const rel = P.relative(fold(outer), fold(inner));
+  return rel === '' || (!rel.startsWith('..') && !P.isAbsolute(rel));
 }
 
 /** The environment for a run: the user's, minus the hive's own secrets and anything the preset names. */
