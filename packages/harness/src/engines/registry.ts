@@ -40,6 +40,8 @@ export interface EngineAdapter {
   models: ModelTiers | null;
   /** e.g. "Phase 2 · step A2" when this build has no adapter yet. Such engines are never detected or run. */
   availableIn: string | null;
+  /** Why it can't run, in plain words, shown instead of the generic "not supported yet" line (e.g. no guard). */
+  unavailableReason?: string;
   install: { command: string; note: string } | null;
   signIn: { command: string; note: string } | null;
   privacyNote: string | null;
@@ -247,7 +249,8 @@ export class EngineRegistry {
         privacyNote: a.privacyNote,
       };
       if (!a.detect) {
-        return { ...base, state: 'unsupported', version: null, message: `${a.name} isn't supported in this version yet${a.availableIn ? ` (coming in ${a.availableIn})` : ''}.` };
+        const message = a.unavailableReason ?? `${a.name} isn't supported in this version yet${a.availableIn ? ` (coming in ${a.availableIn})` : ''}.`;
+        return { ...base, state: 'unsupported', version: null, message };
       }
       if (!d || this.#checking.has(id)) return { ...base, state: 'checking', version: d?.version ?? null, message: `Checking for ${a.name}…` };
       return { ...base, state: d.state, version: d.version, message: d.message };

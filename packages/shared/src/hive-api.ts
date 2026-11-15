@@ -76,7 +76,12 @@ export const EngineViewSchema = z.object({
 export type EngineView = z.infer<typeof EngineViewSchema>;
 
 /** Every engine the hive knows about (Connections 04-D2). 'fake' is the scripted test engine. */
-export const EngineIdSchema = z.enum(['claude', 'gemini', 'codex', 'opencode', 'fake']);
+export const EngineIdSchema = z.enum([
+  'claude', 'gemini', 'codex', 'opencode',
+  // Phase 4 B: more engines, most as presets on the generic command engine; 'custom' is the user's own command.
+  'copilot', 'cursor', 'qwen', 'grok', 'kimi', 'crush', 'pi', 'antigravity', 'custom',
+  'fake',
+]);
 export type EngineId = z.infer<typeof EngineIdSchema>;
 
 /**
@@ -589,7 +594,7 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   /** Switch an engine on or off for the hive. */
   z.object({ type: z.literal('setEngineEnabled'), engineId: EngineIdSchema, enabled: z.boolean() }),
   /** The user's preference order (first = default). Unknown ids are ignored; missing ones keep their place at the end. */
-  z.object({ type: z.literal('setEngineOrder'), order: z.array(EngineIdSchema).max(5) }),
+  z.object({ type: z.literal('setEngineOrder'), order: z.array(EngineIdSchema).max(EngineIdSchema.options.length) }),
   /** The user's soft spending limits for an engine's subscription (null clears). */
   z.object({ type: z.literal('setEngineLimits'), engineId: EngineIdSchema, cap5hUsd: z.number().positive().max(10_000).nullable(), cap7dUsd: z.number().positive().max(100_000).nullable() }),
   /** Tidy the Brain now (B2): fade unused, unimportant agent notes into the archive. Also runs on its own every 6 h. */

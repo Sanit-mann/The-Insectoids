@@ -6,6 +6,15 @@ export const ENGINE_NAMES: Record<EngineId, string> = {
   gemini: 'Gemini CLI',
   codex: 'Codex',
   opencode: 'OpenCode',
+  copilot: 'Copilot',
+  cursor: 'Cursor',
+  qwen: 'Qwen Code',
+  grok: 'Grok',
+  kimi: 'Kimi',
+  crush: 'Crush',
+  pi: 'Pi',
+  antigravity: 'Antigravity',
+  custom: 'Custom command',
   fake: 'Test engine',
 };
 
