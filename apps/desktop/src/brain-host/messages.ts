@@ -80,7 +80,11 @@ export type HostMethod =
   // Engine install (C4): main reads the engine's card (its official install command) from the host.
   // 'e2eEngineInstalled' works only when the host runs under INSECTOIDS_E2E=1.
   | 'engineCard'
-  | 'e2eEngineInstalled';
+  | 'e2eEngineInstalled'
+  // Ask the Brain (Memory 01; Phase 4 A1): params BrainAskRequest, result BrainAskResult (never thrown: errors come
+  // back as status "error"); 'brainAskEstimate' takes nothing and returns BrainAskEstimate (read-only).
+  | 'brainAsk'
+  | 'brainAskEstimate';
 
 /**
  * Requests the host makes to main (the reverse direction): the secret broker and the Vault live in

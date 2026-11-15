@@ -12,6 +12,7 @@ import { type Library, ROLE_SKILLS, brainRules, estimateTokens, inspectorPrompt,
 import { type Plan, parsePlan, parseStatus, parseVerdict } from './protocol';
 import type { EngineId } from '@insectoids/shared';
 import { detectUsageLimit } from '../engines/limits';
+import { ASK_ROUTE, type AskSourceInput, askPrompt, parseAskReply } from './ask';
 import { type AuditSummary, type LibrarianProposal, LibrarianProposalSchema, applyLibrarianProposal, lessonFrom, librarianPrompt, parseLibrarianReply } from './librarian';
 import { type ModelTiers, type Route, type RouteInput, type Tier, TIERS, budgetState, isInsectRole, routeCard, runTokens } from './router';
 import type { ForemanWake, Incident } from '@insectoids/brain';
@@ -173,6 +174,11 @@ export interface RunInfo {
   costUsd?: number;
 }
 
+/** What Hive.askBrain returns (Phase 4 A1). `unknown`: the run said UNKNOWN or cited no source it was given. */
+export type AskBrainResult =
+  | { ok: true; answer: string; cited: number[]; tokens: number; costUsd: number; costEstimated: boolean; engine: string; model: string | null }
+  | { ok: false; unknown: boolean; error: string | null; tokens: number; costUsd: number };
+
 /** Where a goal stands on the user's branch (Workspace 06-D3, D6). */
 export type MergeState = 'not-merged' | 'awaiting-approval' | 'merged' | 'undone';
 
@@ -197,6 +203,7 @@ export class Hive {
   readonly #jobs = new Map<string, Job>();
   #ants = 0;
   #runs = 0;
+  #asks = 0;
   readonly #deciding = new Set<string>();
   /** Goals already warned at 75% of their budget (A3: once per goal). */
   readonly #budgetWarned = new Set<string>();
@@ -382,7 +389,8 @@ export class Hive {
         cwd: scratch,
         system: prompt.system,
         task: prompt.task,
-        route: this.#route({ role: 'librarian', priority: 'low', attempts: 0 }),
+        // 'normal': the Librarian's standard tier. 'low' is its light tier, kept for Ask the Brain (ASK_ROUTE).
+        route: this.#route({ role: 'librarian', priority: 'normal', attempts: 0 }),
         guard: { workspace: scratch, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
       }, (stop) => (stopRun = stop));
     })().finally(() => this.#jobs.delete(jobKey));
@@ -390,6 +398,53 @@ export class Hive {
     const result = await done;
     if (!result.ok) return { ok: false, error: `The drafting run failed (${result.error ?? 'error'}).` };
     return parseSkillDraft(result.text);
+  }
+
+  /**
+   * Ask the Brain (Phase 4 A1): one short read-only Librarian run that sees only the numbered sources and
+   * must cite them. It has no Brain door, no network and a scratch folder of its own; its cost is recorded
+   * like any run (no goal). Routed with ASK_ROUTE: a free local model when one is ready (see ask.ts).
+   * Never throws: a failed run is `error`, a reply that is UNKNOWN or cites nothing valid is `unknown`.
+   */
+  async askBrain(question: string, sources: readonly AskSourceInput[]): Promise<AskBrainResult> {
+    if (!sources.length) return { ok: false, unknown: true, error: null, tokens: 0, costUsd: 0 };
+    const scratch = join(this.#o.dataDir, 'ask');
+    mkdirSync(scratch, { recursive: true });
+    const prompt = askPrompt(question, sources);
+    const route = this.#route({ ...ASK_ROUTE });
+    let stopRun: (() => void) | undefined;
+    // Each question is its own job, so two asks at once don't overwrite each other's entry.
+    const jobKey = `Librarian:ask#${++this.#asks}`;
+    const done = this.#runWith(null, undefined, {
+      role: 'librarian',
+      agentId: 'Librarian',
+      title: 'Ask the Brain',
+      cwd: scratch,
+      system: prompt.system,
+      task: prompt.task,
+      route,
+      guard: { workspace: scratch, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
+    }, (stop) => (stopRun = stop)).finally(() => this.#jobs.delete(jobKey));
+    this.#jobs.set(jobKey, { kind: 'librarian', cardId: '', done: done.then(() => undefined, () => undefined), stop: () => stopRun?.() });
+    let result: EngineResult;
+    try {
+      result = await done;
+    } catch (err) {
+      return { ok: false, unknown: false, error: `The run crashed (${err instanceof Error ? err.message : String(err)}).`, tokens: 0, costUsd: 0 };
+    }
+    const tokens = runTokens(result.usage);
+    if (!result.ok) return { ok: false, unknown: false, error: `The run failed (${result.error ?? 'error'}).`, tokens, costUsd: result.costUsd };
+    const parsed = parseAskReply(result.text, sources.length);
+    if (!parsed) return { ok: false, unknown: true, error: null, tokens, costUsd: result.costUsd };
+    return {
+      ok: true,
+      ...parsed,
+      tokens,
+      costUsd: result.costUsd,
+      costEstimated: result.costEstimated ?? false,
+      engine: route.engine,
+      model: result.model ?? (route.model || null),
+    };
   }
 
   /** A lesson from a failed inspection, retried or escalated (01-E10, B3): free, no LLM. Never blocks the hive. */

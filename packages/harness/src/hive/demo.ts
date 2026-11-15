@@ -1,6 +1,7 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { ClaudeEvent } from '../claude/stream';
+import { ASK_HEADING, ASK_UNKNOWN } from './ask';
 import { type EngineRequest, FakeEngine, type FakeReply } from './engine';
 
 /**
@@ -12,6 +13,7 @@ import { type EngineRequest, FakeEngine, type FakeReply } from './engine';
  * - Each insect writes `<card id>.txt` (C-01.txt, C-02.txt, C-03.txt) in its worktree and ends with STATUS: DONE.
  * - The Inspector always passes (with `inspectorFailsFirst`, it fails C-01's first attempt once: a lesson, B3).
  * - The Librarian's review proposes confirming the first lesson its summary lists as waiting, if any.
+ * - Ask the Brain (A1): a short answer citing [1] (and [2] with 2+ sources); UNKNOWN when the question says "unknowable".
  * After the last wave the merge into main waits for approval.
  */
 export const DEMO_PLAN = {
@@ -213,6 +215,21 @@ function demoLibrarianReply(task: string): string {
   return `I read the audit.\n\`\`\`json\n${JSON.stringify({ proposals })}\n\`\`\``;
 }
 
+/**
+ * The demo answer to Ask the Brain (A1): a short answer citing [1] (and [2] when there are 2+ sources),
+ * built from the sources' titles; UNKNOWN when the question has the word "unknowable".
+ */
+export function demoAskReply(task: string): string {
+  const question = /^## Question\n(.*)$/m.exec(task)?.[1] ?? '';
+  if (/\bunknowable\b/i.test(question)) return ASK_UNKNOWN;
+  const titles = [...task.matchAll(/^<<<SOURCE (\d+)>>>\nTitle: (.*)$/gm)].map((m) => ({ n: Number(m[1]), title: m[2]!.trim() }));
+  if (!titles.length) return ASK_UNKNOWN;
+  const [first, second] = titles;
+  const lines = [`The Brain has a record on this: "${first!.title}" [${first!.n}].`];
+  if (second) lines.push(`"${second.title}" adds to it [${second.n}].`);
+  return lines.join(' ');
+}
+
 export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
   const t: DemoTiming = { queenMs: 400, insectMs: 600, inspectorMs: 300, ...timing };
   let failedOnce = false;
@@ -267,6 +284,9 @@ export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
         events: [init, { kind: 'text', text: 'Reading the goal and the project files.' }, { kind: 'text', text: 'Plan: 2 waves, 3 cards.' }],
         text: `Here is the plan.\n\`\`\`json\n${JSON.stringify(DEMO_PLAN)}\n\`\`\``,
       };
+    }
+    if (req.role === 'librarian' && req.task.startsWith(ASK_HEADING)) {
+      return { delayMs: t.inspectorMs, tokens: 900, events: [init, { kind: 'text', text: 'Reading the numbered sources.' }], text: demoAskReply(req.task) };
     }
     if (req.role === 'librarian') {
       return { delayMs: t.inspectorMs, tokens: 1_200, events: [init, { kind: 'text', text: 'Reading the Brain audit.' }], text: demoLibrarianReply(req.task) };

@@ -13,7 +13,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { dirname, join } from 'node:path';
 import { type Brain, openBrain } from '@insectoids/brain';
 import { writeBrainShims } from '@insectoids/brain-cli/shims';
-import { ObsidianExportRequestSchema, WebhookCallSchema } from '@insectoids/shared';
+import { BrainAskRequestSchema, ObsidianExportRequestSchema, WebhookCallSchema } from '@insectoids/shared';
 import { type BrainService, startBrainService } from '@insectoids/brain-service';
 import { HiveManager, e2eReadyEngines } from './hive-manager';
 import { MeaningSearch } from './meaning-search';
@@ -264,6 +264,11 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
     case 'libraryImport':
       // main passes the folder the user picked (or the e2e fixture path).
       return hive.libraryImport((params as { path: string }).path);
+    // Ask the Brain (Phase 4 A1): validated in main against BrainAskRequestSchema, and again here.
+    case 'brainAsk':
+      return hive.brainAsk(BrainAskRequestSchema.parse(params));
+    case 'brainAskEstimate':
+      return hive.brainAskEstimate();
     case 'setLimits':
       // Built in main from the shared PRESETS table; checked again by setLimits.
       hive.setLimits(params as Parameters<HiveManager['setLimits']>[0]);

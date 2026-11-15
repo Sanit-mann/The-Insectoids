@@ -1,6 +1,7 @@
 import { Brain, Code2, LayoutDashboard, NotebookText, Network, Search } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { BrainHitView, RecordKind } from '@insectoids/shared';
+import { AskBrain } from '@/components/brain/AskBrain';
 import { BrainCareRow } from '@/components/brain/BrainCare';
 import { BrainReader } from '@/components/brain/BrainReader';
 import { CodeMapView } from '@/components/brain/CodeMapView';
@@ -173,6 +174,7 @@ function NotesView({ switcher, openRequest }: { switcher: ReactNode; openRequest
       {switcher}
       <BrainCareRow onOpen={setOpenId} />
       <ObsidianExport />
+      <AskBrain onOpen={setOpenId} />
       <section aria-label="Search the Brain" className="flex w-full flex-[1_1_300px] flex-col gap-3 md:max-w-[400px]">
         <p className="m-0 text-xs text-muted" data-testid="brain-tidy-intro">
           The Brain keeps itself tidy: notes that get used rise in results, unused agent notes fade into the archive, and nothing is

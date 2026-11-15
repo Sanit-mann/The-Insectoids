@@ -25,6 +25,7 @@ export * from './opencode/stream';
 export * from './opencode/run';
 export * from './opencode/engine';
 export * from './hive/librarian';
+export * from './hive/ask';
 export * from './hive/catalog';
 export * from './hive/watchdog';
 export * from './hive/managers';

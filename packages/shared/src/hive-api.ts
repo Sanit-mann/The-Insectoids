@@ -25,6 +25,10 @@ export const HIVE_IPC = {
   brainGraph: 'hive:brain-graph',
   brainDashboard: 'hive:brain-dashboard',
   brainEdit: 'hive:brain-edit',
+  /** Ask the Brain (Phase 4 A1): a plain-words question answered from Brain records, with citations. */
+  brainAsk: 'hive:brain-ask',
+  /** What one question will roughly cost, shown before the first one. */
+  brainAskEstimate: 'hive:brain-ask-estimate',
   /** Library screen (Phase 2 C1): the castes, and the catalog of agents and skills. */
   libraryCastes: 'hive:library-castes',
   librarySearch: 'hive:library-search',
@@ -626,6 +630,8 @@ export const HiveCommandSchema = z.discriminatedUnion('type', [
   ...CadenceCommandSchemas,
   /** The user read the digest ("Got it"): what happened so far no longer counts as unseen (B1). */
   z.object({ type: z.literal('markDigestSeen') }),
+  /** Keep an Ask-the-Brain answer as an unconfirmed note that links to the records it cited (Phase 4 A1). */
+  z.object({ type: z.literal('saveBrainAnswer'), question: z.string().trim().min(3).max(500), answer: z.string().trim().min(1).max(8000), citationIds: z.array(Id).max(20) }),
 ]);
 export type HiveCommand = z.infer<typeof HiveCommandSchema>;
 
@@ -664,6 +670,85 @@ export const BrainHitViewSchema = z.object({
   status: z.enum(['current', 'superseded', 'archived']),
 });
 export type BrainHitView = z.infer<typeof BrainHitViewSchema>;
+
+// ---- Ask the Brain (Memory 01; Phase 4 A1) ---------------------------------------------------------
+
+/**
+ * A plain-words question answered only from Brain records:
+ * 1. retrieval: hybrid search (words + meaning) over the open project's shelf and Global, current records only, at most
+ *    BRAIN_ASK_MAX_SOURCES; nothing found → `unknown` without any AI run (no tokens);
+ * 2. one short read-only run (the Librarian's role, routed by the Treasurer: a free local model when one is ready,
+ *    else a light/standard model at low effort) that sees only those numbered sources and must cite them as [1], [2];
+ * 3. checks: every cited number must be one of the sources given (anything else is dropped); an answer citing nothing
+ *    becomes `unknown` ("The Brain doesn't know"), so the hive never answers from outside the Brain.
+ * Secrets never reach the run (the Brain refuses them on write). The cost is recorded like any run (no goal).
+ */
+export const BRAIN_ASK_MAX_SOURCES = 8;
+
+export const BrainAskRequestSchema = z.object({
+  question: z.string().trim().min(3).max(500),
+});
+export type BrainAskRequest = z.infer<typeof BrainAskRequestSchema>;
+
+/** A record the answer was built from. */
+export const BrainAskSourceSchema = z.object({
+  /** 1-based, as cited in the answer text ("[2]"). */
+  n: z.number().int().positive(),
+  id: Id,
+  kind: RecordKindSchema,
+  shelf: z.string(),
+  title: z.string(),
+  trust: TrustSchema,
+});
+export type BrainAskSource = z.infer<typeof BrainAskSourceSchema>;
+
+export const BrainAskResultSchema = z.discriminatedUnion('status', [
+  z.object({
+    status: z.literal('answered'),
+    question: z.string(),
+    /** Plain text with citation markers like [1] that match `citations[].n`. */
+    answer: z.string(),
+    /** Only the sources the answer actually cites, in number order. */
+    citations: z.array(BrainAskSourceSchema).min(1),
+    /** How many sources the run was given. */
+    sourcesGiven: z.number().int(),
+    engine: z.string(),
+    model: z.string().nullable(),
+    tokens: z.number(),
+    costUsd: z.number(),
+    /** True when the engine didn't report cost (it was worked out from a price table). */
+    costEstimated: z.boolean(),
+  }),
+  z.object({
+    status: z.literal('unknown'),
+    question: z.string(),
+    /** "The Brain doesn't know: nothing in it matches …" or "The records found don't answer it." */
+    message: z.string(),
+    /** What retrieval found, if anything (so the user can look). */
+    sources: z.array(BrainAskSourceSchema),
+    /** 0 when no AI run happened. */
+    tokens: z.number(),
+    costUsd: z.number(),
+  }),
+  z.object({ status: z.literal('error'), question: z.string(), message: z.string() }),
+]);
+export type BrainAskResult = z.infer<typeof BrainAskResultSchema>;
+
+/** Shown before the first question: what one question roughly costs and on which engine. */
+export const BrainAskEstimateSchema = z.object({
+  /** False when no engine can run it right now (message says why). */
+  canAsk: z.boolean(),
+  engine: z.string().nullable(),
+  /** True for a local model: no subscription use, no money. */
+  free: z.boolean(),
+  tokensLow: z.number(),
+  tokensHigh: z.number(),
+  /** Null when the engine doesn't price runs (subscription) or it's free. */
+  costUsdHigh: z.number().nullable(),
+  /** e.g. "About 3,000–8,000 tokens per question on Claude Code (your subscription)." */
+  message: z.string(),
+});
+export type BrainAskEstimate = z.infer<typeof BrainAskEstimateSchema>;
 
 export const BrainRecordViewSchema = z.object({
   id: z.string(),
@@ -976,6 +1061,9 @@ export interface HiveApi {
   codeLookup(req: z.infer<typeof CodeLookupRequestSchema>): Promise<CodeLookupResult>;
   brainGraph(req: BrainGraphRequest): Promise<BrainGraphView>;
   brainDashboard(): Promise<BrainDashboardView>;
+  /** Ask the Brain (Phase 4 A1). Never throws for an unknown answer: it says so. */
+  brainAsk(req: BrainAskRequest): Promise<BrainAskResult>;
+  brainAskEstimate(): Promise<BrainAskEstimate>;
   brainEdit(req: BrainEditRequest): Promise<BrainEditResult>;
   libraryCastes(): Promise<CasteView[]>;
   librarySearch(req: LibrarySearchRequest): Promise<LibrarySearchResult>;

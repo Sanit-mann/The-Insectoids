@@ -58,6 +58,7 @@ export const budgetForTier = (tier: Tier): number => (tier === 'strongest' ? 5 :
 function ruleReason(input: RouteInput): string {
   if (input.role === 'queen') return 'rule: the Queen plans on the strongest model';
   if (input.role === 'inspector') return `rule: inspecting a ${input.priority} priority card`;
+  if (input.role === 'librarian' && input.priority === 'low') return 'rule: the Librarian answers from the Brain on the light model, low effort';
   if (input.role === 'librarian') return 'rule: the Librarian reviews the Brain on the standard model, low effort';
   if (input.role === 'scout') return 'rule: the Scout surveys the code on the light model';
   if (input.role === 'foreman') return 'rule: the Foreman decides on the standard model, low effort';
@@ -76,6 +77,11 @@ export function routeCard(input: RouteInput, models: ModelTiers, engine: EngineI
     return { engine, tier: 'strongest', model: models.strongest, effort: 'high', reason: ruleReason(input), maxTurns: 30, maxBudgetUsd: 3, timeoutMs: 15 * MIN };
   }
 
+  if (input.role === 'librarian' && input.priority === 'low') {
+    // Light Librarian work (Ask the Brain, A1): one short cited answer from a few numbered sources, no tools.
+    // The light tier makes it light work, so a free local model takes it first when one is ready.
+    return { engine, tier: 'light', model: models.light, effort: 'low', reason: ruleReason(input), maxTurns: 4, maxBudgetUsd: budgetForTier('light'), timeoutMs: 5 * MIN };
+  }
   if (input.role === 'librarian') {
     // A short, read-only review of a compact audit summary: the standard tier at low effort is plenty.
     return { engine, tier: 'standard', model: models.standard, effort: 'low', reason: ruleReason(input), maxTurns: 12, maxBudgetUsd: 1, timeoutMs: 10 * MIN };

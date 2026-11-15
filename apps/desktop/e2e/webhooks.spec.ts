@@ -54,8 +54,16 @@ async function webhookCadence(win: Page, name: string, when: { type: 'webhook'; 
   return c.id;
 }
 
-/** The text main put on the clipboard (copySecret / newSecret never return the secret to the renderer). */
-const clipboardText = (): Promise<string> => t.app.evaluate(({ clipboard }) => clipboard.readText());
+/**
+ * The text main put on the clipboard (copySecret / newSecret never return the secret to the renderer), as the e2e hook
+ * recorded it: the system clipboard itself is shared with every program on the computer and can be busy or locked.
+ */
+const clipboardText = (): Promise<string> => t.app.evaluate(() => (globalThis as unknown as { __insectoidsE2E?: { lastCopiedText?: string } }).__insectoidsE2E?.lastCopiedText ?? '');
+const clearClipboardRecord = (): Promise<void> =>
+  t.app.evaluate(() => {
+    const hook = (globalThis as unknown as { __insectoidsE2E?: { lastCopiedText?: string } }).__insectoidsE2E;
+    if (hook) hook.lastCopiedText = '';
+  });
 
 async function copySecret(win: Page, cadenceId: string): Promise<string> {
   const r = await win.evaluate((id) => (globalThis as unknown as AppWindow).insectoids.webhooks.copySecret(id), cadenceId);
@@ -262,7 +270,7 @@ test('the Cadence screen shows the webhook URL, copies the secret, and words the
   await expect(win.getByText(secret)).toHaveCount(0);
 
   // "Copy secret" puts it on the clipboard (in main), never on screen.
-  await t.app.evaluate(({ clipboard }) => clipboard.writeText(''));
+  await clearClipboardRecord();
   await panel.getByRole('button', { name: 'Copy secret' }).click();
   await expect.poll(clipboardText, { timeout: 5_000 }).toBe(secret);
 

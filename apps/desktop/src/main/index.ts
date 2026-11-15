@@ -69,6 +69,8 @@ type E2EHook = BackgroundE2E & {
   agentEditRecord?: (id: string, body: string) => Promise<void>;
   /** C2: a record whose body holds a secret (past the Brain's guard), for the Obsidian export test. */
   plantSecretRecord?: (title: string, body: string) => Promise<{ id: string }>;
+  /** e2e: what main last put on the clipboard (the clipboard itself is shared with everything on the computer). */
+  lastCopiedText?: string;
   /** C4: "Restart to update" was pressed (the app does not quit under e2e). */
   updateRestartRequested?: boolean;
   /** C4: the release page "Download" or "What's new" would have opened in the browser. */
@@ -491,7 +493,16 @@ function registerIpc(): void {
   }
   registerVaultIpc({ vault: vault!, services: services!, broker: broker!, providers: providers!, assertTrustedSender });
   registerProvidersIpc({ providers: providers!, vault: vault!, llm: llm!, assertTrustedSender });
-  registerWebhookIpc({ service: webhooks!, secrets: webhookSecrets!, vault: vault!, webhookCadences, clipboard, assertTrustedSender });
+  // e2e only: the system clipboard is shared with everything on the computer (and can be locked by another program),
+  // so tests read what was copied from the e2e hook instead. Outside e2e only the clipboard gets it.
+  const webhookClipboard = {
+    writeText: (text: string): void => {
+      clipboard.writeText(text);
+      const hook = e2e();
+      if (hook) hook.lastCopiedText = text;
+    },
+  };
+  registerWebhookIpc({ service: webhooks!, secrets: webhookSecrets!, vault: vault!, webhookCadences, clipboard: webhookClipboard, assertTrustedSender });
   const testBackupFolder = isE2E ? process.env['INSECTOIDS_E2E_BACKUP_FOLDER'] : undefined;
   registerBackupIpc({
     settings: settings!,

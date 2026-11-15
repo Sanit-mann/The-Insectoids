@@ -1,5 +1,8 @@
 import { type BrowserWindow, type IpcMainInvokeEvent, dialog, ipcMain } from 'electron';
 import {
+  BrainAskEstimateSchema,
+  BrainAskRequestSchema,
+  BrainAskResultSchema,
   BrainDashboardViewSchema,
   BrainEditRequestSchema,
   BrainEditResultSchema,
@@ -98,6 +101,10 @@ export function registerHiveIpc(d: Deps): void {
     // Words + meaning when meaning search is on (the service embeds the query in the Brain host); each hit says how it was found.
     return BrainHitViewSchema.array().parse(hits.map(({ id, kind, shelf, title, summary, match, status }) => ({ id, kind, shelf, title, summary, match, status })));
   });
+
+  // Ask the Brain (Phase 4 A1): one short read-only run over Brain records; the estimate is a read.
+  handle(HIVE_IPC.brainAsk, async (arg) => BrainAskResultSchema.parse(await host().call('brainAsk', BrainAskRequestSchema.parse(arg))));
+  handle(HIVE_IPC.brainAskEstimate, async () => BrainAskEstimateSchema.parse(await host().call('brainAskEstimate')));
 
   // The code map (Phase 2 B4): read-only lookups on the current project's map, answered by the Brain host.
   handle(HIVE_IPC.codeLookup, async (arg) => CodeLookupResultSchema.parse(await host().call('codeLookup', CodeLookupRequestSchema.parse(arg))));

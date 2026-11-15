@@ -16,8 +16,10 @@ const READY_WAIT_MS = 15_000;
 /** The error in-flight calls get when the host process dies under them. */
 const HOST_STOPPED = 'The Brain host stopped.';
 /** Host methods that only read: safe to repeat after a crash-and-restart. */
-const READ_ONLY_METHODS: ReadonlySet<HostMethod> = new Set<HostMethod>(['snapshot', 'changes', 'project', 'brainRecent', 'codeLookup', 'brainGraph', 'brainDashboard', 'libraryCastes', 'librarySearch', 'libraryItem', 'budgets', 'cadenceRuns', 'engineCard']);
+const READ_ONLY_METHODS: ReadonlySet<HostMethod> = new Set<HostMethod>(['snapshot', 'changes', 'project', 'brainRecent', 'codeLookup', 'brainGraph', 'brainDashboard', 'libraryCastes', 'librarySearch', 'libraryItem', 'budgets', 'cadenceRuns', 'engineCard', 'brainAskEstimate']);
 const RPC_TIMEOUT_MS = 30_000;
+/** Calls that wait for an AI run: a question to the Brain (Phase 4 A1) may take minutes on a real engine. */
+const LONG_RPC_TIMEOUT_MS: Partial<Record<HostMethod, number>> = { brainAsk: 11 * 60_000 };
 
 export const restartDelay = (attempt: number): number => BACKOFF_MS[Math.min(attempt, BACKOFF_MS.length - 1)]!;
 
@@ -177,11 +179,12 @@ export class BrainHost {
     const proc = this.#proc;
     if (!proc || this.#status.state !== 'ready') return Promise.reject(new Error(this.#status.message));
     const id = ++this.#rpcId;
+    const timeoutMs = LONG_RPC_TIMEOUT_MS[method] ?? RPC_TIMEOUT_MS;
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`The hive did not answer within ${RPC_TIMEOUT_MS / 1000} s.`));
-      }, RPC_TIMEOUT_MS);
+        reject(new Error(`The hive did not answer within ${timeoutMs / 1000} s.`));
+      }, timeoutMs);
       this.#pending.set(id, { resolve, reject, timer });
       const msg: ToHost = { type: 'rpc', id, method, ...(params === undefined ? {} : { params }) };
       proc.postMessage(msg);

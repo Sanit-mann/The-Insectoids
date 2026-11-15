@@ -13,6 +13,7 @@ import { basename, isAbsolute, join } from 'node:path';
 import { promisify } from 'node:util';
 import { type ApprovalItem, type Brain, type BoardCard, type Cadence, type Goal, ConflictError, STOP_WORDS, SecretError, brainHealth, writeBackup } from '@insectoids/brain';
 import {
+  ASK_ROUTE,
   approvalFor,
   auditSummary,
   isInsectRole,
@@ -62,6 +63,7 @@ import { CadenceKeeper, isBuiltIn } from './cadence-keeper';
 import { CadenceProposer } from './cadence-proposals';
 import { approvalView, buildDigest } from './digest';
 import { exportObsidian } from './obsidian-export';
+import { NOTHING_MATCHES, NOT_ANSWERED, answerRecord, askEstimate, citedSources, findSources, sourceView } from './brain-ask';
 import {
   type ActivityView,
   type AgentView,
@@ -74,6 +76,10 @@ import {
   LibrarySearchRequestSchema,
   type LibrarySearchResult,
   type BrainDashboardView,
+  type BrainAskEstimate,
+  type BrainAskRequest,
+  BrainAskRequestSchema,
+  type BrainAskResult,
   type BudgetsView,
   type CadenceRunView,
   type DigestView,
@@ -391,6 +397,8 @@ export class HiveManager {
   #backupDirSet: Promise<void>;
   #backupDirKnown: () => void = () => {};
   #hiveReviewing = false;
+  /** A question to the Brain is being answered (Phase 4 A1): one at a time. */
+  #asking = false;
 
   constructor(o: HiveManagerOptions) {
     this.#o = o;
@@ -1176,7 +1184,33 @@ export class HiveManager {
         return p.hive.requestUndoMerge(this.#ownGoal(cmd.goalId).id);
       case 'requestRedoMerge':
         return p.hive.requestRedoMerge(this.#ownGoal(cmd.goalId).id);
+      case 'saveBrainAnswer':
+        return this.#saveBrainAnswer(p, cmd);
     }
+  }
+
+  /**
+   * Keep an Ask-the-Brain answer (Phase 4 A1): an unconfirmed `update` on the project's shelf, written as the
+   * Librarian (never as the user, so it never counts as confirmed), linked `cites` to each record it cited.
+   */
+  #saveBrainAnswer(p: ProjectState, cmd: Extract<HiveCommand, { type: 'saveBrainAnswer' }>): void {
+    const { brain } = this.#o;
+    const ids = [...new Set(cmd.citationIds)];
+    const cited = ids.map((id) => {
+      const rec = brain.get(id);
+      if (!rec || (rec.shelf !== p.view.shelf && rec.shelf !== 'global')) throw new Error(`Not saved: ${id} is not a record in this project's Brain.`);
+      return rec;
+    });
+    const { title, body } = answerRecord(cmd.question, cmd.answer, cited.map((r) => r.title));
+    let id: string;
+    try {
+      id = brain.write({ kind: 'update', shelf: p.view.shelf, title, body, trust: 'unconfirmed', source: 'Ask the Brain' }, { type: 'agent', id: LIBRARIAN }).id;
+    } catch (err) {
+      if (err instanceof SecretError) throw new Error('Not saved: it looks like a password or key. Keys belong in the Vault, never in the Brain.', { cause: err });
+      throw err;
+    }
+    for (const rec of cited) brain.link(id, rec.id, 'cites');
+    this.#note('brain-ask', `Saved an answer from Ask the Brain as an unconfirmed note: ${short(title, 120)}`);
   }
 
   #mustProject(): ProjectState {
@@ -1677,6 +1711,72 @@ export class HiveManager {
       routing,
       learned,
     });
+  }
+
+  // ---- Ask the Brain (Memory 01; Phase 4 A1) -------------------------------------------------------
+
+  /**
+   * Answer a question only from Brain records: hybrid search over the project's shelf and Global, then one short
+   * read-only run (the Hive's askBrain) over the numbered sources. Nothing found → "doesn't know" with no run.
+   * Quiet: no activity line, and nothing is written to the Brain unless the user saves the answer.
+   */
+  async brainAsk(req: BrainAskRequest): Promise<BrainAskResult> {
+    const raw = (req as { question?: unknown } | null)?.question;
+    const parsed = BrainAskRequestSchema.safeParse(req);
+    if (!parsed.success) return { status: 'error', question: typeof raw === 'string' ? raw.trim() : '', message: 'Ask a question of 3 to 500 characters.' };
+    const question = parsed.data.question;
+    const error = (message: string): BrainAskResult => ({ status: 'error', question, message });
+    const p = this.#project;
+    if (!p) return error('Open a project first.');
+    if (this.#asking) return error('One question at a time.');
+    this.#asking = true;
+    try {
+      const embed = this.#o.meaning ? (text: string) => this.#o.meaning!.embedQuery(text) : undefined;
+      const sources = await findSources(this.#o.brain, question, p.view.shelf, embed);
+      if (!sources.length) return { status: 'unknown', question, message: NOTHING_MATCHES, sources: [], tokens: 0, costUsd: 0 };
+      if (!this.#engines.canRoute('librarian')) return error('No AI engine is ready to answer. Set one up in Connections.');
+      const work = p.hive.askBrain(question, sources);
+      // Closing the project waits for the run, like any other background work.
+      this.#track(work.catch(() => undefined));
+      const r = await work;
+      if (!r.ok) {
+        if (!r.unknown) return error(`The Brain couldn't answer: ${(r.error ?? 'the AI run failed').replace(/\.$/, '')}.`);
+        return { status: 'unknown', question, message: NOT_ANSWERED, sources: sources.map(sourceView), tokens: r.tokens, costUsd: r.costUsd };
+      }
+      const cited = citedSources(sources, r.cited);
+      if (!cited.length) return { status: 'unknown', question, message: NOT_ANSWERED, sources: sources.map(sourceView), tokens: r.tokens, costUsd: r.costUsd };
+      return {
+        status: 'answered',
+        question,
+        answer: r.answer,
+        citations: cited.map(sourceView),
+        sourcesGiven: sources.length,
+        engine: r.engine,
+        model: r.model,
+        tokens: r.tokens,
+        costUsd: r.costUsd,
+        costEstimated: r.costEstimated,
+      };
+    } catch (err) {
+      return error(`The Brain couldn't answer: ${(err instanceof Error ? err.message : String(err)).replace(/\.$/, '')}.`);
+    } finally {
+      this.#asking = false;
+    }
+  }
+
+  /** What one question roughly costs and where it runs (the Treasurer's route for the Librarian's role). */
+  brainAskEstimate(): BrainAskEstimate {
+    let engine: { id: string; name: string; free: boolean } | null = null;
+    if (this.#engines.canRoute('librarian')) {
+      // The same route the question's run takes, so the engine named here is the one that answers.
+      const route = this.#engines.route(ASK_ROUTE, routeCard);
+      const a = this.#engines.adapter(route.engine);
+      engine = { id: route.engine, name: a?.name ?? route.engine, free: route.engine === 'fake' || a?.capabilities.free === true };
+    }
+    const runs = this.#o.brain.outcomes
+      .recent(500)
+      .map((o) => ({ role: o.role, engine: o.engine, tokens: o.tokensIn + o.tokensOut + o.tokensCache, costUsd: o.costUsd }));
+    return askEstimate({ project: this.#project !== null, engine, runs });
   }
 
   /** Dashboard numbers for the open project's shelf (plus global), or global when no project is open. */
