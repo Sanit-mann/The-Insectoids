@@ -63,13 +63,13 @@ Like Phases 1–3, every step ends in something that works and is tested, and co
 
 ## Decisions for the user
 
-Open; asked when Phase 4 starts:
+Decided 2026-11-15:
 
-1. **Which subscriptions to build engines for.** Copilot is installed here; Codex and the Cursor agent aren't. Engines without a subscription to test against stay "listed, not available".
-2. **Google sign-in for Gmail and Calendar.** It needs a Google Cloud project with an OAuth client, which the user creates (free). In Google's "testing" mode only listed test users can sign in and tokens last 7 days, which is enough for personal use. Otherwise C2–C3 wait.
-3. **Container runtime.** Docker Desktop or Podman, installed by the user (Docker Desktop is free for personal use). Without one, D1–D2 are built and tested against a fake runtime only.
-4. **The Globe's 3D library.** Three.js (pinned, at least 14 days old) is the usual choice, or a lighter WebGL renderer written in the app.
-5. **Order.** Proposed: A (Brain) → B (engines) → C (OAuth) → D (containers) → E.
+1. **Engines:** GitHub Copilot is built and tested (its command is installed here). Codex and the Cursor agent stay "listed, not available" until there is a subscription to test against; B3 shrinks to that, and the generic engine (B1) and presets (B4) still come.
+2. **Google sign-in: yes.** The user creates the Google Cloud project and OAuth client when C1 starts, with step-by-step guidance. Testing mode (only the user signs in; tokens last 7 days) is fine for personal use. The app never handles the user's Google password; the client secret, if any, goes into the Vault by the user.
+3. **Containers: a fake runtime for now.** D1–D2 are built and tested against a fake Docker/Podman runtime; real container runs wait until the user installs one.
+4. **The Globe uses Three.js**, pinned and at least 14 days old (asked again with the exact version and size before installing).
+5. **Order:** A (Brain) → B (engines) → C (OAuth) → D (containers) → E, one step at a time on the user's yes.
 
 ## Not in Phase 4 (by design)
 
