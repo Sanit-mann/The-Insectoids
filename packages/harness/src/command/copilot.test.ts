@@ -206,6 +206,7 @@ describe('finding Copilot on this computer', () => {
       },
       env: { PATH: `${vscode};${npm}` },
       platform: 'win32',
+      arch: 'x64',
     });
     expect(found).toEqual({ status: 'installed', command: native, args: [], version: '1.0.105' });
     expect(ran).toEqual([`${native} --version`]);

@@ -21,6 +21,8 @@ export interface CommandDetectDeps {
   run: (command: string, args: readonly string[]) => Promise<string>;
   env: NodeJS.ProcessEnv;
   platform: NodeJS.Platform;
+  /** The CPU the native package is for (default: this computer's). Tests name it, so they read the same on any runner. */
+  arch?: string;
 }
 
 const defaultDeps = (): CommandDetectDeps => ({
@@ -67,7 +69,7 @@ export function resolveCmdShim(text: string, shimDir: string, d: Pick<CommandDet
 type Found = { command: string; args: string[] } | { unsupported: string; command: string };
 
 /** The preset's program on PATH: a real executable first; on Windows an npm launcher is read, never run. */
-export function findCommand(p: CommandPreset, d: Pick<CommandDetectDeps, 'exists' | 'readFile' | 'env' | 'platform'>): Found | null {
+export function findCommand(p: CommandPreset, d: Pick<CommandDetectDeps, 'exists' | 'readFile' | 'env' | 'platform' | 'arch'>): Found | null {
   const win = d.platform === 'win32';
   const { join } = pathOf(d.platform);
   let shim: string | null = null;
@@ -88,7 +90,7 @@ export function findCommand(p: CommandPreset, d: Pick<CommandDetectDeps, 'exists
   // An npm launcher whose script only starts a native program (Copilot): start that program directly.
   const script = resolved?.args[0];
   if (resolved && script && p.resolveScript) {
-    const native = p.resolveScript(script, d.exists, d.platform);
+    const native = p.resolveScript(script, d.exists, d.platform, d.arch ?? process.arch);
     if (native && d.exists(native) && !ignored(native)) resolved = { command: native, args: [] };
   }
   return (

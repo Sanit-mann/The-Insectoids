@@ -96,6 +96,7 @@ describe('finding Codex on this computer', () => {
       run: async () => 'codex-cli 0.166.0',
       env: { PATH: npm },
       platform: 'win32',
+      arch: 'x64',
     });
     expect(found).toEqual({ status: 'installed', command: native, args: [], version: '0.166.0' });
     expect(codexNativeBinary(script, () => false, 'win32', 'x64')).toBeNull();

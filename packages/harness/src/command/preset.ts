@@ -83,7 +83,7 @@ export interface CommandPreset {
    * The native program behind the CLI's npm launcher script, when it has one: the hive then starts it
    * directly (no Node.js hop in between). Null: start the script with Node.js as usual.
    */
-  resolveScript?: (script: string, exists: (path: string) => boolean, platform: NodeJS.Platform) => string | null;
+  resolveScript?: (script: string, exists: (path: string) => boolean, platform: NodeJS.Platform, arch?: string) => string | null;
   /** e.g. { args: ['--version'], pattern: /(\d+\.\d+\.\d+)/, minimum: '1.2.0' }; the pattern's group 1 is the version. */
   version: { args: readonly string[]; pattern: RegExp; minimum: string };
   /** The official install command, shown for the user to copy (or run with consent). */
