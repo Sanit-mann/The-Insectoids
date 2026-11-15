@@ -140,7 +140,7 @@ export const COPILOT_PRESET: CommandPreset = {
   executable: 'copilot',
   // VS Code puts a `copilot` stand-in on PATH that isn't the CLI (it offers to install it).
   ignorePaths: /[\\/]copilot-shim[\\/]/i,
-  resolveScript: (script, exists, platform) => copilotNativeBinary(script, exists, platform),
+  resolveScript: (script, exists, platform, arch) => copilotNativeBinary(script, exists, platform, arch),
   version: { args: ['--version'], pattern: /Copilot CLI (\d+\.\d+\.\d+)/, minimum: '1.0.105' },
   install: { command: 'npm install -g @github/copilot@1.0.105', note: "GitHub's official package (its own licence terms). Needs a GitHub Copilot plan." },
   signIn: { command: 'copilot login', note: 'Opens your browser to sign in to GitHub. The hive never sees your login.' },

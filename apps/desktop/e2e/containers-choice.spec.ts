@@ -147,11 +147,14 @@ test('the setting is a three-way choice that saves, works from the keyboard and 
   // One tab stop (the chosen mode); arrow keys move the choice and save it.
   await expect(radio('When needed')).toHaveAttribute('tabindex', '0');
   await expect(radio('Off')).toHaveAttribute('tabindex', '-1');
+  // Arrow keys are ignored while a choice is still saving (the options say so with aria-disabled): wait for it, as a user would.
+  await expect(radio('When needed')).not.toHaveAttribute('aria-disabled', 'true');
   await radio('When needed').focus();
   await win.keyboard.press('ArrowDown');
   await expect(radio('Every card')).toBeFocused();
   await expect.poll(async () => (await status(win)).settings.mode, { timeout: 15_000 }).toBe('always');
   await expect(radio('Every card')).toHaveAttribute('aria-checked', 'true');
+  await expect(radio('Every card')).not.toHaveAttribute('aria-disabled', 'true');
   await win.keyboard.press('ArrowUp');
   await expect(radio('When needed')).toBeFocused();
   await expect.poll(async () => (await status(win)).settings.mode, { timeout: 15_000 }).toBe('auto');

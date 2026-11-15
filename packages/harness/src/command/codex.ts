@@ -132,7 +132,7 @@ export const CODEX_PRESET: CommandPreset = {
   name: 'Codex CLI',
   vendor: 'OpenAI',
   executable: 'codex',
-  resolveScript: (script, exists, platform) => codexNativeBinary(script, exists, platform),
+  resolveScript: (script, exists, platform, arch) => codexNativeBinary(script, exists, platform, arch),
   version: { args: ['--version'], pattern: /codex-cli (\d+\.\d+\.\d+)/, minimum: '0.166.0' },
   install: { command: 'npm install -g @openai/codex@0.166.0', note: "OpenAI's official package (Apache-2.0). Needs a ChatGPT plan or an OpenAI API key." },
   signIn: { command: 'codex login', note: 'Sign in with your ChatGPT account. The hive never sees your login.' },

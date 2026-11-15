@@ -298,7 +298,10 @@ test.describe('the Globe on a big Brain (5,000 records)', () => {
     await t?.close();
   });
 
-  test('draws all 5,000 within 15 s, and spins at a usable frame rate', async () => {
+  // 15 s on a real computer (about 2 s on the dev PC); CI's virtual machines draw WebGL in software, so they get 30 s.
+  const READY_MS = process.env['CI'] ? 30_000 : 15_000;
+
+  test('draws all 5,000 in time, and spins at a usable frame rate', async () => {
     const info = test.info();
     test.setTimeout(120_000);
     const { win } = t;
@@ -308,10 +311,10 @@ test.describe('the Globe on a big Brain (5,000 records)', () => {
     await win.getByRole('group', { name: 'Which shelf' }).getByRole('button', { name: 'All', exact: true }).click();
     const g = await apiGraph(win, { scope: 'all' });
     expect(g.nodes.length).toBe(GLOBE_LIMIT);
-    await expect.poll(async () => numberAttr(globe(win), 'data-nodes'), { timeout: 15_000 }).toBe(g.nodes.length);
-    await expectGlobeReady(win, 15_000);
+    await expect.poll(async () => numberAttr(globe(win), 'data-nodes'), { timeout: READY_MS }).toBe(g.nodes.length);
+    await expectGlobeReady(win, READY_MS);
     const readyMs = Date.now() - started;
-    expect(readyMs).toBeLessThan(15_000);
+    expect(readyMs).toBeLessThan(READY_MS);
     expect(await numberAttr(globe(win), 'data-edges')).toBeGreaterThan(0);
     await expect(showingLine(win)).toHaveText(showing(g.nodes.length, g.nodes.length + g.hidden));
 

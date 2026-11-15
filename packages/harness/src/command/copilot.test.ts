@@ -210,6 +210,16 @@ describe('finding Copilot on this computer', () => {
     });
     expect(found).toEqual({ status: 'installed', command: native, args: [], version: '1.0.105' });
     expect(ran).toEqual([`${native} --version`]);
+    // The CPU reaches the resolver: on an arm64 computer the x64 program isn't picked; npm's loader runs instead.
+    const arm = await detectCommand(COPILOT_PRESET, {
+      exists: (f) => f in files,
+      readFile: (f) => files[f] ?? '',
+      run: async () => 'GitHub Copilot CLI 1.0.105.',
+      env: { PATH: `${vscode};${npm}` },
+      platform: 'win32',
+      arch: 'arm64',
+    });
+    expect(arm).toEqual({ status: 'installed', command: win32.join(npm, 'node.exe'), args: [loader], version: '1.0.105' });
   });
 
   it('an older Copilot is outdated; the loader falls back to Node when the native package is missing', async () => {
