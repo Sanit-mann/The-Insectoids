@@ -64,6 +64,11 @@ export interface CommandGuard {
    * Throwing refuses the run (e.g. a value the CLI would expand).
    */
   wireMcp: ((servers: HiveMcpServers, run: { runDir: string; platform: NodeJS.Platform }) => McpWiring) | null;
+  /**
+   * Call wireMcp on every run, also with no servers: for a CLI whose guard itself lives in the per-run config
+   * the wiring writes (e.g. a settings file that denies its own tools). Then disableBuiltinTools may be empty.
+   */
+  wireAlways?: boolean;
 }
 
 export interface CommandPreset {
@@ -116,6 +121,8 @@ export interface CommandPreset {
    */
   signedInCheck?: { args: readonly string[]; signedIn: RegExp };
   guard: CommandGuard | null;
+  /** For an unguarded preset: why, in plain words (shown after "can't be guarded yet"). */
+  unguardedWhy?: string;
   /** Flags that auto-approve or bypass safety; the run is refused if any argument is one of them. */
   forbiddenArgs: readonly string[];
   reportsCost: boolean;
@@ -143,8 +150,8 @@ export function isForbiddenArg(arg: string, forbidden: readonly string[]): boole
  * the adapter's capabilities: no guard, no work.
  */
 export function unguardedReason(p: CommandPreset): string | null {
-  if (!p.guard) return `${p.name} can't be guarded yet; it will run inside a container once container mode exists.`;
-  if (p.guard.disableBuiltinTools.length === 0) return `${p.name}'s preset doesn't say how to switch off its own tools, so it can't be guarded yet.`;
+  if (!p.guard) return `${p.name} can't be guarded yet; it will run inside a container once container mode exists.${p.unguardedWhy ? ` ${p.unguardedWhy}` : ''}`;
+  if (p.guard.disableBuiltinTools.length === 0 && !(p.guard.wireAlways && p.guard.wireMcp)) return `${p.name}'s preset doesn't say how to switch off its own tools, so it can't be guarded yet.`;
   const bad = [...p.headlessArgs, ...p.guard.disableBuiltinTools].find((a) => isForbiddenArg(a, p.forbiddenArgs));
   if (bad) return `${p.name}'s preset passes "${bad}", which would approve every action without the command guard.`;
   return null;

@@ -45,7 +45,7 @@ export function buildCommandInvocation(p: CommandPreset, o: CommandArgsInput): C
   // The hive tools change files: never in a read-only run, whatever the caller passed.
   const servers: HiveMcpServers = { ...o.mcpServers };
   if (o.readOnly) delete servers.hive;
-  const wiring = p.guard.wireMcp && Object.keys(servers).length ? p.guard.wireMcp(servers, { runDir: o.runDir, platform: o.platform ?? process.platform }) : {};
+  const wiring = p.guard.wireMcp && (Object.keys(servers).length || p.guard.wireAlways) ? p.guard.wireMcp(servers, { runDir: o.runDir, platform: o.platform ?? process.platform }) : {};
 
   const value = (what: string, v: string): string => {
     if (v.startsWith('-')) throw new Error(`The ${what} "${v}" starts with "-", so ${p.name} would read it as a flag. Refusing to run.`);

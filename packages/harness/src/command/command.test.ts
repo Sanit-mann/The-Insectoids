@@ -104,6 +104,28 @@ describe('the command line (Phase 4 B1)', () => {
     expect(buildCommandInvocation(noMcp, { ...base, readOnly: true }).files).toEqual([]);
   });
 
+  it('a guard that lives in a per-run config is written on every run, also with no servers (Phase 4 B4)', () => {
+    const configGuard = fakeCommandPreset({
+      guard: {
+        disableBuiltinTools: [],
+        wireAlways: true,
+        wireMcp: (servers) => ({ env: { FAKE_HOME: 'run' }, files: [{ path: 'home/settings.json', content: JSON.stringify({ deny: ['shell', 'write'], servers: Object.keys(servers) }) }] }),
+      },
+    });
+    expect(unguardedReason(configGuard)).toBeNull();
+    const inv = buildCommandInvocation(configGuard, { ...base, readOnly: true, mcpServers: {} });
+    expect(inv.files).toEqual([{ path: join('home', 'settings.json'), content: '{"deny":["shell","write"],"servers":[]}' }]);
+    expect(inv.env).toEqual({ FAKE_HOME: 'run' });
+    // Without wireAlways, an empty tool switch still means unguarded.
+    expect(unguardedReason(fakeCommandPreset({ guard: { disableBuiltinTools: [], wireMcp: configGuard.guard!.wireMcp } }))).toMatch(/switch off its own tools/);
+  });
+
+  it('an unguarded preset can say why, after the plain reason', () => {
+    expect(unguardedReason(fakeCommandPreset({ guard: null, unguardedWhy: 'Its print mode edits files on its own.' }))).toBe(
+      "Fake command can't be guarded yet; it will run inside a container once container mode exists. Its print mode edits files on its own.",
+    );
+  });
+
   it('values that would read as flags, and wiring files that leave the run folder, are refused', () => {
     expect(() => buildCommandInvocation(p, { ...base, model: '--yolo' })).toThrow(/starts with "-"/);
     const positional = fakeCommandPreset({ prompt: { via: 'arg', flag: null } });

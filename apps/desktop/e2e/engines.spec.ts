@@ -33,6 +33,13 @@ test('lists every engine: the scripted one ready, the other engines listed but n
     ['copilot', 'missing'],
     // Phase 4 B3: listed with its real install, but it can't be guarded yet (waits for container mode).
     ['cursor', 'unsupported'],
+    // Phase 4 B4: Qwen Code is guarded (listed but never checked here); the others wait for container mode.
+    ['qwen', 'missing'],
+    ['grok', 'unsupported'],
+    ['kimi', 'unsupported'],
+    ['crush', 'unsupported'],
+    ['pi', 'unsupported'],
+    ['antigravity', 'unsupported'],
   ]);
   expect(s.engines.find((e) => e.id === 'codex')).toMatchObject({ vendor: 'OpenAI', enabled: false, guard: 'policy-and-tools', install: { command: 'npm install -g @openai/codex@0.166.0' }, signIn: { command: 'codex login' } });
   const cursor = s.engines.find((e) => e.id === 'cursor')!;
@@ -60,7 +67,7 @@ test('switching engines off and on, and reordering them', async () => {
   expect(await command({ type: 'setEngineEnabled', engineId: 'gemini', enabled: false })).toEqual({ ok: true });
   expect(await command({ type: 'setEngineOrder', order: ['fake', 'opencode'] })).toEqual({ ok: true });
   let s = await snap();
-  expect(s.engines.map((e) => e.id)).toEqual(['fake', 'opencode', 'claude', 'gemini', 'codex', 'copilot', 'cursor']);
+  expect(s.engines.map((e) => e.id)).toEqual(['fake', 'opencode', 'claude', 'gemini', 'codex', 'copilot', 'cursor', 'qwen', 'grok', 'kimi', 'crush', 'pi', 'antigravity']);
   expect(s.engines.find((e) => e.id === 'gemini')!.enabled).toBe(false);
   expect(await command({ type: 'setEngineEnabled', engineId: 'gemini', enabled: true })).toEqual({ ok: true });
   s = await snap();

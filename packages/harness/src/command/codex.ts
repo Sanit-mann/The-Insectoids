@@ -182,6 +182,7 @@ export const CURSOR_PRESET: CommandPreset = {
   output: { format: 'text' },
   signedInCheck: { args: ['status'], signedIn: /logged in|signed in/i },
   guard: null,
+  unguardedWhy: 'Its headless mode edits files on its own, and its tools can’t be set for one run.',
   forbiddenArgs: ['--force', '-f', '--yolo', '--approve-mcps', '--trust'],
   reportsCost: false,
   subscription: true,
