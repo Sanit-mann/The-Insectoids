@@ -14,8 +14,9 @@ import { useDigest } from './useDigest';
 /**
  * The "while you were away" dialog (Cadence 05-D8; App 07; Phase 3 B1), mounted once in the app shell.
  * - Opens by itself when the snapshot's `digest.unseen` is true and the user is arriving: when the app opens, or when
- *   the window comes back after being hidden (to the tray) or losing focus. Never in the middle of use: work that
- *   finishes while the user is in the app shows as the top-bar dot. At most once per unseen period (since +
+ *   the window is shown again from the tray or restored (main's `window-shown` push). Never in the middle of use, and
+ *   not on mere focus changes (switching apps, which also fire as test windows come and go on macOS): then the
+ *   top-bar dot shows instead. At most once per unseen period (since +
  *   headline) per renderer session.
  * - Never steals focus from typing: while an input or textarea has focus it waits until that focus leaves.
  * - "Got it" marks the digest seen; "Later" (or Escape, or the close button) only closes it, so the badge stays.
@@ -60,8 +61,7 @@ export function AwayDigestDialog() {
   // Only a new unseen period re-arms the check (not every snapshot refresh).
   const watchKey = badge?.unseen ? periodKey(badge) : null;
 
-  // "The user is arriving": true when the app opens, and again whenever the window is hidden (to the tray) or loses
-  // focus. The dialog only opens by itself on arrival, never in the middle of use: unattended work that finishes
+  // "The user is arriving": true when the app opens, and again whenever the window is shown from the tray or restored. The dialog only opens by itself on arrival, never in the middle of use: unattended work that finishes
   // while the user is in the app shows as the top-bar dot instead.
   const arrivingRef = useRef(true);
   const firstBadgeRef = useRef(true);
@@ -72,25 +72,17 @@ export function AwayDigestDialog() {
     if (!badge.unseen) arrivingRef.current = false;
   }, [badge]);
   useEffect(() => {
-    // The window being hidden, shown again, losing or gaining focus are all the user leaving or coming back. A
-    // window that keeps focus fires none of these, so nothing pops up mid-use.
+    // Only main's signal counts as arriving: the window shown from the tray or restored. The page's own focus and
+    // visibility events don't: they also fire while the user is busy elsewhere, and on macOS as other windows come and go.
     const arriving = (): void => {
       arrivingRef.current = true;
     };
-    document.addEventListener('visibilitychange', arriving);
-    window.addEventListener('blur', arriving);
-    window.addEventListener('focus', arriving);
-    // Main's own signal (the window shown from the tray or focused), which arrives even when the page's focus and
-    // visibility events don't.
     const off = window.insectoids.hive.onEvent((e) => {
       if (e.type === 'window-shown') arriving();
       // A click on a notification or a tray item opens a screen on purpose: the digest doesn't cover it this time.
       if (e.type === 'open-screen') arrivingRef.current = false;
     });
     return () => {
-      document.removeEventListener('visibilitychange', arriving);
-      window.removeEventListener('blur', arriving);
-      window.removeEventListener('focus', arriving);
       off();
     };
   }, []);
