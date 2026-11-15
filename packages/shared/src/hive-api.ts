@@ -29,6 +29,8 @@ export const HIVE_IPC = {
   brainAsk: 'hive:brain-ask',
   /** What one question will roughly cost, shown before the first one. */
   brainAskEstimate: 'hive:brain-ask-estimate',
+  /** The Brain's timeline view (Phase 4 A3). */
+  brainTimeline: 'hive:brain-timeline',
   /** Library screen (Phase 2 C1): the castes, and the catalog of agents and skills. */
   libraryCastes: 'hive:library-castes',
   librarySearch: 'hive:library-search',
@@ -824,6 +826,66 @@ export type BrainGraphRequest = z.input<typeof BrainGraphRequestSchema>;
 export type BrainGraphNode = z.infer<typeof BrainGraphNodeSchema>;
 export type BrainGraphView = z.infer<typeof BrainGraphViewSchema>;
 
+// ---- the Brain's timeline (01-D13 phase 2; Phase 4 A3) ----------------------------------------------
+
+/** What happened to a record at one version (the record_versions log). */
+export const BrainChangeSchema = z.enum(['create', 'update', 'archive', 'supersede', 'unarchive', 'merge']);
+export type BrainChange = z.infer<typeof BrainChangeSchema>;
+
+/** Where the next page starts: the last entry of the previous page (entries are ordered by time, then record, then version, newest first). */
+export const BrainTimelineCursorSchema = z.object({ changedAt: z.number(), recordId: z.string(), version: z.number().int() });
+export type BrainTimelineCursor = z.infer<typeof BrainTimelineCursorSchema>;
+
+export const BrainTimelineRequestSchema = z.object({
+  /** Same meaning as the graph: the open project's shelf plus Global, Global alone, or every shelf. */
+  scope: z.enum(['project', 'global', 'all']).default('project'),
+  kinds: z.array(RecordKindSchema).max(20).optional(),
+  changes: z.array(BrainChangeSchema).max(6).optional(),
+  /** 'user' = only the user's own changes, 'agents' = only agents', or one agent's id ("Ant-02", "Librarian"). */
+  actor: z.string().trim().min(1).max(100).optional(),
+  /** Words to look for in the record's title (at that version). */
+  query: z.string().trim().max(200).optional(),
+  /** Only changes at or after / before these times (ms). */
+  since: z.number().int().nonnegative().optional(),
+  until: z.number().int().nonnegative().optional(),
+  before: BrainTimelineCursorSchema.optional(),
+  limit: z.number().int().min(1).max(200).default(50),
+});
+export type BrainTimelineRequest = z.input<typeof BrainTimelineRequestSchema>;
+
+export const BrainTimelineEntrySchema = z.object({
+  recordId: Id,
+  version: z.number().int(),
+  change: BrainChangeSchema,
+  kind: RecordKindSchema,
+  shelf: z.string(),
+  /** The title at that version (it may have been renamed since). */
+  title: z.string(),
+  /** The record's title now, when different from `title`; else null. */
+  currentTitle: z.string().nullable(),
+  trust: TrustSchema,
+  /** 'user' or the agent's id. */
+  changedBy: z.string(),
+  actorType: z.enum(['user', 'agent']),
+  changedAt: z.number(),
+  /** The change in plain words: "Created", "Edited", "Faded into the archive: unused for 90 days", "Replaced by …", "Merged into …", "Brought back". */
+  what: z.string(),
+  /** The goal the change came from, when the hive knows it (an agent working on a card of that goal); else null. */
+  goalId: z.string().nullable(),
+  goalTitle: z.string().nullable(),
+});
+export type BrainTimelineEntry = z.infer<typeof BrainTimelineEntrySchema>;
+
+export const BrainTimelineViewSchema = z.object({
+  /** Newest first. */
+  entries: z.array(BrainTimelineEntrySchema),
+  /** Pass as `before` to get the next (older) page; null at the end. */
+  nextCursor: BrainTimelineCursorSchema.nullable(),
+  /** Everyone who changed something within the scope (for the actor filter): 'user' first, then agent ids A–Z. */
+  actors: z.array(z.string()),
+});
+export type BrainTimelineView = z.infer<typeof BrainTimelineViewSchema>;
+
 /** Dashboard (01-D13 phase 2): health is in the snapshot (B3); this adds counts, growth, most used and a timeline. */
 export const BrainDashboardViewSchema = z.object({
   /** Shelf the numbers are for (the open project's, or global). */
@@ -1064,6 +1126,8 @@ export interface HiveApi {
   /** Ask the Brain (Phase 4 A1). Never throws for an unknown answer: it says so. */
   brainAsk(req: BrainAskRequest): Promise<BrainAskResult>;
   brainAskEstimate(): Promise<BrainAskEstimate>;
+  /** The Brain's timeline (Phase 4 A3): every change to a record, newest first, paged. */
+  brainTimeline(req: BrainTimelineRequest): Promise<BrainTimelineView>;
   brainEdit(req: BrainEditRequest): Promise<BrainEditResult>;
   libraryCastes(): Promise<CasteView[]>;
   librarySearch(req: LibrarySearchRequest): Promise<LibrarySearchResult>;

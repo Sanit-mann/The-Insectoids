@@ -153,7 +153,7 @@ export function KanbanBoard<T>({ columns, getId, getLabel, renderCard, selectedI
                       key={id}
                       {...(reduce ? {} : { layout: true, layoutId: id })}
                       variants={cardVariants}
-                      initial="initial"
+                      initial={reduce ? false : 'initial'}
                       animate="animate"
                       exit="exit"
                       transition={{ ...gentleSpring, layout: springTransition }}

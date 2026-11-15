@@ -89,7 +89,9 @@ export type HostMethod =
   // Ask the Brain (Memory 01; Phase 4 A1): params BrainAskRequest, result BrainAskResult (never thrown: errors come
   // back as status "error"); 'brainAskEstimate' takes nothing and returns BrainAskEstimate (read-only).
   | 'brainAsk'
-  | 'brainAskEstimate';
+  | 'brainAskEstimate'
+  // The Brain's timeline (Phase 4 A3): params BrainTimelineRequest, result BrainTimelineView (read-only).
+  | 'brainTimeline';
 
 /**
  * Requests the host makes to main (the reverse direction): the secret broker and the Vault live in

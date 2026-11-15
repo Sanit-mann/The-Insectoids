@@ -11,6 +11,8 @@ import {
   BrainHitViewSchema,
   BrainRecordViewSchema,
   BrainSearchRequestSchema,
+  BrainTimelineRequestSchema,
+  BrainTimelineViewSchema,
   CasteViewSchema,
   BudgetsViewSchema,
   CadenceRunViewSchema,
@@ -112,6 +114,8 @@ export function registerHiveIpc(d: Deps): void {
   // Brain screens (Phase 2 B5): the graph and the dashboard are reads; the edit is the user's, through the single writer.
   handle(HIVE_IPC.brainGraph, async (arg) => BrainGraphViewSchema.parse(await host().call('brainGraph', BrainGraphRequestSchema.parse(arg ?? {}))));
   handle(HIVE_IPC.brainDashboard, async () => BrainDashboardViewSchema.parse(await host().call('brainDashboard')));
+  // Phase 4 A3: the Brain's timeline, a read.
+  handle(HIVE_IPC.brainTimeline, async (arg) => BrainTimelineViewSchema.parse(await host().call('brainTimeline', BrainTimelineRequestSchema.parse(arg ?? {}))));
   handle(HIVE_IPC.brainEdit, async (arg) => BrainEditResultSchema.parse(await host().call('brainEdit', BrainEditRequestSchema.parse(arg))));
 
   // Library screen (Phase 2 C1): read-only views of the castes and the catalog in the Brain.

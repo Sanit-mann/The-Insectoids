@@ -34,6 +34,8 @@ const findings: Finding[] = [];
 
 test.beforeAll(async () => {
   t = await launchApp();
+  // Reduced motion: entrance animations (cards fading in) finish at once, so axe always reads the final colours.
+  await t.win.emulateMedia({ reducedMotion: 'reduce' });
   const { win } = t;
   // A smaller window, like CI screens: narrow layouts scroll sideways, and those regions must be keyboard-reachable.
   await t.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1024, 720));

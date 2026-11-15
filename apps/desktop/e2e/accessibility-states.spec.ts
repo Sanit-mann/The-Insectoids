@@ -106,6 +106,8 @@ test('the first-run setup wizard passes axe at every step, in both themes', asyn
   const t = await launchApp({ onboarded: false, project: 'none' });
   try {
     const { win } = t;
+    // Reduced motion: entrance animations (cards fading in) finish at once, so axe always reads the final colours.
+    await t.win.emulateMedia({ reducedMotion: 'reduce' });
     // A smaller window, like CI screens: narrow layouts scroll sideways, and those regions must be keyboard-reachable.
     await t.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1024, 720));
     const step = win.getByTestId('setup-step-label');
@@ -171,6 +173,8 @@ test('panels, forms, detail views and dialogs pass axe in both themes', async ()
   const t = await launchApp({ env: { INSECTOIDS_E2E_BRAIN_SEED: '1', INSECTOIDS_E2E_FAKE_INSTALL: 'ok' } });
   try {
     const { win } = t;
+    // Reduced motion: entrance animations (cards fading in) finish at once, so axe always reads the final colours.
+    await t.win.emulateMedia({ reducedMotion: 'reduce' });
     // A smaller window, like CI screens: narrow layouts scroll sideways, and those regions must be keyboard-reachable.
     await t.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.setSize(1024, 720));
     await expect(win.getByLabel('Message the Queen')).toBeEnabled({ timeout: 30_000 });

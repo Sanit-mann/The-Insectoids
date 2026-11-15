@@ -6,12 +6,13 @@
  * Charts follow the dataviz method: one measure per chart (added and reads are two charts, never two
  * axes), one hue (honey), values written on the bars, and every chart is also a plain list for screen
  * readers. Reuses: BrainCare panels (shadcn `button`, Kokonut UI `hold-button`, `inline-alert`) and
- * `InlineError`. Custom: the tiles and bar lists.
+ * `InlineError`; shadcn `button` for "See the full timeline" (Phase 4 A3). Custom: the tiles and bar lists.
  */
-import { Activity, BarChart3, Clock, Link2, NotebookText, ShieldCheck, Archive } from 'lucide-react';
+import { Activity, ArrowRight, BarChart3, Clock, Link2, NotebookText, ShieldCheck, Archive } from 'lucide-react';
 import type { ReactNode } from 'react';
 import type { BrainDashboardView } from '@insectoids/shared';
 import { InlineError } from '@/components/changes/CardChanges';
+import { Button } from '@/components/ui/button';
 import { useHive } from '@/lib/hive-store';
 import { cn } from '@/lib/utils';
 import { HealthPanel, LessonsPanel, LibrarianCard } from './BrainCare';
@@ -34,7 +35,7 @@ const changeWord = (c: string): string => CHANGE_WORDS[c] ?? c;
 const byWho = (by: string): string => (by === 'user' ? 'You' : by);
 const weekLabel = (ms: number): string => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 
-export function DashboardView({ onOpen, refreshKey }: { onOpen: (id: string) => void; refreshKey: number }) {
+export function DashboardView({ onOpen, onSeeTimeline, refreshKey }: { onOpen: (id: string) => void; onSeeTimeline?: () => void; refreshKey: number }) {
   const { snapshot } = useHive();
   const { live, reload } = useLive<BrainDashboardView>(`dash#${refreshKey}`, () => window.insectoids.hive.brainDashboard(), 600);
 
@@ -42,7 +43,7 @@ export function DashboardView({ onOpen, refreshKey }: { onOpen: (id: string) => 
     <div className="flex min-w-0 flex-col gap-4" data-testid="brain-dashboard">
       {live.state === 'loading' && <div aria-busy="true" className="h-40 animate-pulse rounded-2xl border border-line bg-surface" />}
       {live.state === 'error' && <InlineError message={`Could not load the dashboard: ${live.message}`} onRetry={reload} />}
-      {live.state === 'ready' && <Numbers d={live.data} onOpen={onOpen} />}
+      {live.state === 'ready' && <Numbers d={live.data} onOpen={onOpen} onSeeTimeline={onSeeTimeline} />}
       {snapshot?.brainHealth && snapshot.librarian && (
         <div aria-label="How the Brain looks after itself" className="grid grid-cols-[repeat(auto-fit,minmax(280px,1fr))] gap-4" role="region">
           <HealthPanel health={snapshot.brainHealth} />
@@ -66,7 +67,7 @@ function Tile({ label, value, icon }: { label: string; value: number; icon: Reac
   );
 }
 
-function Numbers({ d, onOpen }: { d: BrainDashboardView; onOpen: (id: string) => void }) {
+function Numbers({ d, onOpen, onSeeTimeline }: { d: BrainDashboardView; onOpen: (id: string) => void; onSeeTimeline?: (() => void) | undefined }) {
   const kindMax = Math.max(1, ...d.byKind.map((k) => k.count));
   const kinds = [...d.byKind].filter((k) => k.count > 0).sort((a, b) => b.count - a.count);
   // "Most used" only lists what agents actually used; importance alone is not use.
@@ -145,6 +146,12 @@ function Numbers({ d, onOpen }: { d: BrainDashboardView; onOpen: (id: string) =>
           <h2 className="m-0 flex items-center gap-2 font-display text-base font-semibold" id="dash-timeline-title">
             <Clock aria-hidden="true" className="size-4 text-honey" /> Timeline
           </h2>
+          {onSeeTimeline && (
+            <Button className="self-start" data-testid="dash-timeline-all" onClick={onSeeTimeline} size="sm" variant="link">
+              See the full timeline
+              <ArrowRight aria-hidden="true" className="size-3.5" />
+            </Button>
+          )}
           {d.timeline.length === 0 ? (
             <p className="m-0 text-sm text-muted">No changes yet.</p>
           ) : (

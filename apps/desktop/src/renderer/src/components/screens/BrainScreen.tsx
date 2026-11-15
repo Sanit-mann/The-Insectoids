@@ -1,4 +1,4 @@
-import { Brain, Code2, Globe, LayoutDashboard, NotebookText, Network, Search } from 'lucide-react';
+import { Brain, Code2, Globe, History, LayoutDashboard, NotebookText, Network, Search } from 'lucide-react';
 import { type KeyboardEvent, type ReactNode, useEffect, useRef, useState } from 'react';
 import type { BrainHitView, RecordKind } from '@insectoids/shared';
 import { AskBrain } from '@/components/brain/AskBrain';
@@ -12,6 +12,7 @@ import { KINDS, kindInfo } from '@/components/brain/kinds';
 import { HitStatusBadge } from '@/components/brain/HitStatus';
 import { MatchBadge, MeaningSearchStrip, TURN_ON_ID } from '@/components/brain/MeaningSearch';
 import { ObsidianExport } from '@/components/brain/ObsidianExport';
+import { TimelineView } from '@/components/brain/TimelineView';
 import { Switch } from '@/components/connections/Switch';
 import { InlineError } from '@/components/changes/CardChanges';
 import { useHive } from '@/lib/hive-store';
@@ -27,18 +28,20 @@ type Results = { state: 'idle' } | { state: 'loading' } | { state: 'error'; mess
  * filter by kind; read a record with its trust, versions and links. Above them (B3): Brain health, the
  * Librarian and the lessons the hive learned. B5: the graph, the dashboard, and editing in the reader.
  */
-type BrainView = 'notes' | 'graph' | 'globe' | 'dashboard' | 'code';
+type BrainView = 'notes' | 'graph' | 'globe' | 'dashboard' | 'timeline' | 'code';
 const VIEWS: Array<{ id: BrainView; label: string; icon: typeof Code2 }> = [
   { id: 'notes', label: 'Notes', icon: NotebookText },
   { id: 'graph', label: 'Graph', icon: Network },
   { id: 'globe', label: 'Globe', icon: Globe },
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'timeline', label: 'Timeline', icon: History },
   { id: 'code', label: 'Code', icon: Code2 },
 ];
 
 /**
- * Notes | Graph | Globe | Dashboard | Code (Phase 2 B4, B5; Phase 4 A2): the Brain's records, the graph of how
- * they link, the same on a 3D globe, the numbers and timeline, or the code map of the current project. Arrow keys switch.
+ * Notes | Graph | Globe | Dashboard | Timeline | Code (Phase 2 B4, B5; Phase 4 A2, A3): the Brain's records, the
+ * graph of how they link, the same on a 3D globe, the numbers, every change over time, or the code map of the
+ * current project. Arrow keys switch.
  */
 function ViewSwitch({ view, onChange }: { view: BrainView; onChange: (v: BrainView) => void }) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
@@ -103,12 +106,13 @@ export function BrainScreen() {
       </div>
     );
   }
-  if (view === 'graph' || view === 'globe' || view === 'dashboard') return <WithReader switcher={<ViewSwitch onChange={setView} view={view} />} view={view} />;
+  if (view === 'graph' || view === 'globe' || view === 'dashboard' || view === 'timeline')
+    return <WithReader onView={setView} switcher={<ViewSwitch onChange={setView} view={view} />} view={view} />;
   return <NotesView openRequest={openRequest} switcher={<ViewSwitch onChange={setView} view={view} />} />;
 }
 
-/** Graph, globe or dashboard on the left, the reader beside it once a record is picked (B5, Phase 4 A2). */
-function WithReader({ view, switcher }: { view: 'graph' | 'globe' | 'dashboard'; switcher: ReactNode }) {
+/** Graph, globe, dashboard or timeline on the left, the reader beside it once a record is picked (B5, Phase 4 A2, A3). */
+function WithReader({ view, switcher, onView }: { view: 'graph' | 'globe' | 'dashboard' | 'timeline'; switcher: ReactNode; onView: (v: BrainView) => void }) {
   const [openId, setOpenId] = useState<string | null>(null);
   // Bumped when the reader changes a record, so the graph or the numbers follow at once.
   const [refreshKey, setRefreshKey] = useState(0);
@@ -121,8 +125,10 @@ function WithReader({ view, switcher }: { view: 'graph' | 'globe' | 'dashboard';
           <GraphView onOpen={setOpenId} openId={openId} refreshKey={refreshKey} />
         ) : view === 'globe' ? (
           <GlobeView onOpen={setOpenId} openId={openId} refreshKey={refreshKey} />
+        ) : view === 'timeline' ? (
+          <TimelineView onOpen={setOpenId} openId={openId} refreshKey={refreshKey} />
         ) : (
-          <DashboardView onOpen={setOpenId} refreshKey={refreshKey} />
+          <DashboardView onOpen={setOpenId} onSeeTimeline={() => onView('timeline')} refreshKey={refreshKey} />
         )}
       </div>
       {openId && (

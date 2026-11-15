@@ -93,6 +93,10 @@ import {
   type BrainGraphRequest,
   BrainGraphRequestSchema,
   type BrainGraphView,
+  type BrainTimelineRequest,
+  BrainTimelineRequestSchema,
+  type BrainTimelineView,
+  BrainTimelineViewSchema,
   type LessonView,
   type LibrarianView,
   type CardView,
@@ -1594,6 +1598,29 @@ export class HiveManager {
       ...(r.includeArchived ? { includeArchived: true } : {}),
       limit: r.limit,
     });
+  }
+
+  /**
+   * The Brain's timeline (Phase 4 A3): every change to a record, newest first, paged with `before`. Scope as the
+   * graph: the open project's shelf plus Global (Global alone when no project is open), Global alone, or every
+   * shelf. `actors` lists everyone who changed something in that scope and time window, for the actor filter.
+   */
+  brainTimeline(req: BrainTimelineRequest): BrainTimelineView {
+    const r = BrainTimelineRequestSchema.parse(req);
+    const project = this.#project?.view.shelf;
+    const shelves = r.scope === 'all' ? undefined : r.scope === 'global' || !project ? ['global'] : [project, 'global'];
+    const page = this.#o.brain.timeline({
+      ...(shelves ? { shelves } : {}),
+      ...(r.kinds?.length ? { kinds: r.kinds } : {}),
+      ...(r.changes?.length ? { changes: r.changes } : {}),
+      ...(r.actor ? { actor: r.actor } : {}),
+      ...(r.query ? { query: r.query } : {}),
+      ...(r.since !== undefined ? { since: r.since } : {}),
+      ...(r.until !== undefined ? { until: r.until } : {}),
+      ...(r.before ? { before: r.before } : {}),
+      limit: r.limit,
+    });
+    return BrainTimelineViewSchema.parse({ ...page, actors: this.#o.brain.timelineActors(shelves, r.since, r.until) });
   }
 
   /**

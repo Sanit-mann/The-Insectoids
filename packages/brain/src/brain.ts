@@ -100,6 +100,59 @@ export interface Dashboard {
   timeline: Array<{ id: string; kind: RecordKind; title: string; version: number; change: string; changedBy: string; changedAt: number }>;
 }
 
+/** Where a timeline page starts: the last entry of the page before (newest first by time, record, version). */
+export interface TimelineCursor {
+  changedAt: number;
+  recordId: string;
+  version: number;
+}
+
+/** The Brain's timeline (01-D13 phase 2; Phase 4 A3): every change to a record, newest first, paged. */
+export interface TimelineOptions {
+  /** Only records on these shelves; undefined = every shelf. */
+  shelves?: string[];
+  kinds?: RecordKind[];
+  changes?: Array<RecordVersion['change']>;
+  /** 'user' = the user's own changes, 'agents' = everyone else's, or one agent's id ("Ant-02"). */
+  actor?: string;
+  /** Words in the record's title at that version (every word must appear; case-insensitive for A–Z). */
+  query?: string;
+  /** At or after (ms). */
+  since?: number;
+  /** Before (ms). */
+  until?: number;
+  /** Only changes older than this one (keyset paging). */
+  before?: TimelineCursor;
+  limit: number;
+}
+
+export interface TimelineEntry {
+  recordId: string;
+  version: number;
+  change: RecordVersion['change'];
+  kind: RecordKind;
+  shelf: string;
+  /** The title at that version. */
+  title: string;
+  /** The record's title now, when it differs from `title`. */
+  currentTitle: string | null;
+  trust: Trust;
+  changedBy: string;
+  actorType: 'user' | 'agent';
+  changedAt: number;
+  /** The change in plain words ("Created", "Edited", "Faded into the archive: …"). */
+  what: string;
+  /** The goal the change came from, when the hive's records tie it to one (see #goalOf); else null. */
+  goalId: string | null;
+  goalTitle: string | null;
+}
+
+export interface Timeline {
+  entries: TimelineEntry[];
+  /** Pass as `before` for the next (older) page; null when there is none. */
+  nextCursor: TimelineCursor | null;
+}
+
 export interface BrainRecord {
   id: string;
   kind: RecordKind;
@@ -240,6 +293,10 @@ const estimateTokens = (text: string): number => Math.ceil(text.length / 4);
 const norm = (s: string): string => s.trim().replace(/\s+/g, ' ').toLowerCase();
 const actorName = (a: Actor): string => (a.type === 'user' ? 'user' : a.id);
 const clip = (s: string, n: number): string => (s.length <= n ? s : `${s.slice(0, n - 1)}…`);
+/** A LIKE pattern matching `s` literally (with ESCAPE '\'). */
+const likeLiteral = (s: string): string => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+/** Longest an agent run is taken to last when matching a change to a run's time window (goal link). */
+const LONGEST_RUN_MS = DAY;
 
 /** The numbers in a text (as written), so near-duplicates that differ only in a number never merge. */
 const numbersIn = (s: string): string => [...s.matchAll(/\d+(?:[.,:]\d+)*/g)].map((m) => m[0]).sort().join('|');
@@ -338,7 +395,26 @@ interface HitRow {
   updated_at: number;
 }
 
-const statusOf = (r: { archived: number; valid_to: number | null }): RecordStatus =>
+interface TimelineRow {
+  record_id: string;
+  version: number;
+  change: RecordVersion['change'];
+  title: string;
+  trust: string;
+  changed_by: string;
+  changed_at: number;
+  kind: string;
+  shelf: string;
+  current_title: string;
+  archived: number;
+  archived_reason: string | null;
+  prev_trust: string | null;
+  text_changed: number | null;
+  last_archive: number | null;
+  replaced_by: string | null;
+}
+
+const statusOf = (r:{ archived: number; valid_to: number | null }): RecordStatus =>
   r.archived === 1 ? 'archived' : r.valid_to !== null ? 'superseded' : 'current';
 
 const importanceOf = (r: HitRow | RecordRow, now: number): number =>
@@ -1162,6 +1238,195 @@ export class Brain {
     ).map((t) => ({ id: t.id, kind: t.kind as RecordKind, title: t.title, version: t.version, change: t.change, changedBy: t.changed_by, changedAt: t.changed_at }));
 
     return { shelf, totals, byKind, weeks, mostUsed, timeline };
+  }
+
+  /**
+   * The timeline (01-D13 phase 2; Phase 4 A3): changes to records, newest first by (time, record, version), which
+   * is unique, so keyset paging with `before` never skips or repeats an entry even when many share a millisecond.
+   * The (changed_at, record_id, version) index (v15) walks the versions in exactly that order and stops after
+   * limit + 1 matches (the extra one only says whether there is a next page). CROSS JOIN keeps versions as the
+   * outer loop: without statistics SQLite would start from the shelf index and sort every version on the shelf.
+   */
+  timeline(opts: TimelineOptions): Timeline {
+    const limit = Math.max(1, Math.floor(opts.limit));
+    const { where, params } = this.#timelineScope(opts.shelves, opts.since, opts.until);
+    if (opts.kinds?.length) {
+      where.push(`r.kind IN (${opts.kinds.map(() => '?').join(', ')})`);
+      params.push(...opts.kinds);
+    }
+    if (opts.changes?.length) {
+      where.push(`v.change IN (${opts.changes.map(() => '?').join(', ')})`);
+      params.push(...opts.changes);
+    }
+    if (opts.actor === 'user') where.push("v.changed_by = 'user'");
+    else if (opts.actor === 'agents') where.push("v.changed_by <> 'user'");
+    else if (opts.actor) {
+      where.push('v.changed_by = ?');
+      params.push(opts.actor);
+    }
+    for (const word of (opts.query ?? '').trim().split(/\s+/).filter(Boolean).slice(0, 10)) {
+      where.push("v.title LIKE ? ESCAPE '\\'");
+      params.push(`%${likeLiteral(word)}%`);
+    }
+    if (opts.before) {
+      where.push('(v.changed_at, v.record_id, v.version) < (?, ?, ?)');
+      params.push(opts.before.changedAt, opts.before.recordId, opts.before.version);
+    }
+    const rows = this.#db
+      .prepare(
+        `SELECT v.record_id, v.version, v.change, v.title, v.trust, v.changed_by, v.changed_at,
+           r.kind, r.shelf, r.title AS current_title, r.archived, r.archived_reason,
+           p.trust AS prev_trust, (p.title IS NOT v.title OR p.body IS NOT v.body) AS text_changed,
+           CASE WHEN v.change = 'archive' THEN (SELECT MAX(a.version) FROM record_versions a WHERE a.record_id = v.record_id AND a.change = 'archive') END AS last_archive,
+           CASE WHEN v.change = 'supersede' THEN (SELECT n.title FROM records n WHERE n.id = r.superseded_by) END AS replaced_by
+         FROM record_versions v
+         CROSS JOIN records r ON r.id = v.record_id
+         LEFT JOIN record_versions p ON p.record_id = v.record_id AND p.version = v.version - 1
+         ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+         ORDER BY v.changed_at DESC, v.record_id DESC, v.version DESC
+         LIMIT ?`,
+      )
+      .all(...params, limit + 1) as unknown as TimelineRow[];
+    const page = rows.slice(0, limit);
+    const goalTitles = new Map<string, string | null>();
+    const entries = page.map((row): TimelineEntry => {
+      const goalId = row.changed_by === 'user' ? null : this.#goalOf(row.changed_by, row.changed_at, row.shelf);
+      if (goalId && !goalTitles.has(goalId)) goalTitles.set(goalId, this.goals.get(goalId)?.title ?? null);
+      return {
+        recordId: row.record_id,
+        version: row.version,
+        change: row.change,
+        kind: row.kind as RecordKind,
+        shelf: row.shelf,
+        title: row.title,
+        currentTitle: row.current_title !== row.title ? row.current_title : null,
+        trust: row.trust as Trust,
+        changedBy: row.changed_by,
+        actorType: row.changed_by === 'user' ? 'user' : 'agent',
+        changedAt: row.changed_at,
+        what: this.#what(row),
+        goalId,
+        goalTitle: goalId ? (goalTitles.get(goalId) ?? null) : null,
+      };
+    });
+    const last = page.at(-1);
+    return {
+      entries,
+      nextCursor: rows.length > limit && last ? { changedAt: last.changed_at, recordId: last.record_id, version: last.version } : null,
+    };
+  }
+
+  /** Everyone who changed a record on these shelves (all shelves when undefined), in the time window: 'user' first, then A–Z. */
+  timelineActors(shelves?: string[], since?: number, until?: number): string[] {
+    const { where, params } = this.#timelineScope(shelves, since, until);
+    // Without a shelf or time filter, the changed_by index answers alone (no join, no scan of every version).
+    const sql =
+      shelves === undefined && since === undefined && until === undefined
+        ? 'SELECT DISTINCT changed_by FROM record_versions'
+        : `SELECT DISTINCT v.changed_by FROM record_versions v JOIN records r ON r.id = v.record_id ${where.length ? `WHERE ${where.join(' AND ')}` : ''}`;
+    const ids = (this.#db.prepare(sql).all(...params) as Array<{ changed_by: string }>).map((r) => r.changed_by);
+    const agents = ids.filter((id) => id !== 'user').sort((a, b) => a.localeCompare(b, 'en', { sensitivity: 'base' }) || (a < b ? -1 : a > b ? 1 : 0));
+    return ids.includes('user') ? ['user', ...agents] : agents;
+  }
+
+  #timelineScope(shelves: string[] | undefined, since: number | undefined, until: number | undefined): { where: string[]; params: Array<string | number> } {
+    const where: string[] = [];
+    const params: Array<string | number> = [];
+    if (shelves !== undefined) {
+      // An empty list matches nothing (r.shelf IN () is not valid SQL).
+      where.push(shelves.length ? `r.shelf IN (${shelves.map(() => '?').join(', ')})` : '0');
+      params.push(...shelves);
+    }
+    if (since !== undefined) {
+      where.push('v.changed_at >= ?');
+      params.push(since);
+    }
+    if (until !== undefined) {
+      where.push('v.changed_at < ?');
+      params.push(until);
+    }
+    return { where, params };
+  }
+
+  /** The change in plain words. */
+  #what(row: TimelineRow): string {
+    const titleOf = (id: string): string | null => (this.#db.prepare('SELECT title FROM records WHERE id = ?').get(id) as { title: string } | undefined)?.title ?? null;
+    const quoted = (t: string): string => `"${clip(t, 120)}"`;
+    switch (row.change) {
+      case 'create': {
+        // A near-duplicate folded in as it was written (01-E5) is created already merged into the record it matched.
+        const into = this.#db
+          .prepare("SELECT r.title FROM links l JOIN records r ON r.id = l.to_id WHERE l.from_id = ? AND l.rel = 'merged_into' AND l.created_at = ? LIMIT 1")
+          .get(row.record_id, row.changed_at) as { title: string } | undefined;
+        return into ? `Merged into ${quoted(into.title)}` : 'Created';
+      }
+      case 'update':
+        if (row.prev_trust !== null && row.prev_trust !== 'confirmed' && row.trust === 'confirmed') return row.text_changed ? 'Edited and confirmed' : 'Confirmed';
+        return 'Edited';
+      case 'archive': {
+        // Only the latest archive's reason is kept (on the record), and only while it is still archived.
+        const reason = row.archived === 1 && row.last_archive === row.version ? row.archived_reason?.trim() : undefined;
+        if (!reason) return 'Archived';
+        const faded = /^faded\b:?\s*(.*)$/i.exec(reason);
+        if (faded) return faded[1] ? `Faded into the archive: ${faded[1]}` : 'Faded into the archive';
+        const merged = /^merged into (\S+)$/i.exec(reason);
+        if (merged) {
+          const t = titleOf(merged[1]!);
+          return t ? `Merged into ${quoted(t)}` : 'Merged into another record';
+        }
+        return /^by\s/i.test(reason) ? `Archived ${reason}` : `Archived: ${reason}`;
+      }
+      case 'supersede':
+        return row.replaced_by ? `Replaced by ${quoted(row.replaced_by)}` : 'Replaced by a newer record';
+      case 'merge': {
+        // This record took in a near-duplicate (01-E5): the incoming one is kept archived, linked merged_into here.
+        const from = this.#db
+          .prepare("SELECT r.title FROM links l JOIN records r ON r.id = l.from_id WHERE l.to_id = ? AND l.rel = 'merged_into' AND l.created_at = ? LIMIT 1")
+          .get(row.record_id, row.changed_at) as { title: string } | undefined;
+        return from ? `Merged in ${quoted(from.title)}` : 'Merged in a near-duplicate';
+      }
+      case 'unarchive':
+        return 'Brought back';
+      default:
+        return String(row.change);
+    }
+  }
+
+  /**
+   * The goal an agent's change came from, only when the hive's own records say so (else null, never a guess):
+   * 1. Taskboard: the agent's latest claim of a card at or before the change, if that card was not released
+   *    (back to open, review, done or failed) before it. Insects ("Ant-02") hold one card per run.
+   * 2. Run log: runs recorded for that agent id (run ids are "<goal>:<agent>#n"; `at` is when the run ended)
+   *    whose time window [at - duration, at] contains the change; only when they all belong to one goal. This
+   *    covers the Queen, the Scout and the Inspector, which run per goal but hold no card.
+   * Either way the goal must be on the record's shelf (or the record on Global), as the run's Brain token is.
+   */
+  #goalOf(agentId: string, at: number, shelf: string): string | null {
+    const onShelf = (goalId: string): boolean => {
+      const g = this.goals.get(goalId);
+      return !!g && (g.shelf === shelf || shelf === GLOBAL_SHELF);
+    };
+    const claim = this.#db
+      .prepare(
+        `SELECT c.task_id, c.seq, t.goal_id FROM task_events c JOIN tasks t ON t.id = c.task_id
+         WHERE c.actor = ? AND c.to_st = 'claimed' AND c.at <= ? ORDER BY c.at DESC, c.seq DESC LIMIT 1`,
+      )
+      .get(agentId, at) as { task_id: string; seq: number; goal_id: string } | undefined;
+    if (claim) {
+      const released = this.#db
+        .prepare(
+          `SELECT 1 FROM task_events e WHERE e.task_id = ? AND e.seq > ? AND e.at < ? AND e.to_st NOT IN ('claimed', 'in_progress', 'blocked') LIMIT 1`,
+        )
+        .get(claim.task_id, claim.seq, at);
+      if (!released) return onShelf(claim.goal_id) ? claim.goal_id : null;
+    }
+    const runs = this.#db
+      .prepare(
+        `SELECT DISTINCT goal_id FROM run_outcomes
+         WHERE goal_id IS NOT NULL AND run_id LIKE ? ESCAPE '\\' AND at >= ? AND at <= ? AND at - duration_ms <= ? LIMIT 2`,
+      )
+      .all(`%:${likeLiteral(agentId)}#%`, at, at + LONGEST_RUN_MS, at) as Array<{ goal_id: string }>;
+    return runs.length === 1 && onShelf(runs[0]!.goal_id) ? runs[0]!.goal_id : null;
   }
 
   // ---- internals -------------------------------------------------------------------------------

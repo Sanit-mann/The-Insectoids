@@ -385,6 +385,13 @@ const MIGRATIONS: readonly string[] = [
   `
   CREATE INDEX cadence_runs_at ON cadence_runs (at);
   `,
+  // v15: the Brain's timeline (Phase 4 A3). Versions newest first by (time, record, version), the timeline's exact
+  // order, so a page walks the index and stops instead of sorting every version; and an agent's card claims by
+  // time, for the timeline's goal link.
+  `
+  CREATE INDEX record_versions_time ON record_versions (changed_at, record_id, version);
+  CREATE INDEX task_events_actor ON task_events (actor, at);
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {
