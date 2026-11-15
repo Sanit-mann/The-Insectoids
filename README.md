@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Sanit-mann/The-Insectoids/releases/tag/v0.0.3">v0.0.3 · developer preview</a> ·
+  <a href="https://github.com/Sanit-mann/The-Insectoids/releases/tag/v0.0.4">v0.0.4 · developer preview</a> ·
   <a href="LICENSE">MIT license</a> ·
   <a href="CONTRIBUTING.md">Contributing</a> ·
   <a href="functions/README.md">Design specs</a>
@@ -31,9 +31,9 @@ The Insectoids is a desktop app that turns AI coding agents into an organised te
 - **You approve the merge** into your branch. Undo is one click (with approval) and keeps the history; you can merge again later.
 - **The Brain** is one local memory that every agent shares: decisions, tasks, facts and outcomes, with trust levels and version history. It lives in a SQLite file on your computer and is never uploaded.
 
-It runs on the AI subscription you already have. **Claude Code** is the main engine; **OpenCode** can run a free model on your own computer (Ollama or LM Studio) or an API provider you add. Light work goes to the free model first, and a card that struggles moves up to a stronger one.
+It runs on the AI subscription you already have. **Claude Code** is the main engine; **GitHub Copilot CLI** can take cards too; **OpenCode** can run a free model on your own computer (Ollama or LM Studio) or an API provider you add. Light work goes to the free model first, and a card that struggles moves up to a stronger one.
 
-## Status: v0.0.3 (Phase 3 "Cadence & Polish")
+## Status: v0.0.4 (Phase 4 "Expansion")
 
 This is an early developer preview, built and tested on Windows. From v0.0.3 there are installers for Windows, macOS and Linux (see [Install](#install)); you can also run it from source (see [Run it](#run-it)).
 
@@ -41,31 +41,32 @@ This is an early developer preview, built and tested on Windows. From v0.0.3 the
 
 - The full loop: goal → plan approval → parallel insects in worktrees → Inspector verification → merge approval → undo → merge again.
 - **Eight insect castes** (coder, tester, reviewer, documenter, designer, researcher, writer, analyst) and the managers: Scout, Foreman, Librarian, Treasurer and Watchdog.
-- **Two engines:** Claude Code, and OpenCode with a local model or an API provider. A first-run step installs either one, but only after you see the exact command and say yes.
+- **Engines:** Claude Code; GitHub Copilot CLI (new in v0.0.4); and OpenCode with a local model or an API provider. A first-run step installs an engine, but only after you see the exact command and say yes. New engines start switched off until you switch them on. A generic command engine (new in v0.0.4) runs other coding CLIs from presets, but only when their own tools can be switched off and the hive's guarded tools put in their place: Codex and Qwen Code are built that way but not yet tried on a real account; Cursor, Grok, Kimi, Crush, Pi and Antigravity are listed with the reason they can't be guarded yet.
 - **A cost-aware router (the Treasurer):** it picks each run's engine, model and effort, says why in plain words, and learns from which runs pass.
 - **The Vault and secret broker:** you type keys into the app once; agents call services through the broker and never see a key.
 - **A library that learns:** skills switch on per card. Repeated successful work becomes a proposed skill you approve. Imported skills are safety-scanned first.
-- **The Brain:** local meaning search, ranking and fading, lessons from failures, a health score, a graph view, a dashboard and a code map of your project. New in v0.0.3: daily local backups with restore, and an export as an Obsidian vault (secrets are never written).
-- **Cadences (new in v0.0.3):** the hive works without being asked: on a schedule (local time, catching up once after sleep), when files land in a folder, when a goal finishes, or when an outside app calls a local webhook (with trust modes). Every run is normal hive work through the Queen, within its own budget. If you ask for the same thing three times, the Queen proposes a cadence. Built-in housekeeping keeps the Brain healthy without spending tokens.
-- **While you were away (new in v0.0.3):** a digest of what ran, what it cost and what waits for you opens when you come back; desktop notifications only for approvals and failures; the tray shows the next run and can run one now; optional start with your computer.
-- **Polish (new in v0.0.3):** an accessibility pass (WCAG 2.2 AA, checked automatically on every screen in both themes, with keyboard-only tests), and update checks you control: never forced, nothing about you is sent.
+- **The Brain:** local meaning search, ranking and fading, lessons from failures, a health score, a graph view, a dashboard and a code map of your project. Daily local backups with restore, and an export as an Obsidian vault (secrets are never written).
+- **Cadences:** the hive works without being asked: on a schedule (local time, catching up once after sleep), when files land in a folder, when a goal finishes, or when an outside app calls a local webhook (with trust modes). Every run is normal hive work through the Queen, within its own budget. If you ask for the same thing three times, the Queen proposes a cadence. Built-in housekeeping keeps the Brain healthy without spending tokens.
+- **While you were away:** a digest of what ran, what it cost and what waits for you opens when you come back; desktop notifications only for approvals and failures; the tray shows the next run and can run one now; optional start with your computer.
+- **Polish:** an accessibility pass (WCAG 2.2 AA, checked automatically on every screen in both themes, with keyboard-only tests), and update checks you control: never forced, nothing about you is sent.
+- **Ask the Brain (new in v0.0.4):** a plain-words question gets a short answer that cites the records it came from (each one opens), or "The Brain doesn't know". The cost is shown before you ask, and an answer can be kept as a note.
+- **Brain Globe and Timeline (new in v0.0.4):** the Brain's records as points on a turning 3D globe (with a list beside it for keyboard and screen-reader users; smooth with 5,000 records), and a timeline of what happened, when and by which agent.
+- **Containers (new in v0.0.4):** a card's shell commands can run in a throwaway Docker or Podman container with only its worktree inside, no network for most castes, and limits on CPU, memory and processes. Off, "when needed" (cards the Queen marks as risky and cards the Watchdog moves after they got stuck) or every card; you can also force it per goal. Docker and Podman are found, never installed for you, and the image is downloaded only when you click.
 - **Screens:** Queen chat, Approvals, Taskboard, Hive (lanes and a living honeycomb), Brain, Changes & undo, Library, Connections, Budgets, Cadence and Settings, and a full setup wizard with an optional sample goal.
 - A command guard in front of every agent action (details under [Safety](#safety)), and a Watchdog that warns, pauses or stops an agent that keeps failing.
 
-**Real end-to-end demo** (on the installed app; sample project `tiny-text`; a weekly report that runs on its own):
+**Real end-to-end demo** (sample project `tiny-text`, with Claude Code and GitHub Copilot):
 
 | | Result |
 |---|---|
-| Install | the Windows installer, installed silently; uninstalled afterwards with nothing left behind |
-| Cadence | "Weekly report", every Saturday at 19:42, set two minutes ahead; then the window was closed to the tray |
-| Unattended run | on time, with the window closed: Scout, Queen plan, one writer card, Inspector check; the merge waited for the user and a notification was raised |
-| Morning digest | opened by itself when the window came back: "1 run, 1 waits for you. 137,910 tokens ($0.58)", and that the next weekly runs are skipped until the merge is approved |
-| Merge | `reports/weekly.md` on `main` (the week's commits, what the library does, three next steps); `node --test` passed |
-| Time and cost | 2.5 minutes; 4 Claude Code runs, 137,910 tokens ($0.58 reported) |
+| Ask the Brain | "Which hosting provider does the project use?" → "The project uses Vercel … [1]", citing the current record, not the older one it replaced; the Globe showed the same record and opened it |
+| A risky card | containers "when needed"; the goal was to run a contributor's build script nobody had reviewed. The Queen marked that card herself; its commands (and its Inspector's) ran in a container, the Queen's own run didn't; the generated file landed on `main` |
+| A second engine | GitHub Copilot first in the engine order: the Queen, the coder and the Inspector ran on Copilot; `titleCase` and its tests on `main`, `node --test` passed |
+| Time and cost | 3.4 minutes; Claude Code about 107k tokens ($0.43 reported); Copilot 3 runs |
 
-It passed on the first real run. The write-up, with every step of Phase 3, is in [docs/plans/phase-3-cadence-polish.md](docs/plans/phase-3-cadence-polish.md); the Phase 2 demo (two engines and a learned skill) is in [docs/plans/phase-2-full-hive.md](docs/plans/phase-2-full-hive.md).
+The container part used a stand-in runtime (Docker and Podman weren't installed on the demo computer), so it shows the hive's choices, not real isolation. Calendar and mail through Google sign-in were set aside for a later phase. The write-up is in [docs/plans/phase-4-expansion.md](docs/plans/phase-4-expansion.md); the Phase 3 demo (a weekly report that runs on its own) is in [docs/plans/phase-3-cadence-polish.md](docs/plans/phase-3-cadence-polish.md).
 
-![The "While you were away" digest after the weekly report ran from the tray: one run, its tokens and cost, and the merge that waits for you](design/screenshots/phase-3-demo-morning-digest.png)
+![The Taskboard after the risky goal: its one card done, marked "In a container"](design/screenshots/phase-4-demo-card-in-a-container.png)
 
 **Tests:** 1,144 unit tests and 199 end-to-end tests (Playwright driving the real Electron app), including automated accessibility checks. A scripted engine runs every flow without spending tokens.
 
@@ -219,7 +220,7 @@ pnpm check
 pnpm test:e2e
 ```
 
-**The demos**, without tokens (scripted engine) or with real engines. Real runs use your subscription: the Phase 1 demo costs about $0.50, the Phase 2 demo about 150–200k Claude tokens, the Phase 3 demo about 140k ($0.60). Run them from `apps/desktop`; results go to `demo-runs/`:
+**The demos**, without tokens (scripted engine) or with real engines. Real runs use your subscription: the Phase 1 demo costs about $0.50, the Phase 2 demo about 150–200k Claude tokens, the Phase 3 demo about 140k ($0.60), the Phase 4 demo about 110k Claude tokens ($0.45) plus a few Copilot requests. Run them from `apps/desktop`; results go to `demo-runs/`:
 
 ```bash
 INSECTOIDS_DEMO=fake pnpm exec playwright test e2e/phase1-demo.spec.ts
@@ -249,6 +250,16 @@ INSECTOIDS_DEMO3=fake pnpm exec playwright test e2e/phase3-demo.spec.ts
 INSECTOIDS_DEMO3=real pnpm exec playwright test e2e/phase3-demo.spec.ts
 ```
 
+The Phase 4 demo needs Claude Code and GitHub Copilot CLI signed in. Containers use a stand-in runtime unless you add `INSECTOIDS_DEMO4_RUNTIME=real` (Docker or Podman, with the image already downloaded, or `INSECTOIDS_DEMO4_PULL=1` to download it):
+
+```bash
+INSECTOIDS_DEMO4=fake pnpm exec playwright test e2e/phase4-demo.spec.ts
+```
+
+```bash
+INSECTOIDS_DEMO4=real pnpm exec playwright test e2e/phase4-demo.spec.ts
+```
+
 ## Where things are
 
 | Folder | What's in it |
@@ -259,8 +270,8 @@ INSECTOIDS_DEMO3=real pnpm exec playwright test e2e/phase3-demo.spec.ts
 | [`packages/brain`](packages/brain/) | The Brain: records, versions, trust, secrets guard, full-text search, taskboard, goals, approvals |
 | [`packages/brain-service`](packages/brain-service/) | The single-writer Brain service and its client |
 | [`packages/brain-mcp`](packages/brain-mcp/) · [`packages/brain-cli`](packages/brain-cli/) | The Brain's doors for agents: MCP server and `brain` command |
-| [`packages/harness`](packages/harness/) | The hive runtime (Queen, managers, insects, Inspector, Treasurer router), the engine adapters (Claude Code, OpenCode, Gemini CLI) and the library |
-| [`packages/workspace`](packages/workspace/) | Git worktrees per card, the single committer, merge, undo |
+| [`packages/harness`](packages/harness/) | The hive runtime (Queen, managers, insects, Inspector, Treasurer router), the engine adapters (Claude Code, OpenCode, Gemini CLI, and the command engine with its presets: GitHub Copilot, Codex, Qwen Code and more) and the library |
+| [`packages/workspace`](packages/workspace/) | Git worktrees per card, the single committer, merge, undo, and the container runtime |
 | [`packages/codemap`](packages/codemap/) | The code map: symbols, imports and calls per file (tree-sitter in WebAssembly, no AI) |
 | [`packages/embeddings`](packages/embeddings/) | Local meaning search: a small model run on your computer; nothing leaves it |
 | [`packages/hive-tools-mcp`](packages/hive-tools-mcp/) · [`packages/services-mcp`](packages/services-mcp/) | Guarded file and shell tools for engines whose own hooks cannot fail closed, and outside services through the secret broker |
@@ -274,7 +285,8 @@ INSECTOIDS_DEMO3=real pnpm exec playwright test e2e/phase3-demo.spec.ts
 - **Phase 1 "First Spark" (done, v0.0.1):** the safe end-to-end loop with one engine.
 - **Phase 2 "The Full Hive" (done, v0.0.2):** all 8 castes and the manager agents, OpenCode with local models and API providers, a cost-aware router, the Vault and secret broker, a library that learns, meaning search and a graph view for the Brain. Gemini CLI is built but waits on Google (it no longer serves personal plans); Codex is planned.
 - **Phase 3 "Cadence & Polish" (done, v0.0.3):** cadences (schedules, file watch, hive events, webhooks with trust modes, built-in housekeeping, proposed cadences), a "while you were away" digest, notifications and the tray, backups and Obsidian export, accessibility, installers and update checks.
-- **Phase 4 "Expansion":** more connections, a container sandbox mode, more Brain views.
+- **Phase 4 "Expansion" (done, v0.0.4):** Ask the Brain, the Brain Globe and Timeline, GitHub Copilot and a generic engine for other coding CLIs, and container mode chosen by the Queen, the Watchdog or you.
+- **Later:** Google Calendar and Gmail through the app's own sign-in (set aside in Phase 4), service events that start cadences, whole coding CLIs inside containers, voice and a phone companion.
 
 Details: [functions/10-build-roadmap.md](functions/10-build-roadmap.md).
 
@@ -285,7 +297,8 @@ The Insectoids is open source and early, and there's a lot of interesting work l
 - **Try it** on a small project and open an issue with what worked and what didn't.
 - **Test on macOS and Linux.** It's built and tested on Windows; CI runs all three, but real use there is new.
 - **Break the guard.** Find a command that slips past the safety rules (report it privately, see [SECURITY.md](SECURITY.md)).
-- **Add an engine:** a Codex adapter, or test OpenCode with more local models and providers.
+- **Try an engine:** run Codex or Qwen Code with a real account and report back, or test OpenCode with more local models and providers.
+- **Try container mode** with a real Docker or Podman install.
 - **Improve the Brain:** better meaning search, ranking and the graph view.
 - **Sharpen the library:** better agent and skill instructions, measured by real runs.
 - **UI and accessibility:** keyboard flows, screen readers, the living-hive view.
@@ -333,7 +346,7 @@ The command guard is one strong layer, not a sandbox: it parses every shell comm
 - **Always blocked:** deleting outside the workspace, force-pushing, reaching outside the repo, links that escape the workspace, disk and system changes, piping downloads into a shell, privilege escalation, protected files (`.env`, SSH and cloud keys, browser profiles), and git commands that commit or move branches (only the hive commits).
 - **Needs your approval:** pushing, publishing and deploying, new dependencies, destructive database commands.
 
-It fails closed: if the guard can't run, the action is blocked. A container sandbox mode for untrusted code is planned for Phase 4.
+It fails closed: if the guard can't run, the action is blocked. For untrusted code, container mode (Settings → Containers) also runs a card's commands in a throwaway Docker or Podman container with only its worktree inside; if containers aren't ready, those cards wait instead of running on your computer.
 
 ## Privacy
 
