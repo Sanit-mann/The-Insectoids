@@ -18,19 +18,26 @@ const snap = (): Promise<HiveSnapshot> => launched.win.evaluate(() => (globalThi
 const command = (c: Parameters<AppWindow['insectoids']['hive']['command']>[0]) =>
   launched.win.evaluate((x) => (globalThis as unknown as AppWindow).insectoids.hive.command(x), c);
 
-test('lists every engine: the scripted one ready, Claude Code, Gemini CLI and OpenCode listed but not run, Codex coming later', async () => {
+test('lists every engine: the scripted one ready, the other engines listed but not run, Cursor waiting for container mode', async () => {
   await expect.poll(async () => (await snap()).engines.every((e) => e.state !== 'checking'), { timeout: 15_000 }).toBe(true);
   const s = await snap();
   expect(s.engines.map((e) => [e.id, e.state])).toEqual([
     ['fake', 'fake'],
     ['claude', 'missing'],
     ['gemini', 'missing'],
-    ['codex', 'unsupported'],
+    // Phase 4 B3: Codex is a guarded command engine now (listed but never checked or run here).
+    ['codex', 'missing'],
     // A real engine since A4; in scripted mode it is listed but never checked or run.
     ['opencode', 'missing'],
     // Phase 4 B2: on the command engine; listed but never checked or run here, and off until switched on.
     ['copilot', 'missing'],
+    // Phase 4 B3: listed with its real install, but it can't be guarded yet (waits for container mode).
+    ['cursor', 'unsupported'],
   ]);
+  expect(s.engines.find((e) => e.id === 'codex')).toMatchObject({ vendor: 'OpenAI', enabled: false, guard: 'policy-and-tools', install: { command: 'npm install -g @openai/codex@0.166.0' }, signIn: { command: 'codex login' } });
+  const cursor = s.engines.find((e) => e.id === 'cursor')!;
+  expect(cursor).toMatchObject({ guard: null, signIn: { command: 'agent login' } });
+  expect(cursor.message).toMatch(/can't be guarded yet/);
   expect(s.engines.find((e) => e.id === 'copilot')).toMatchObject({
     name: 'GitHub Copilot CLI',
     vendor: 'GitHub',
@@ -53,7 +60,7 @@ test('switching engines off and on, and reordering them', async () => {
   expect(await command({ type: 'setEngineEnabled', engineId: 'gemini', enabled: false })).toEqual({ ok: true });
   expect(await command({ type: 'setEngineOrder', order: ['fake', 'opencode'] })).toEqual({ ok: true });
   let s = await snap();
-  expect(s.engines.map((e) => e.id)).toEqual(['fake', 'opencode', 'claude', 'gemini', 'codex', 'copilot']);
+  expect(s.engines.map((e) => e.id)).toEqual(['fake', 'opencode', 'claude', 'gemini', 'codex', 'copilot', 'cursor']);
   expect(s.engines.find((e) => e.id === 'gemini')!.enabled).toBe(false);
   expect(await command({ type: 'setEngineEnabled', engineId: 'gemini', enabled: true })).toEqual({ ok: true });
   s = await snap();

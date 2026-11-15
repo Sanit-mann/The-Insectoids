@@ -31,6 +31,7 @@ export * from './command/engine';
 export * from './command/detect';
 export * from './command/adapter';
 export * from './command/copilot';
+export * from './command/codex';
 export * from './hive/librarian';
 export * from './hive/ask';
 export * from './hive/catalog';

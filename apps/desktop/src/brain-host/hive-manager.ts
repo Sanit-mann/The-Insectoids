@@ -38,13 +38,15 @@ import {
   geminiAdapter,
   opencodeAdapter,
   COPILOT_PRESET,
+  CODEX_PRESET,
+  CURSOR_PRESET,
+  type CommandPreset,
   commandAdapter,
   type LlmAccess,
   type OpenCodeInstall,
   type CommandInstall,
   type ReadyProvider,
   headlineFrom,
-  plannedAdapters,
   routeCard,
   type LimitState,
   LIMIT_PAUSE,
@@ -226,8 +228,8 @@ export interface HiveManagerOptions {
   geminiAuth?: () => GeminiAuth;
   /** Tests: replace OpenCode detection and the machine-wide config check. */
   opencodeDetect?: () => Promise<OpenCodeInstall>;
-  /** Tests: replace Copilot CLI's detection (else the real program on this computer is checked). */
-  copilotDetect?: () => Promise<CommandInstall>;
+  /** Tests: replace a command engine's detection (else the real program on this computer is checked). */
+  commandDetect?: Partial<Record<EngineId, () => Promise<CommandInstall>>>;
   opencodeSystemConfig?: () => string | null;
   /** Tests: a custom engine instead of the demo or Claude. */
   engineOverride?: Engine;
@@ -543,14 +545,19 @@ export class HiveManager {
       ...(this.#o.opencodeDetect ? { detect: this.#o.opencodeDetect } : {}),
       ...(this.#o.opencodeSystemConfig ? { systemConfig: this.#o.opencodeSystemConfig } : {}),
     });
-    // GitHub Copilot CLI (Phase 4 B2): its own tools hidden by flag, file and shell work through the hive tools.
-    const copilot = commandAdapter(COPILOT_PRESET, {
-      hiveTools: doors?.hiveTools ?? null,
-      runtime: doors?.runtime ?? { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
-      runBase: join(this.#o.userDataDir, 'hive', 'copilot-runs'),
-      ...(this.#o.copilotDetect ? { detect: this.#o.copilotDetect } : {}),
-    });
-    if (!scripted) return [claude, gemini, ...plannedAdapters(), opencode, copilot];
+    // Engines on the command engine (Phase 4 B): their own tools switched off by their flags, file and shell
+    // work through the hive tools. Copilot (B2) and Codex (B3) are guarded; Cursor (B3) is listed only.
+    const command = (preset: CommandPreset): EngineAdapter => {
+      const detect = this.#o.commandDetect?.[preset.id];
+      return commandAdapter(preset, {
+        hiveTools: doors?.hiveTools ?? null,
+        runtime: doors?.runtime ?? { command: process.execPath, env: { ELECTRON_RUN_AS_NODE: '1' } },
+        runBase: join(this.#o.userDataDir, 'hive', `${preset.id}-runs`),
+        ...(detect ? { detect } : {}),
+      });
+    };
+    const [codex, copilot, cursor] = [command(CODEX_PRESET), command(COPILOT_PRESET), command(CURSOR_PRESET)];
+    if (!scripted) return [claude, gemini, codex, opencode, copilot, cursor];
     // An engine with no detection (unsupported here, e.g. unguarded) stays as it is, reason and all.
     const listedOnly = (a: EngineAdapter): EngineAdapter => !a.detect ? a : ({
       id: a.id,
@@ -574,7 +581,7 @@ export class HiveManager {
             : { state: 'missing', version: null, message: 'Not checked: the scripted engine runs everything here.' },
     });
     // In tests, OpenCode is real only when the test gave it its own detection (a stand-in binary).
-    return [scripted, listedOnly(claude), listedOnly(gemini), ...plannedAdapters(), this.#o.opencodeDetect ? opencode : listedOnly(opencode), listedOnly(copilot)];
+    return [scripted, listedOnly(claude), listedOnly(gemini), listedOnly(codex), this.#o.opencodeDetect ? opencode : listedOnly(opencode), listedOnly(copilot), listedOnly(cursor)];
   }
 
   /** Restore the project and start checking the engine. Never throws: problems become activity lines. */
