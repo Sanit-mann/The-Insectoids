@@ -13,9 +13,10 @@ import { DatabaseSync } from 'node:sqlite';
 import { dirname, join } from 'node:path';
 import { type Brain, openBrain } from '@insectoids/brain';
 import { writeBrainShims } from '@insectoids/brain-cli/shims';
-import { BrainAskRequestSchema, BrainTimelineRequestSchema, ObsidianExportRequestSchema, WebhookCallSchema } from '@insectoids/shared';
+import { BrainAskRequestSchema, BrainTimelineRequestSchema, ContainerSettingsSchema, ObsidianExportRequestSchema, WebhookCallSchema } from '@insectoids/shared';
 import { type BrainService, startBrainService } from '@insectoids/brain-service';
 import { HiveManager, e2eReadyEngines } from './hive-manager';
+import { REAL_CONTAINER_RUNTIME } from './containers';
 import { MeaningSearch } from './meaning-search';
 import type { LlmAccess, LlmUsage, ReadyProvider } from '@insectoids/harness';
 import { writeHookLauncher } from '../main/hook-launcher';
@@ -130,6 +131,11 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
       ...(process.env['INSECTOIDS_E2E'] === '1' && /^\d+$/.test(process.env['INSECTOIDS_E2E_PROPOSAL_RETRY_MS'] ?? '')
         ? { cadenceProposals: { retryWindowMs: Number(process.env['INSECTOIDS_E2E_PROPOSAL_RETRY_MS']) } }
         : {}),
+      // e2e only (Phase 4 D1): a fake container runtime (a script) instead of docker or podman on PATH. It runs on the
+      // test's own Node (INSECTOIDS_E2E_CONTAINER_NODE), since this app's executable needs ELECTRON_RUN_AS_NODE to act
+      // as Node and that must never reach the runtime's children. Other e2e runs never look at the computer's own
+      // Docker or Podman: they find none.
+      ...(process.env['INSECTOIDS_E2E'] === '1' ? { containers: e2eContainers(process.env) } : {}),
       // e2e only (B3): the demo Inspector fails C-01 once, so a lesson is learned.
       ...(process.env['INSECTOIDS_E2E'] === '1' && process.env['INSECTOIDS_E2E_INSPECTOR_FAILS_FIRST'] === '1' ? { demoInspectorFailsFirst: true } : {}),
     });
@@ -147,6 +153,13 @@ async function start(m: Extract<ToHost, { type: 'start' }>): Promise<void> {
     brain = null;
     send({ type: 'failed', message: err instanceof Error ? err.message : String(err) });
   }
+}
+
+/** e2e only (Phase 4 D1): the fake runtime when the test names one, else no runtime at all (never the real one). */
+function e2eContainers(env: NodeJS.ProcessEnv): NonNullable<ConstructorParameters<typeof HiveManager>[0]['containers']> {
+  const script = env['INSECTOIDS_E2E_CONTAINER_RUNTIME'];
+  if (script) return { override: { command: env['INSECTOIDS_E2E_CONTAINER_NODE'] || process.execPath, commandArgs: [script] } };
+  return { deps: { ...REAL_CONTAINER_RUNTIME, detect: async () => null } };
 }
 
 /**
@@ -280,6 +293,15 @@ async function rpc(method: HostMethod, params: unknown): Promise<unknown> {
     // The Brain's timeline (Phase 4 A3): validated in main against BrainTimelineRequestSchema, and again here.
     case 'brainTimeline':
       return hive.brainTimeline(BrainTimelineRequestSchema.parse(params ?? {}));
+    // Container mode (Phase 4 D1): settings validated in main against ContainerSettingsSchema, and again here.
+    case 'containersStatus':
+      return hive.containersStatus();
+    case 'containersSave':
+      return hive.containersSave(ContainerSettingsSchema.parse(params));
+    case 'containersRecheck':
+      return hive.containersRecheck();
+    case 'containersPull':
+      return hive.containersPull();
     case 'setLimits':
       // Built in main from the shared PRESETS table; checked again by setLimits.
       hive.setLimits(params as Parameters<HiveManager['setLimits']>[0]);

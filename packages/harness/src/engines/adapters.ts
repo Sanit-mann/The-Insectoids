@@ -3,7 +3,7 @@ import { type ClaudeInstall, checkClaudeAuth, detectClaude } from '../claude/det
 import { type GeminiAuth, type GeminiInstall, checkGeminiAuth, detectGemini, hasMachinePolicies, machinePolicyDir } from '../gemini/detect';
 import { GeminiEngine } from '../gemini/engine';
 import type { runGemini } from '../gemini/run';
-import { ClaudeEngine, type Engine } from '../hive/engine';
+import { ClaudeEngine, type Engine, type HiveToolsDoor } from '../hive/engine';
 import { type OpenCodeInstall, blockingSystemConfig, detectOpenCode } from '../opencode/detect';
 import { type LlmAccess, OpenCodeEngine, type ReadyProvider } from '../opencode/engine';
 import type { runOpenCode } from '../opencode/run';
@@ -17,6 +17,8 @@ export interface ClaudeAdapterOptions {
   /** Where per-run system prompts and MCP configs are written (outside every workspace). */
   promptDir: string;
   env?: Record<string, string>;
+  /** The hive tools, for runs in container mode (Phase 4 D1): Claude's own Bash is blocked there. */
+  hiveTools?: HiveToolsDoor | null;
   /** Tests: replace detection and the sign-in check. */
   detect?: () => Promise<ClaudeInstall>;
   auth?: (command: string) => Promise<{ loggedIn: boolean }>;
@@ -62,7 +64,10 @@ export function claudeAdapter(o: ClaudeAdapterOptions): EngineAdapter {
       if (!command) throw new Error('Claude Code is not ready.');
       // One engine per install: it numbers its prompt files, so runs never overwrite each other's.
       if (engine?.command !== command) {
-        engine = { command, engine: new ClaudeEngine({ claude: command, hook: o.hook, promptDir: o.promptDir, ...(o.env ? { env: o.env } : {}) }) };
+        engine = {
+          command,
+          engine: new ClaudeEngine({ claude: command, hook: o.hook, promptDir: o.promptDir, ...(o.env ? { env: o.env } : {}), ...(o.hiveTools ? { hiveTools: o.hiveTools } : {}) }),
+        };
       }
       return engine.engine;
     },

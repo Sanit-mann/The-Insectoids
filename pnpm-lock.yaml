@@ -400,6 +400,9 @@ importers:
       '@insectoids/shared':
         specifier: workspace:*
         version: link:../shared
+      '@insectoids/workspace':
+        specifier: workspace:*
+        version: link:../workspace
       '@modelcontextprotocol/sdk':
         specifier: 1.32.2
         version: 1.32.2(zod@4.6.7)
@@ -439,7 +442,14 @@ importers:
         specifier: 4.6.7
         version: 4.6.7
 
-  packages/workspace: {}
+  packages/workspace:
+    dependencies:
+      '@insectoids/reflexes':
+        specifier: workspace:*
+        version: link:../reflexes
+      '@insectoids/shared':
+        specifier: workspace:*
+        version: link:../shared
 
 packages:
 

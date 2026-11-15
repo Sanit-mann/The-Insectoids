@@ -8,6 +8,8 @@ import { type BrainAccess, type BrainTicket, brainWriteAccess } from './brain-ac
 import { type ServiceAccess, type ServiceTicket, servicesBrief } from './services-access';
 import type { Engine, EngineRequest, EngineResult } from './engine';
 import { CASTE_NETWORK, MAX_FOUND_SKILLS, chooseSkills, firstSentence } from './catalog';
+import type { ContainerPolicy } from '@insectoids/reflexes';
+import { CONTAINER_PAUSE, type ContainerChoice, type HiveContainerSetup, chooseContainer, containerRunName } from './containers';
 import { type Library, ROLE_SKILLS, brainRules, estimateTokens, inspectorPrompt, insectPrompt, queenPrompt } from './prompts';
 import { type Plan, parsePlan, parseStatus, parseVerdict } from './protocol';
 import type { EngineId } from '@insectoids/shared';
@@ -98,6 +100,17 @@ export interface HiveOptions {
    * outline. `enabled` is the user's setting; `outline` returns null when the code map isn't ready.
    */
   scout?: { enabled(): boolean; outline(goal: string): string | null };
+  /**
+   * Container mode (Phase 4 D1): asked at the start of every card run that may run commands (insects and the
+   * Inspector). Absent or off: commands run on the computer, guarded as before. On but not usable: the run is
+   * refused, the card waits with the reason and the hive pauses until it's ready (never the computer instead).
+   */
+  containers?: () => HiveContainerSetup;
+  /**
+   * Called when a run that had a container ends, however it ended (done, failed, stopped by a pause, the
+   * Watchdog or a time limit): the app removes that run's containers, so none outlive it.
+   */
+  containerRunEnded?: (container: ContainerPolicy) => void;
 }
 
 export interface HiveLimits {
@@ -203,6 +216,8 @@ export class Hive {
   readonly #jobs = new Map<string, Job>();
   #ants = 0;
   #runs = 0;
+  /** Container runs started (part of each container's unique name). */
+  #boxes = 0;
   #asks = 0;
   readonly #deciding = new Set<string>();
   /** Goals already warned at 75% of their budget (A3: once per goal). */
@@ -475,7 +490,45 @@ export class Hive {
 
   resume(): void {
     this.#paused = false;
+    this.#releaseContainerWaits();
     this.#emit({ type: 'resumed', message: 'Hive resumed.' });
+  }
+
+  /**
+   * Cards refused because container mode wasn't ready wait as blocked, with the reason on the card. On resume they
+   * go back on the board (no attempt used: no work was done) and are tried again: in a container when it is ready,
+   * on the computer if the user switched container mode off, refused again otherwise. Read from the board's own
+   * history, so it also works after the app restarted.
+   */
+  #releaseContainerWaits(): void {
+    const board = this.#o.brain.taskboard;
+    for (const card of board.list({ status: 'blocked' })) {
+      const last = board.events(card.id).at(-1);
+      if (!last || last.to !== 'blocked' || !last.note?.startsWith(CONTAINER_PAUSE) || !card.claimedBy) continue;
+      try {
+        board.release(card.id, card.claimedBy, 'Container mode: trying again.');
+      } catch {
+        // Moved meanwhile (a cancelled goal): nothing to release.
+      }
+    }
+  }
+
+  /**
+   * The container decision for one card run (Phase 4 D1). `network` is the run's own network rule (the caste's for
+   * insects, none for the Inspector); a docs-only caste gets no network in a container.
+   */
+  #containerFor(network: EngineRequest['guard']['network'], agentId: string): ContainerChoice {
+    const setup = this.#o.containers?.();
+    if (!setup || setup.mode === 'off') return null;
+    return chooseContainer(setup, network, containerRunName(agentId, ++this.#boxes));
+  }
+
+  /** Container mode is on but not usable: pause the hive once, in plain words, so cards aren't refused one by one. */
+  #containerRefused(reason: string): void {
+    if (this.#paused) return;
+    this.pause(
+      `${CONTAINER_PAUSE} ${reason} Cards that run commands wait; they never run on your computer instead. The hive carries on by itself once containers are ready, or when you switch container mode off.`,
+    );
   }
 
   /**
@@ -952,10 +1005,11 @@ export class Hive {
     const insects = () => [...this.#jobs.values()].filter((j) => j.kind === 'insect').length;
     const cap = Math.min(this.#o.insectCap, this.#o.limits?.cap?.() ?? Number.POSITIVE_INFINITY);
     let progress = true;
-    while (progress && insects() < cap) {
+    // A pause during this pass (e.g. container mode refused a card) stops dispatching at once.
+    while (progress && insects() < cap && !this.#paused) {
       progress = false;
       for (const caste of this.#o.castes) {
-        if (insects() >= cap) break;
+        if (insects() >= cap || this.#paused) break;
         // A caste no engine can take right now (all at their limits) waits on the board.
         if (this.#o.limits && !this.#o.limits.canRoute(caste)) continue;
         const agentId = `Ant-${String(++this.#ants).padStart(2, '0')}`;
@@ -975,6 +1029,17 @@ export class Hive {
     const done = (async () => {
       const { brain, workspace } = this.#o;
       const id = wsId(card);
+      // Container mode (D1): decided before any work starts. Refused = the card waits with the reason (blocked, no
+      // attempt used) and the hive pauses; resume puts it back on the board.
+      const box = this.#containerFor(CASTE_NETWORK[card.caste], agentId);
+      if (box && 'refused' in box) {
+        if (!resumeNote) brain.taskboard.start(card.id, agentId);
+        const why = `${CONTAINER_PAUSE} ${box.refused}`;
+        brain.taskboard.block(card.id, agentId, why);
+        this.#emit({ type: 'card-blocked', goalId: goal.id, cardId: card.id, agentId, message: why });
+        this.#containerRefused(box.refused);
+        return;
+      }
       let cardPath: string;
       if (resumeNote) {
         cardPath = workspace.cardPath(goal.id, id);
@@ -1023,6 +1088,7 @@ export class Hive {
             noGo: this.#o.noGo ?? [],
             network: CASTE_NETWORK[card.caste],
             approvedRules: this.#approved.get(card.id) ?? [],
+            ...(box ? { container: box.container } : {}),
           },
           onEvent: (e) => {
             if (e.kind === 'tool_result' && e.isError) {
@@ -1130,6 +1196,13 @@ export class Hive {
     const done = (async () => {
       const { brain, workspace } = this.#o;
       const id = wsId(card);
+      // The Inspector runs the card's checks (tests, builds), so in container mode it runs them in one too, with no
+      // network. Refused: the card stays in review and the hive pauses until containers are ready.
+      const box = this.#containerFor('none', 'Inspector');
+      if (box && 'refused' in box) {
+        this.#containerRefused(box.refused);
+        return;
+      }
       const cardPath = workspace.cardPath(goal.id, id);
       const diff = await workspace.diffCard(goal.id, id);
       const prompt = inspectorPrompt(this.#o.library, { id: local(card.id), title: card.title, brief: card.brief, acceptance: card.acceptance, attempts: card.attempts }, {
@@ -1146,7 +1219,7 @@ export class Hive {
         system: prompt.system,
         task: prompt.task,
         route,
-        guard: { workspace: cardPath, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none' },
+        guard: { workspace: cardPath, home: this.#o.home, noGo: this.#o.noGo ?? [], network: 'none', ...(box ? { container: box.container } : {}) },
       }, (stop) => (stopRun = stop));
 
       if (!result.ok && result.error === 'auth') {
@@ -1277,6 +1350,17 @@ export class Hive {
   }
 
   async #runEngine(goalId: string, cardId: string | undefined, req: EngineRequest, onStop?: (stop: () => void) => void): Promise<EngineResult> {
+    const box = req.guard.container;
+    const ended = this.#o.containerRunEnded;
+    if (!box || !ended) return this.#runEngineWithServices(goalId, cardId, req, onStop);
+    try {
+      return await this.#runEngineWithServices(goalId, cardId, req, onStop);
+    } finally {
+      ended(box);
+    }
+  }
+
+  async #runEngineWithServices(goalId: string, cardId: string | undefined, req: EngineRequest, onStop?: (stop: () => void) => void): Promise<EngineResult> {
     // Outside services: only insects working a card that names integrations; never the Queen or Inspector.
     const services = this.#o.services;
     const wanted = services && cardId && goalId && isInsectRole(req.role) ? this.#cardIntegrations(goalId, cardId) : [];

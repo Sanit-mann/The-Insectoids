@@ -41,6 +41,7 @@ export * from './command/antigravity';
 export * from './hive/librarian';
 export * from './hive/ask';
 export * from './hive/catalog';
+export * from './hive/containers';
 export * from './hive/watchdog';
 export * from './hive/managers';
 export * from './library/scan';

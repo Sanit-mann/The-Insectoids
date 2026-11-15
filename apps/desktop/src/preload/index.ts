@@ -3,6 +3,9 @@ import {
   AppInfoSchema,
   BACKUP_IPC,
   type BackupApi,
+  CONTAINER_IPC,
+  type ContainerApi,
+  ContainerStatusSchema,
   BRAIN_EXPORT_IPC,
   type BrainExportApi,
   ObsidianExportResultSchema,
@@ -193,6 +196,14 @@ const updates: UpdateApi = {
   },
 };
 
+/** Container mode (Phase 4 D1): the image download starts only from the user's click on the Containers settings. */
+const containers: ContainerApi = {
+  status: async () => ContainerStatusSchema.parse(await invoke(CONTAINER_IPC.status)),
+  save: async (settings) => VaultResultSchema.parse(await invoke(CONTAINER_IPC.save, settings)),
+  recheck: async () => ContainerStatusSchema.parse(await invoke(CONTAINER_IPC.recheck)),
+  pullImage: async () => VaultResultSchema.parse(await invoke(CONTAINER_IPC.pullImage)),
+};
+
 // The only door from the UI to the main process. Every reply is validated.
 const api: InsectoidsApi = {
   appInfo: async () => AppInfoSchema.parse(await invoke(IPC.appInfo)),
@@ -200,6 +211,7 @@ const api: InsectoidsApi = {
   hive,
   setup,
   vault,
+  containers,
   providers,
   webhooks,
   backups,

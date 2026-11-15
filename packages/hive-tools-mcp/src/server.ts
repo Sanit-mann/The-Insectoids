@@ -1,9 +1,11 @@
+import { randomInt } from 'node:crypto';
 import { type ChildProcess, spawn, spawnSync } from 'node:child_process';
 import { existsSync, globSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import type { CallToolResult } from '@modelcontextprotocol/sdk/types.js';
-import { type HookPolicy, type Verdict, evaluateCommand, evaluatePath } from '@insectoids/reflexes';
+import { CONTAINER_WORKDIR, type HookPolicy, type Verdict, evaluateCommand, evaluatePath } from '@insectoids/reflexes';
+import { containerRunArgs, killContainer } from '@insectoids/workspace';
 import { z } from 'zod';
 
 export const SERVER_NAME = 'insectoids-hive-tools';
@@ -88,7 +90,15 @@ export function createHiveToolsServer(policyOrResult: HookPolicy | PolicyResult 
   const P = win ? path.win32 : path.posix;
   const max = opts.maxOutput ?? 30_000;
   const ctx: HookPolicy | null = policy ? { ...policy, platform } : null;
-  const shellName = win ? 'PowerShell' : 'sh (POSIX shell)';
+  // Container mode (Phase 4 D1): every command runs as sh in a throwaway Linux container, never on the computer.
+  const container = ctx?.container ?? null;
+  const runtimeName = container?.runtime === 'podman' ? 'Podman' : 'Docker';
+  const shellName = container ? `sh in a Linux container (${runtimeName})` : win ? 'PowerShell' : 'sh (POSIX shell)';
+  /**
+   * Numbers this server's containers: `<policy name>-<n>`, so a timeout can stop exactly one by name. It starts
+   * at a random point: if this server restarts during a run, its names can't clash with a container still alive.
+   */
+  let containerSeq = randomInt(0, 1_000_000);
 
   const server = new McpServer(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -97,7 +107,9 @@ export function createHiveToolsServer(policyOrResult: HookPolicy | PolicyResult 
         ? [
             `The Insectoids hive tools: the only way to read, change files and run commands in this card's workspace (${ctx.workspace}).`,
             'Paths are relative to the workspace. Every action is checked by the hive\'s safety guard first.',
-            `run_shell uses ${shellName}${win ? ': use PowerShell syntax (e.g. `;` to chain, `if ($?) { … }`), not bash' : ''}.`,
+            container
+              ? `run_shell runs sh inside a Linux container, not on this computer: the workspace is mounted at ${CONTAINER_WORKDIR} (the working folder), nothing else of the computer is visible, and the network is ${container.network === 'open' ? 'on' : 'off'}. Use sh syntax and relative paths.`
+              : `run_shell uses ${shellName}${win ? ': use PowerShell syntax (e.g. `;` to chain, `if ($?) { … }`), not bash' : ''}.`,
             'Leave your changes uncommitted; the hive commits them.',
           ].join('\n')
         : `The Insectoids hive tools are unavailable: ${result.error} Stop and end with "STATUS: BLOCKED: the hive's safety guard has no policy for this run".`,
@@ -308,7 +320,9 @@ export function createHiveToolsServer(policyOrResult: HookPolicy | PolicyResult 
   server.registerTool(
     'run_shell',
     {
-      description: win
+      description: container
+        ? `Run a sh command inside a throwaway Linux container (${container.image.split('@')[0]}), not on this computer. The workspace is mounted at ${CONTAINER_WORKDIR}, which is the working folder; nothing else of the computer is visible; network ${container.network === 'open' ? 'on' : 'off'}. Returns exit code, stdout and stderr. Default timeout 2 min, max 10.`
+        : win
         ? 'Run a PowerShell command in the workspace (use PowerShell syntax, not bash). Returns exit code, stdout and stderr. Default timeout 2 min, max 10.'
         : 'Run a sh command in the workspace. Returns exit code, stdout and stderr. Default timeout 2 min, max 10.',
       inputSchema: {
@@ -318,10 +332,17 @@ export function createHiveToolsServer(policyOrResult: HookPolicy | PolicyResult 
       annotations: { readOnlyHint: false, destructiveHint: true, idempotentHint: false, openWorldHint: true },
     },
     guarded(async (a: { command: string; timeout_ms?: number | undefined }, c) => {
-      const v = evaluateCommand(a.command, c);
+      // In container mode the command is sh in Linux with the worktree at /work: judge it as it will run there
+      // (POSIX rules, /work as the workspace, /tmp as home). The computer's own folders, no-go list and links
+      // don't exist inside the container; the command-level rules (pushes, new dependencies, …) still apply.
+      const judged: HookPolicy = container
+        ? (({ realpath: _drop, ...rest }) => ({ ...rest, platform: 'posix' as const, workspace: CONTAINER_WORKDIR, home: '/tmp', linkedPaths: [], noGo: [] }))(c)
+        : c;
+      const v = evaluateCommand(a.command, judged);
       if (!allowed(v, c)) return refuse(verdictMessage(v as Exclude<Verdict, { decision: 'allow' }>));
       const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env) };
       for (const k of STRIPPED_ENV) delete env[k];
+      if (container) return await runInContainer(a, c, env);
       const [cmd, args] = win
         ? // -Command turns any failing program's exit code into 1; hand the program's own code back.
           ['powershell.exe', ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', `${a.command}\nif ($LASTEXITCODE) { exit $LASTEXITCODE }`]]
@@ -360,6 +381,85 @@ export function createHiveToolsServer(policyOrResult: HookPolicy | PolicyResult 
       });
     }),
   );
+
+  /**
+   * run_shell in container mode: the command goes to `sh -c` in a throwaway container with only the worktree
+   * mounted. The runtime program is started directly; if it can't start or its service isn't answering, the
+   * insect gets plain words and the command does not run anywhere (never on the computer as a fallback).
+   */
+  async function runInContainer(a: { command: string; timeout_ms?: number | undefined }, c: HookPolicy, env: NodeJS.ProcessEnv): Promise<CallToolResult> {
+    const ct = c.container!;
+    const rt = { command: ct.command, commandArgs: ct.commandArgs ?? [] };
+    const index = ++containerSeq;
+    const name = `${ct.name}-${index}`;
+    let args: string[];
+    try {
+      // HOME=/tmp: the image's root filesystem is read-only, and tools like npm keep a cache under HOME.
+      // Docker on Linux would run as root and leave root-owned files in the worktree: run as the user there.
+      const user = ct.runtime === 'docker' && process.platform === 'linux' && process.getuid && process.getgid ? `${process.getuid()}:${process.getgid()}` : undefined;
+      args = containerRunArgs(ct, { workspace: c.workspace, command: a.command, index, env: { HOME: '/tmp' }, ...(user ? { user } : {}) });
+    } catch (e) {
+      return refuse(`Container mode can't run this command: ${e instanceof Error ? e.message : String(e)} Nothing was run.`);
+    }
+    const notReady = (why: string): CallToolResult =>
+      refuse(
+        `${runtimeName} isn't running${why ? ` (${why})` : ''}. This card runs in container mode, so its commands never run on the computer instead. ` +
+          'Nothing was run. End your work with "STATUS: BLOCKED: container mode is on but the container runtime is not running"; the user can start it or switch container mode off.',
+      );
+    const timeout = a.timeout_ms ?? opts.defaultTimeoutMs ?? 120_000;
+    return await new Promise<CallToolResult>((resolve) => {
+      let child: ChildProcess;
+      try {
+        child = spawn(rt.command, [...rt.commandArgs, ...args], { env, windowsHide: true, shell: false, detached: !win, stdio: ['ignore', 'pipe', 'pipe'] });
+      } catch (e) {
+        resolve(notReady(`${rt.command} could not be started: ${e instanceof Error ? e.message : String(e)}`));
+        return;
+      }
+      let out = '';
+      let err = '';
+      let timedOut = false;
+      child.stdout!.setEncoding('utf8').on('data', (d: string) => {
+        if (out.length < max * 2) out += d;
+      });
+      child.stderr!.setEncoding('utf8').on('data', (d: string) => {
+        if (err.length < max * 2) err += d;
+      });
+      const timer = setTimeout(() => {
+        timedOut = true;
+        // Killing the runtime's client is not enough: the container would keep running. Stop it by name first.
+        void killContainer(rt, name, { env }).finally(() => killTree(child, win));
+      }, timeout);
+      child.on('error', (e) => {
+        clearTimeout(timer);
+        resolve(notReady(`${rt.command} could not be started: ${e.message}`));
+      });
+      child.on('close', (code) => {
+        clearTimeout(timer);
+        if (!timedOut && code !== 0) {
+          // The runtime's own failures, told apart from the command's by their wording.
+          if (/Cannot connect to the Docker daemon|Is the docker daemon running|error during connect|Cannot connect to Podman|podman machine start/i.test(err)) {
+            resolve(notReady(''));
+            return;
+          }
+          if (/No such image|Unable to find image|image not known/i.test(err)) {
+            resolve(
+              refuse(
+                `The container image (${ct.image.split('@')[0]}) isn't on this computer yet, so nothing was run. End your work with "STATUS: BLOCKED: the container image needs downloading"; the user can download it from the app's container settings.`,
+              ),
+            );
+            return;
+          }
+        }
+        const half = Math.floor(max / 2);
+        const parts = [
+          timedOut ? `Timed out after ${timeout} ms; the container (${name}) and everything in it were stopped.` : `Exit code ${code ?? 'unknown'}`,
+          out ? `--- stdout ---\n${clip(out, half)}` : '',
+          err ? `--- stderr ---\n${clip(err, half)}` : '',
+        ].filter(Boolean);
+        resolve(timedOut ? { isError: true, content: [{ type: 'text', text: parts.join('\n') }] } : text(parts.join('\n')));
+      });
+    });
+  }
 
   return server;
 }

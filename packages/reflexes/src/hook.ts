@@ -1,5 +1,6 @@
 import { existsSync, realpathSync } from 'node:fs';
 import path from 'node:path';
+import type { ContainerPolicy } from './container';
 import { type GuardContext, type Verdict, evaluateCommand, evaluatePath } from './guard';
 
 /**
@@ -14,6 +15,8 @@ export type HookPolicy = GuardContext & {
   network: NetworkPolicy;
   /** "Ask" rules the user approved for this card only (e.g. ["new-dependency"]). Never affects "block". */
   approvedRules?: string[];
+  /** Container mode (Phase 4 D1): the card's shell commands run in this container, never on the computer. */
+  container?: ContainerPolicy;
 };
 
 export interface PreToolUseInput {
@@ -33,6 +36,14 @@ const DOCS_HOSTS = [
 const COORDINATION_TOOLS = new Set(['TodoWrite', 'Task', 'Agent', 'ExitPlanMode', 'Skill', 'BashOutput', 'KillShell', 'ListMcpResourcesTool', 'ReadMcpResourceTool']);
 const READ_TOOLS: Record<string, string> = { Read: 'file_path', NotebookRead: 'notebook_path', LS: 'path', Glob: 'path', Grep: 'path' };
 const WRITE_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' };
+
+/**
+ * Claude Code's own shell tools run on the computer. In container mode they are blocked, and Claude is pointed at
+ * the hive's run_shell, which runs the command in the card's container (Phase 4 D1). BashOutput and KillShell
+ * only ever act on shells Bash started, so they go with it.
+ */
+const HOST_SHELL_TOOLS = new Set(['Bash', 'PowerShell', 'BashOutput', 'KillShell']);
+const CONTAINER_MODE_REASON = "This card runs in container mode: run commands with the hive's run_shell tool.";
 
 const str = (v: unknown): string | undefined => (typeof v === 'string' ? v : undefined);
 
@@ -60,6 +71,7 @@ export function preToolUse(input: PreToolUseInput, policy: HookPolicy): Verdict 
 function decide(input: PreToolUseInput, policy: HookPolicy): Verdict {
   const t = input.tool_name;
   const ti = input.tool_input ?? {};
+  if (policy.container && HOST_SHELL_TOOLS.has(t)) return { decision: 'block', rule: 'container-mode', reason: CONTAINER_MODE_REASON };
   if (t === 'Bash' || t === 'PowerShell') return evaluateCommand(str(ti['command']) ?? '', policy);
   if (t in WRITE_TOOLS) return evaluatePath(str(ti[WRITE_TOOLS[t]!]) ?? '', 'write', policy);
   if (t in READ_TOOLS) {

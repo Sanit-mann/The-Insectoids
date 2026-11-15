@@ -68,8 +68,10 @@ import {
   frontmatterDescription,
   loadCatalog,
   type WatchdogThresholds,
+  CONTAINER_PAUSE,
 } from '@insectoids/harness';
 import { LibraryKeeper, scanOf } from './library-keeper';
+import { ContainerKeeper, type ContainerRuntimeDeps } from './containers';
 import { CadenceKeeper, isBuiltIn } from './cadence-keeper';
 import { CadenceProposer } from './cadence-proposals';
 import { approvalView, buildDigest } from './digest';
@@ -132,6 +134,11 @@ import {
   type WebhookCall,
   WebhookCallSchema,
   type WebhookReply,
+  type ContainerSettings,
+  ContainerSettingsSchema,
+  type ContainerStatus,
+  DEFAULT_CONTAINER_SETTINGS,
+  type VaultResult,
 } from '@insectoids/shared';
 import { Workspace } from '@insectoids/workspace';
 import { meaningSearchOffView } from './meaning-search';
@@ -256,6 +263,11 @@ export interface HiveManagerOptions {
   now?: () => number;
   /** Seed for the Treasurer's learning router (tests). Default: the clock. */
   seed?: number;
+  /**
+   * Container mode (Phase 4 D1). `deps`: tests replace the runtime layer's calls. `override`: e2e only, a fake
+   * runtime program used instead of searching PATH for docker or podman.
+   */
+  containers?: { deps?: ContainerRuntimeDeps; override?: { command: string; commandArgs: string[] } };
 }
 
 const HOUR = 3600_000;
@@ -282,6 +294,8 @@ interface HostSettings {
   managers?: ManagerSettings;
   /** When the user last read the "while you were away" digest (Phase 3 B1); the first start sets it to then. */
   digestSeenAt?: number;
+  /** Container mode (Phase 4 D1): off, or every card's commands in a container, and the image and limits. */
+  containers?: ContainerSettings;
 }
 
 interface ManagerSettings {
@@ -419,6 +433,9 @@ export class HiveManager {
   #hiveReviewing = false;
   /** A question to the Brain is being answered (Phase 4 A1): one at a time. */
   #asking = false;
+  /** Container mode (Phase 4 D1): the setting, the runtime and image checks, the image download. */
+  readonly #containers: ContainerKeeper;
+  #containersPushTimer: NodeJS.Timeout | null = null;
 
   constructor(o: HiveManagerOptions) {
     this.#o = o;
@@ -434,6 +451,14 @@ export class HiveManager {
     // The digest (B1) covers what happens from the very first start on, never older history.
     this.#digestSeenAt = settings.digestSeenAt ?? this.#now();
     if (settings.digestSeenAt === undefined) this.#writeSettings({ digestSeenAt: this.#digestSeenAt });
+    this.#containers = new ContainerKeeper({
+      settings: settings.containers ?? { ...DEFAULT_CONTAINER_SETTINGS },
+      save: (c) => this.#writeSettings({ containers: c }),
+      ...(o.containers?.deps ? { deps: o.containers.deps } : {}),
+      ...(o.containers?.override ? { override: o.containers.override } : {}),
+      onChange: () => this.#containersChanged(),
+      ...(o.log ? { log: o.log } : {}),
+    });
     this.#userLib = new UserLibrary(o.userLibraryDir ?? join(o.userDataDir, 'library'));
     this.#keeper = new LibraryKeeper({
       brain: o.brain,
@@ -529,6 +554,8 @@ export class HiveManager {
       // (The MCP door gets it through its server env, the brain CLI through its shim.)
       hook: doors?.hookLauncher ?? { command: doors?.runtime.command ?? process.execPath, args: [doors?.guardHook ?? ''] },
       promptDir: join(this.#o.userDataDir, 'hive', 'prompts'),
+      // Container mode (D1): the hook blocks Claude's own Bash there, so those runs get the hive tools' run_shell.
+      ...(doors?.hiveTools ? { hiveTools: { script: doors.hiveTools, runtime: doors.runtime } } : {}),
       ...(this.#o.detect ? { detect: this.#o.detect } : {}),
       ...(this.#o.auth ? { auth: this.#o.auth } : {}),
     });
@@ -595,6 +622,8 @@ export class HiveManager {
   /** Restore the project and start checking the engine. Never throws: problems become activity lines. */
   async init(): Promise<void> {
     void this.#checkEngines();
+    // Container mode (D1): look for Docker or Podman and the image at start (and clear a crash's leftovers).
+    void this.#containers.check();
     this.#syncLibrary();
     const path = this.#o.project ?? this.#readSettings().projectPath;
     let opened = false;
@@ -1034,6 +1063,8 @@ export class HiveManager {
     if (this.#outTimer) clearTimeout(this.#outTimer);
     if (this.#changedTimer) clearTimeout(this.#changedTimer);
     if (this.#codeMapTimer) clearTimeout(this.#codeMapTimer);
+    if (this.#containersPushTimer) clearTimeout(this.#containersPushTimer);
+    this.#containers.dispose();
     await this.#codeMap?.dispose();
     await this.#closeProject();
   }
@@ -1359,6 +1390,9 @@ export class HiveManager {
       ...(this.#o.watchdog !== undefined ? { watchdog: this.#o.watchdog } : {}),
       ...(this.#o.foremanBrain !== undefined ? { foremanBrain: this.#o.foremanBrain } : {}),
       scout: { enabled: () => this.#managers.scoutBeforePlanning, outline: (goal: string) => this.#scoutOutline(goal) },
+      // Container mode (D1): asked at the start of every card run that may run commands.
+      containers: () => this.#containers.setup(),
+      containerRunEnded: (box) => this.#containers.runEnded(box),
       ...(this.#brainAccess() ? { brainAccess: this.#brainAccess()! } : {}),
       ...(this.#o.services ? { services: this.#o.services } : {}),
       limits: {
@@ -1413,6 +1447,7 @@ export class HiveManager {
     this.#ticking = true;
     try {
       this.#maybeResumeAfterLimit();
+      this.#maybeResumeAfterContainers();
       this.#tickRun = p.hive.tick();
       await this.#tickRun;
     } catch (err) {
@@ -2317,6 +2352,58 @@ export class HiveManager {
   }
 
   /** The hive rested because every engine was at a limit, and one is free again: carry on. */
+  // ---- container mode (Phase 4 D1) -------------------------------------------------------------------
+
+  containersStatus(): ContainerStatus {
+    return this.#containers.status();
+  }
+
+  /** Validated in main against ContainerSettingsSchema, and again by the keeper. */
+  async containersSave(settings: ContainerSettings): Promise<VaultResult> {
+    const r = await this.#containers.save(settings);
+    if (r.ok) {
+      this.#note(
+        'containers',
+        settings.mode === 'always' ? 'Container mode is on: card commands run in a container.' : 'Container mode is off: cards run commands on this computer, guarded as before.',
+      );
+    }
+    return r;
+  }
+
+  /** "Check again": the runtime and the image, now. */
+  async containersRecheck(): Promise<ContainerStatus> {
+    await this.#containers.check();
+    return this.#containers.status();
+  }
+
+  /** "Download image": only on the user's click; progress comes through the status. */
+  containersPull(): VaultResult {
+    return this.#containers.pullImage();
+  }
+
+  /**
+   * The keeper's own push, apart from #changed (which keeps only the latest reason of a burst): the Containers
+   * section refreshes on reason "containers", so download progress must never be swallowed by hive activity.
+   */
+  #containersChanged(): void {
+    this.#maybeResumeAfterContainers();
+    if (this.#containersPushTimer || this.#disposed) return;
+    this.#containersPushTimer = setTimeout(() => {
+      this.#containersPushTimer = null;
+      this.#o.push({ type: 'changed', reason: 'containers' });
+    }, 100);
+    this.#containersPushTimer.unref?.();
+  }
+
+  /** A hive paused by container mode carries on by itself once containers are ready, or the user switched it off. */
+  #maybeResumeAfterContainers(): void {
+    if (!this.#paused || !this.#pausedReason?.startsWith(CONTAINER_PAUSE)) return;
+    const s = this.#containers.settings;
+    if (s.mode === 'always' && !this.#containers.usable) return;
+    this.#resume();
+    this.#note('resumed', s.mode === 'off' ? 'Container mode is off; the hive carries on, with commands on this computer as before.' : 'Containers are ready; the hive carries on.');
+  }
+
   #maybeResumeAfterLimit(): void {
     if (!this.#paused || !this.#pausedReason?.startsWith(LIMIT_PAUSE)) return;
     if (!this.#engines.canRoute('coder') && !this.#engines.canRoute('queen')) return;
@@ -2340,7 +2427,9 @@ export class HiveManager {
         librarian?: unknown;
         managers?: unknown;
         digestSeenAt?: unknown;
+        containers?: unknown;
       };
+      const containers = ContainerSettingsSchema.safeParse(raw.containers);
       const ids = (v: unknown): EngineId[] =>
         Array.isArray(v) ? v.flatMap((x) => (EngineIdSchema.safeParse(x).success ? [x as EngineId] : [])) : [];
       return {
@@ -2351,6 +2440,8 @@ export class HiveManager {
         ...readReviewClock(raw.librarian),
         ...readManagers(raw.managers),
         ...(typeof raw.digestSeenAt === 'number' && Number.isFinite(raw.digestSeenAt) ? { digestSeenAt: raw.digestSeenAt } : {}),
+        // A malformed container setting (e.g. an image edited by hand) falls back to the defaults: off.
+        ...(containers.success ? { containers: containers.data } : {}),
       };
     } catch {
       return {};

@@ -91,7 +91,13 @@ export type HostMethod =
   | 'brainAsk'
   | 'brainAskEstimate'
   // The Brain's timeline (Phase 4 A3): params BrainTimelineRequest, result BrainTimelineView (read-only).
-  | 'brainTimeline';
+  | 'brainTimeline'
+  // Container mode (Phase 4 D1): 'containersStatus' (read-only) and 'containersRecheck' return ContainerStatus;
+  // 'containersSave' takes ContainerSettings (validated in main) and 'containersPull' nothing, both return VaultResult.
+  | 'containersStatus'
+  | 'containersSave'
+  | 'containersRecheck'
+  | 'containersPull';
 
 /**
  * Requests the host makes to main (the reverse direction): the secret broker and the Vault live in

@@ -1,4 +1,4 @@
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { HookPolicy } from '@insectoids/reflexes';
 import type { ClaudeEvent } from '../claude/stream';
@@ -43,6 +43,20 @@ export interface Engine {
   name?(id: Route['engine']): string | undefined;
 }
 
+/** The hive tools MCP bundle and how to start it (the same bundle and runtime the other engines use). */
+export interface HiveToolsDoor {
+  script: string;
+  runtime: { command: string; args?: string[]; env?: Record<string, string> };
+}
+
+/** Told to Claude in container mode: its own Bash is blocked by the hook, so commands go through run_shell. */
+export const CLAUDE_CONTAINER_NOTE = [
+  '## Commands run in a container',
+  'Container mode is on: your own Bash and PowerShell tools are switched off for this card. Run every command with',
+  "the hive tools' run_shell tool (mcp__hive__run_shell). It runs in a throwaway container that sees only this",
+  "card's folder (at /work); nothing else on the computer is reachable from there.",
+].join('\n');
+
 /** Claude Code engine: each run is a headless Claude Code process with the guard hook in front of every tool. */
 export class ClaudeEngine implements Engine {
   #n = 0;
@@ -57,6 +71,11 @@ export class ClaudeEngine implements Engine {
       /** Where system-prompt files are written (outside every workspace). */
       promptDir: string;
       env?: Record<string, string>;
+      /**
+       * Container mode (Phase 4 D1): the hook blocks Claude's own Bash when the run's guard has a container, so
+       * those runs also get the hive tools server (`hive`) and use its run_shell. Absent: such runs have no shell.
+       */
+      hiveTools?: HiveToolsDoor | null;
     },
   ) {}
 
@@ -64,7 +83,8 @@ export class ClaudeEngine implements Engine {
     mkdirSync(this.o.promptDir, { recursive: true });
     const n = ++this.#n;
     const file = join(this.o.promptDir, `${req.agentId}-${n}.md`);
-    writeFileSync(file, req.system);
+    const boxed = Boolean(req.guard.container && this.o.hiveTools && existsSync(this.o.hiveTools.script));
+    writeFileSync(file, boxed ? `${req.system}\n\n${CLAUDE_CONTAINER_NOTE}` : req.system);
     // The Brain door: an MCP config holding this run's token, next to the prompt (outside every workspace).
     // The services door gets the broker address and token in its own server env only: never in Claude's
     // environment, so neither the model's shell nor its other tools can read the token.
@@ -76,6 +96,13 @@ export class ClaudeEngine implements Engine {
       env = { ...this.o.env, ...brainRunEnv(req.brain, { ...process.env, ...this.o.env }) };
     }
     if (req.services) servers['services'] = servicesMcpServer(req.services);
+    // Container mode only: outside it Claude keeps its own (hooked) tools, and a second shell would be one more
+    // way around the guard for no gain. The server reads the run's guard, container included, from its own env.
+    if (boxed && this.o.hiveTools) {
+      const t = this.o.hiveTools;
+      const guard: Omit<HookPolicy, 'realpath'> = { ...req.guard, platform: process.platform === 'win32' ? 'win32' : 'posix' };
+      servers['hive'] = { command: t.runtime.command, args: [...(t.runtime.args ?? []), t.script], env: { ...t.runtime.env, INSECTOIDS_GUARD: JSON.stringify(guard) } };
+    }
     if (Object.keys(servers).length) {
       mcpFile = join(this.o.promptDir, `${req.agentId}-${n}.mcp.json`);
       writeFileSync(mcpFile, JSON.stringify({ mcpServers: servers }, null, 2), { mode: 0o600 });

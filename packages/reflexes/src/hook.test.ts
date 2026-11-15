@@ -116,3 +116,37 @@ describe('runHook fails closed', () => {
     expect(JSON.parse(out.stdout).hookSpecificOutput.permissionDecision).toBe('deny');
   });
 });
+
+describe('container mode (Phase 4 D1)', () => {
+  const contained: HookPolicy = {
+    ...policy,
+    container: {
+      runtime: 'docker', command: '/usr/bin/docker', image: 'node:22-bookworm-slim', network: 'none',
+      cpus: 2, memoryMb: 2048, pidsLimit: 256, name: 'insectoids-g-1-c-01-ab12',
+    },
+  };
+
+  it("blocks Claude Code's own shell tools and points at the hive's run_shell", () => {
+    for (const tool of ['Bash', 'PowerShell', 'BashOutput', 'KillShell']) {
+      const v = preToolUse({ tool_name: tool, tool_input: { command: 'npm test' } }, contained);
+      expect(v, tool).toEqual({ decision: 'block', rule: 'container-mode', reason: "This card runs in container mode: run commands with the hive's run_shell tool." });
+    }
+    // Even an approval for a rule can't bring the host shell back.
+    expect(call('Bash', { command: 'npm install zod' }, { ...contained, approvedRules: ['new-dependency', 'container-mode'] })).toBe('block');
+    const out = JSON.parse(runHook(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'ls' } }), { INSECTOIDS_GUARD: JSON.stringify(contained) }).stdout);
+    expect(out.hookSpecificOutput.permissionDecision).toBe('deny');
+    expect(out.hookSpecificOutput.permissionDecisionReason).toMatch(/container mode: run commands with the hive's run_shell tool/);
+  });
+
+  it('leaves everything else as it was', () => {
+    expect(call('mcp__insectoids-hive-tools__run_shell', { command: 'npm test' }, contained)).toBe('allow');
+    expect(call('Read', { file_path: '/hive/G-1/C-01/src/app.ts' }, contained)).toBe('allow');
+    expect(call('Read', { file_path: '/hive/G-1/C-01/.env' }, contained)).toBe('block');
+    expect(call('Edit', { file_path: 'src/app.ts', old_string: 'a', new_string: 'b' }, contained)).toBe('allow');
+    expect(call('TodoWrite', { todos: [] }, contained)).toBe('allow');
+    expect(call('WebFetch', { url: 'https://developer.mozilla.org/', prompt: 'x' }, contained)).toBe('allow');
+    // Without container mode, Bash is checked by the command guard as before.
+    expect(call('Bash', { command: 'npm test' })).toBe('allow');
+    expect(call('BashOutput', { bash_id: 'x' })).toBe('allow');
+  });
+});

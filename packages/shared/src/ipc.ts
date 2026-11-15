@@ -3,6 +3,7 @@ import type { HiveApi } from './hive-api';
 import type { SetupApi } from './setup-api';
 import type { ProvidersApi } from './providers-api';
 import type { VaultApi } from './vault-api';
+import type { ContainerApi } from './container-api';
 import type { WebhookApi } from './webhook-api';
 import type { BackupApi } from './backup-api';
 import type { BrainExportApi } from './export-api';
@@ -41,6 +42,8 @@ export interface InsectoidsApi {
   hive: HiveApi;
   setup: SetupApi;
   vault: VaultApi;
+  /** Container mode settings and status (Phase 4 D1). */
+  containers: ContainerApi;
   providers: ProvidersApi;
   /** Webhook URLs and secrets (Phase 3 A4). */
   webhooks: WebhookApi;

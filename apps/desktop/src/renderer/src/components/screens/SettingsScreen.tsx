@@ -5,6 +5,7 @@ import { Switch } from '@/components/connections/Switch';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { NotificationsSetting, StartWithComputerSetting } from '@/components/settings/Background';
 import { BackupsSetting } from '@/components/settings/Backups';
+import { ContainersSetting } from '@/components/settings/Containers';
 import { UpdatesSetting } from '@/components/settings/Updates';
 import { BrainFolder, Checklist, PresetCards } from '@/components/setup/parts';
 import { Button } from '@/components/ui/button';
@@ -129,6 +130,14 @@ export function SettingsScreen() {
           enabled={state.startWithComputer.enabled}
           message={state.startWithComputer.message}
         />
+      </Section>
+
+      <Section
+        description="Run cards' commands in a throwaway Docker or Podman container instead of on this computer. Off unless you switch it on."
+        id="settings-containers"
+        title="Containers"
+      >
+        <ContainersSetting />
       </Section>
 
       <Section

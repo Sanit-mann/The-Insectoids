@@ -19,6 +19,7 @@ import {
 import { buildAppInfo } from './app-info';
 import { AppSettingsStore, checkBrainFolder, limitsFor, notificationsOn, updatesOn } from './app-settings';
 import { registerBackupIpc } from './backup-ipc';
+import { registerContainerIpc } from './container-ipc';
 import { createBackupDirSync } from './backups';
 import { registerBrainExportIpc } from './brain-export-ipc';
 import { BrainHost } from './brain-host';
@@ -553,6 +554,8 @@ function registerIpc(): void {
     ...(testExportFolder ? { testPickedFolder: testExportFolder } : {}),
   });
   registerUpdateIpc({ updater: updater!, assertTrustedSender });
+  // Container mode (Phase 4 D1): the setting and checks live in the Brain host, next to the hive that uses them.
+  registerContainerIpc({ host: () => brainHost, assertTrustedSender });
   ipcMain.handle(IPC.brainStatus, (event) => {
     assertTrustedSender(event);
     return brainHost?.status ?? { state: 'starting', message: 'Starting the Brain…' };
