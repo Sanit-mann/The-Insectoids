@@ -125,6 +125,17 @@ describe('run_shell in container mode', () => {
     expect(runs()).toHaveLength(1);
   });
 
+  it("the container's own /tmp is throwaway scratch space: writing there reaches the runtime, deleting /tmp itself doesn't", async () => {
+    const c = await connect(policy());
+    // The folder doesn't exist, so the fake runtime (which runs commands on this computer) writes nothing.
+    const w = await call(c, 'run_shell', { command: 'echo x > /tmp/insectoids-no-such-dir/before.json' });
+    expect(w.text).not.toMatch(/Blocked by the Insectoids guard/);
+    expect(runs()).toHaveLength(1);
+    const rm = await call(c, 'run_shell', { command: 'rm -rf /tmp' });
+    expect(rm.text).toMatch(/Blocked by the Insectoids guard/);
+    expect(runs()).toHaveLength(1);
+  });
+
   it('the command guard still runs first, judged as inside the container: escaping /work never reaches the runtime', async () => {
     const c = await connect(policy());
     // Inside the container the computer's folders don't exist; what matters is leaving the worktree there.

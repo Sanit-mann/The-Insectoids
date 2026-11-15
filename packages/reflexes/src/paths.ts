@@ -10,6 +10,11 @@ export interface PathContext {
   /** Folders the user marked "no-go" (Workspace 06-D8). */
   noGo?: string[];
   /**
+   * Throwaway folders where writes and deletes are allowed as well as the workspace (never the folder itself).
+   * Only set for container runs: the container's own /tmp, which disappears with it (Phase 4 E1).
+   */
+  scratch?: string[];
+  /**
    * Resolve symlinks and junctions on the real file system (the hook adapter supplies one).
    * Without it, a link inside the workspace pointing outside could be written through.
    */
@@ -32,6 +37,12 @@ export function isInside(child: string, parent: string, ctx: PathContext): boole
   const P = impl(ctx);
   const rel = P.relative(parent, child);
   return rel === '' || (!rel.startsWith('..') && !P.isAbsolute(rel));
+}
+
+/** Strictly inside one of the throwaway folders (`scratch`), not the folder itself. */
+export function inScratch(abs: string, ctx: PathContext): boolean {
+  const P = impl(ctx);
+  return (ctx.scratch ?? []).some((s) => isInside(abs, s, ctx) && P.relative(s, abs) !== '');
 }
 
 const SAFE_ENV_FILES = new Set(['.env.example', '.env.sample', '.env.template', '.env.dist']);

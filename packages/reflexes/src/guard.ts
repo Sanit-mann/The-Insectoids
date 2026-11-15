@@ -1,6 +1,7 @@
 import path from 'node:path';
 import {
   type PathContext,
+  inScratch,
   isGitInternals,
   isInside,
   linkedHit,
@@ -181,6 +182,7 @@ function checkSegment(seg: Segment, ctx: GuardContext, depth: number): Verdict {
   if (DELETERS.has(name)) {
     for (const t of args.filter((a) => !isFlag(a, win) && a !== SUBST)) {
       const abs = resolveIn(t, ctx);
+      if (inScratch(abs, ctx)) continue;
       if (!isInside(abs, ctx.workspace, ctx) || P(ctx).relative(ctx.workspace, abs) === '') {
         v = worst(v, block('delete-outside', `Deleting ${t} reaches outside this card's workspace.`));
       } else if (linkedHit(abs, ctx)) {
@@ -285,6 +287,7 @@ function checkSegment(seg: Segment, ctx: GuardContext, depth: number): Verdict {
 
 function checkWrite(target: string, ctx: GuardContext): Verdict {
   const abs = resolveIn(target, ctx);
+  if (inScratch(abs, ctx)) return ALLOW;
   if (!isInside(abs, ctx.workspace, ctx)) return block('write-outside', `Writing ${target} reaches outside this card's workspace.`);
   if (linkedHit(abs, ctx)) return block('write-linked', `${target} is linked to your real files; insects can't change them.`);
   if (isGitInternals(abs, ctx)) return block('git-internals', `${target} is inside git's own folder; only the harness changes it.`);

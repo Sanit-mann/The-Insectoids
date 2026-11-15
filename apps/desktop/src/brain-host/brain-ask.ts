@@ -50,6 +50,13 @@ export function citedSources(sources: readonly AskSourceInput[], cited: readonly
 
 /** Without enough Librarian runs of its own, the hive says this. */
 export const FALLBACK_TOKENS = { low: 3_000, high: 8_000 } as const;
+/**
+ * Engines that read their own long instructions on every run say more. Claude Code's real question in the Phase 4
+ * demo used about 46,000 tokens, nearly all of them its instructions read again from its cache (under a cent).
+ */
+export const FALLBACK_TOKENS_BY_ENGINE: Readonly<Record<string, { low: number; high: number }>> = { claude: { low: 30_000, high: 60_000 } };
+/** Said after the range, so a big number isn't a surprise. */
+const ENGINE_NOTE: Readonly<Record<string, string>> = { claude: " Most of them are Claude Code's own instructions, read again from its cache." };
 /** Librarian runs needed before the hive trusts its own numbers. */
 export const MIN_ASK_RUNS = 3;
 
@@ -71,13 +78,14 @@ const num = (n: number): string => n.toLocaleString('en-US');
 
 /**
  * The token range: half to one and a half times the median of past Librarian runs (the same engine's when it has
- * MIN_ASK_RUNS, else every engine's), rounded to hundreds; FALLBACK_TOKENS without enough runs.
+ * MIN_ASK_RUNS, else every engine's), rounded to hundreds; without enough runs, the engine's own fallback
+ * (FALLBACK_TOKENS_BY_ENGINE) or FALLBACK_TOKENS.
  */
 export function askTokenRange(runs: readonly AskPastRun[], engine: string | null): { low: number; high: number } {
   const lib = runs.filter((r) => r.role === 'librarian' && r.tokens > 0);
   const mine = lib.filter((r) => r.engine === engine);
   const use = mine.length >= MIN_ASK_RUNS ? mine : lib;
-  if (use.length < MIN_ASK_RUNS) return { ...FALLBACK_TOKENS };
+  if (use.length < MIN_ASK_RUNS) return { ...((engine && FALLBACK_TOKENS_BY_ENGINE[engine]) || FALLBACK_TOKENS) };
   const m = median(use.map((r) => r.tokens));
   const low = roundTo(m * 0.5, 100);
   return { low, high: Math.max(low + 100, roundTo(m * 1.5, 100)) };
@@ -114,6 +122,7 @@ export function askEstimate(i: {
       message = `About ${range}, up to about $${costUsdHigh.toFixed(2)} (billed by your API provider).`;
     } else message = `About ${range} (billed by your API provider per token).`;
   }
+  message += ENGINE_NOTE[e.id] ?? '';
   if (!i.project) return { ...base, canAsk: false, costUsdHigh, message: 'Open a project first.' };
   return { ...base, canAsk: true, costUsdHigh, message };
 }

@@ -333,10 +333,10 @@ export function createHiveToolsServer(policyOrResult: HookPolicy | PolicyResult 
     },
     guarded(async (a: { command: string; timeout_ms?: number | undefined }, c) => {
       // In container mode the command is sh in Linux with the worktree at /work: judge it as it will run there
-      // (POSIX rules, /work as the workspace, /tmp as home). The computer's own folders, no-go list and links
+      // (POSIX rules, /work as the workspace, /tmp as home and as throwaway scratch space). The computer's own folders, no-go list and links
       // don't exist inside the container; the command-level rules (pushes, new dependencies, …) still apply.
       const judged: HookPolicy = container
-        ? (({ realpath: _drop, ...rest }) => ({ ...rest, platform: 'posix' as const, workspace: CONTAINER_WORKDIR, home: '/tmp', linkedPaths: [], noGo: [] }))(c)
+        ? (({ realpath: _drop, ...rest }) => ({ ...rest, platform: 'posix' as const, workspace: CONTAINER_WORKDIR, home: '/tmp', scratch: ['/tmp'], linkedPaths: [], noGo: [] }))(c)
         : c;
       const v = evaluateCommand(a.command, judged);
       if (!allowed(v, c)) return refuse(verdictMessage(v as Exclude<Verdict, { decision: 'allow' }>));

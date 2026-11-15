@@ -244,3 +244,27 @@ describe('the `brain` command (the Brain CLI door) is ordinary work', () => {
     expect(decide(cmd)).toBe(expected);
   });
 });
+
+describe("a container's own /tmp is scratch space (Phase 4 E1)", () => {
+  const box: GuardContext = { platform: 'posix', workspace: '/work', home: '/tmp', linkedPaths: [], noGo: [], scratch: ['/tmp'] };
+
+  it('allows writing, copying into and deleting inside the scratch folder', () => {
+    expect(decide('git diff > /tmp/before.json', box)).toBe('allow');
+    expect(decide('cp src/index.js /tmp/index.bak', box)).toBe('allow');
+    expect(decide('mkdir -p ~/cache && touch ~/cache/x', box)).toBe('allow');
+    expect(decide('rm -rf /tmp/build', box)).toBe('allow');
+    expect(evaluatePath('/tmp/notes.txt', 'write', box).decision).toBe('allow');
+  });
+
+  it('still blocks the scratch folder itself and everything else outside the workspace', () => {
+    expect(decide('rm -rf /tmp', box)).toBe('block');
+    expect(decide('echo x > /etc/hosts', box)).toBe('block');
+    expect(decide('cp a /tmpfoo/a', box)).toBe('block');
+    expect(decide('rm -rf /tmp/../work', box)).toBe('block');
+  });
+
+  it('is off without a scratch list (runs on the computer)', () => {
+    const onComputer: GuardContext = { platform: 'posix', workspace: '/work', home: '/tmp', linkedPaths: [], noGo: [] };
+    expect(decide('echo x > /tmp/before.json', onComputer)).toBe('block');
+  });
+});

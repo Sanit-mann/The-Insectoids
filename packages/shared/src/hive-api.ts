@@ -791,7 +791,7 @@ export const BrainAskEstimateSchema = z.object({
   tokensHigh: z.number(),
   /** Null when the engine doesn't price runs (subscription) or it's free. */
   costUsdHigh: z.number().nullable(),
-  /** e.g. "About 3,000–8,000 tokens per question on Claude Code (your subscription)." */
+  /** e.g. "About 30,000–60,000 tokens per question on Claude Code (your subscription). Most of them are …" */
   message: z.string(),
 });
 export type BrainAskEstimate = z.infer<typeof BrainAskEstimateSchema>;

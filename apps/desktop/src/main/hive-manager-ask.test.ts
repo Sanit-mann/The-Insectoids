@@ -208,7 +208,14 @@ describe('the ask estimate (plain code)', () => {
 
   it("gives a range around the median of the engine's own Librarian runs", () => {
     const e = askEstimate({ project: true, engine: { id: 'claude', name: 'Claude Code', free: false, subscription: true }, runs: [run('claude', 4_000), run('claude', 6_000), run('claude', 5_000), run('claude', 90_000, 0, 'queen')] });
-    expect(e).toMatchObject({ canAsk: true, free: false, tokensLow: 2_500, tokensHigh: 7_500, costUsdHigh: null, message: 'About 2,500–7,500 tokens per question on Claude Code (your subscription).' });
+    expect(e).toMatchObject({
+      canAsk: true,
+      free: false,
+      tokensLow: 2_500,
+      tokensHigh: 7_500,
+      costUsdHigh: null,
+      message: "About 2,500–7,500 tokens per question on Claude Code (your subscription). Most of them are Claude Code's own instructions, read again from its cache.",
+    });
   });
 
   it('prices a per-token engine from its own past runs', () => {
@@ -220,7 +227,13 @@ describe('the ask estimate (plain code)', () => {
     const copilot = askEstimate({ project: true, engine: { id: 'copilot', name: 'GitHub Copilot CLI', free: false, subscription: true }, runs: [] });
     expect(copilot).toMatchObject({ costUsdHigh: null, message: 'About 3,000–8,000 tokens per question on GitHub Copilot CLI (your subscription).' });
     const unmarked = askEstimate({ project: true, engine: { id: 'claude', name: 'Claude Code', free: false, subscription: false }, runs: [] });
-    expect(unmarked.message).toBe('About 3,000–8,000 tokens per question on Claude Code (billed by your API provider per token).');
+    expect(unmarked.message).toBe("About 30,000–60,000 tokens per question on Claude Code (billed by your API provider per token). Most of them are Claude Code's own instructions, read again from its cache.");
+  });
+
+  it("Claude Code's fallback counts its own instructions, which it reads on every run (Phase 4 demo: about 46,000 tokens)", () => {
+    const e = askEstimate({ project: true, engine: { id: 'claude', name: 'Claude Code', free: false, subscription: true }, runs: [run('claude', 90_000, 0, 'queen')] });
+    expect(e).toMatchObject({ tokensLow: 30_000, tokensHigh: 60_000, costUsdHigh: null });
+    expect(e.message).toBe("About 30,000–60,000 tokens per question on Claude Code (your subscription). Most of them are Claude Code's own instructions, read again from its cache.");
   });
 
   it('says why when nothing can answer', () => {
