@@ -14,6 +14,8 @@ import { type EngineRequest, FakeEngine, type FakeReply } from './engine';
  * - The Inspector always passes (with `inspectorFailsFirst`, it fails C-01's first attempt once: a lesson, B3).
  * - The Librarian's review proposes confirming the first lesson its summary lists as waiting, if any.
  * - Ask the Brain (A1): a short answer citing [1] (and [2] with 2+ sources); UNKNOWN when the question says "unknowable".
+ * - Containers (Phase 4 D2): when the goal has a word starting with "install" (any case: install, Installs, installing),
+ *   the Queen marks the first card of whichever plan she picks (C-01) with `"container": "it installs packages"`.
  * After the last wave the merge into main waits for approval.
  */
 export const DEMO_PLAN = {
@@ -181,6 +183,20 @@ A card asks for a usage example of one function, in its own page under docs/exam
 The page exists, the example matches the function's real behaviour, and nothing else changed.
 `;
 
+/** Phase 4 D2: a goal with a word starting with "install" gets its first card marked for a container by the demo Queen. */
+export const DEMO_INSTALL_GOAL = /\binstall/i;
+export const DEMO_CONTAINER_MARK = 'it installs packages';
+
+/** The demo Queen's plan reply with the container mark on its first card (every demo plan is one fenced JSON block). */
+function markFirstCard(text: string): string {
+  const m = /```json\n([\s\S]*?)\n```/.exec(text);
+  if (!m) return text;
+  const plan = JSON.parse(m[1]!) as { waves: Array<{ cards: Array<Record<string, unknown>> }> };
+  const first = plan.waves[0]?.cards[0];
+  if (first) first['container'] = DEMO_CONTAINER_MARK;
+  return text.replace(m[0], `\`\`\`json\n${JSON.stringify(plan)}\n\`\`\``);
+}
+
 const fenced = (intro: string, value: unknown): string => `${intro}\n\`\`\`json\n${JSON.stringify(value)}\n\`\`\``;
 
 /** The demo Foreman: sends "Fail on purpose" to the Queen; gives anything else one more try with a note. */
@@ -233,7 +249,22 @@ export function demoAskReply(task: string): string {
 export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
   const t: DemoTiming = { queenMs: 400, insectMs: 600, inspectorMs: 300, ...timing };
   let failedOnce = false;
+  const reply = demoReply(t, () => {
+    if (failedOnce) return false;
+    failedOnce = true;
+    return true;
+  });
   return new FakeEngine((req): FakeReply => {
+    const r = reply(req);
+    // The Queen marks a card for a container when the goal says "install" (D2), whichever plan she picked.
+    const goal = /^# Goal\r?\n(.*)$/m.exec(req.task)?.[1] ?? '';
+    if (req.role !== 'queen' || !DEMO_INSTALL_GOAL.test(goal) || !r.text) return r;
+    return { ...r, text: markFirstCard(r.text) };
+  });
+}
+
+function demoReply(t: DemoTiming, failFirst: () => boolean): (req: EngineRequest) => FakeReply {
+  return (req): FakeReply => {
     const init: ClaudeEvent = { kind: 'init', sessionId: `demo-${req.agentId}`, model: req.route.model };
     const goal = /^# Goal\r?\n(.*)$/m.exec(req.task)?.[1] ?? '';
     if (req.role === 'queen' && (DEMO_LOOP_GOAL.test(goal) || DEMO_FAIL_GOAL.test(goal) || DEMO_SAMPLE_GOAL.test(goal))) {
@@ -292,8 +323,7 @@ export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
       return { delayMs: t.inspectorMs, tokens: 1_200, events: [init, { kind: 'text', text: 'Reading the Brain audit.' }], text: demoLibrarianReply(req.task) };
     }
     const id = cardOf(req);
-    if (req.role === 'inspector' && t.inspectorFailsFirst && id === 'C-01' && !failedOnce) {
-      failedOnce = true;
+    if (req.role === 'inspector' && t.inspectorFailsFirst && id === 'C-01' && failFirst()) {
       return {
         delayMs: t.inspectorMs,
         tokens: 1_500,
@@ -343,5 +373,5 @@ export function demoEngine(timing: Partial<DemoTiming> = {}): FakeEngine {
       ],
       text: `Wrote ${file}.\nSTATUS: DONE`,
     };
-  });
+  };
 }

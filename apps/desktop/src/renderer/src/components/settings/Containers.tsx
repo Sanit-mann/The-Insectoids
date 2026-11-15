@@ -6,8 +6,8 @@ import {
   DEFAULT_CONTAINER_SETTINGS,
 } from '@insectoids/shared';
 import { Box, CircleAlert, CircleCheck, CircleOff, Download, ExternalLink, LoaderCircle, type LucideIcon, Power, RefreshCw, Save } from 'lucide-react';
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { Switch } from '@/components/connections/Switch';
+import { type KeyboardEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
+import { CONTAINER_MODES } from '@/components/containers/words';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -53,7 +53,7 @@ function stateIcon(s: ContainerStatus): { icon: LucideIcon; spin: boolean } {
   if (s.runtime.state === 'missing') return { icon: CircleOff, spin: false };
   if (s.runtime.state === 'not-running') return { icon: Power, spin: false };
   if (s.imagePresent !== true) return { icon: CircleAlert, spin: false };
-  return { icon: s.settings.mode === 'always' ? Box : CircleCheck, spin: false };
+  return { icon: s.settings.mode === 'off' ? CircleCheck : Box, spin: false };
 }
 
 /** "about 80 MB" for the pinned default image; other images' sizes aren't known before the download. */
@@ -61,9 +61,9 @@ const sizeWords = (image: string): string => (image === DEFAULT_CONTAINER_IMAGE 
 
 /**
  * Container mode (Phase 4 D1; Workspace & Safety 06-D4). Docker or Podman is detected, never installed; the image is
- * downloaded only when the user presses "Download image" after the screen named it; and with the switch on, cards
- * that would run commands wait (never on the computer instead) until containers are ready. Everything it says
- * comes from the Brain host's status, in a polite live region.
+ * downloaded only when the user presses "Download image" after the screen named it; the user picks Off, When needed
+ * or Every card (D2); and a card that needs a container while it isn't ready waits (never on the computer instead).
+ * Everything it says comes from the Brain host's status, in a polite live region.
  */
 export function ContainersSetting() {
   const [status, setStatus] = useState<ContainerStatus | null>(null);
@@ -73,6 +73,8 @@ export function ContainersSetting() {
   const [draft, setDraft] = useState<Draft>(draftOf(DEFAULT_CONTAINER_SETTINGS));
   const [touched, setTouched] = useState(false);
   const [lines, setLines] = useState<string[]>([]);
+  // The mode just chosen, shown checked while it saves (arrow keys move the choice before the host answers).
+  const [wantMode, setWantMode] = useState<ContainerSettings['mode'] | null>(null);
   const saved = useRef<Draft | null>(null);
   const ids = useId();
 
@@ -152,8 +154,22 @@ export function ContainersSetting() {
     }
   };
 
-  const setMode = (on: boolean): void =>
-    void run('mode', () => window.insectoids.containers.save({ ...settings, mode: on ? 'always' : 'off' }), "Couldn't change container mode");
+  const mode = wantMode ?? settings.mode;
+  const setMode = (next: ContainerSettings['mode']): void => {
+    if (busy || next === settings.mode) return;
+    setWantMode(next);
+    void run('mode', () => window.insectoids.containers.save({ ...settings, mode: next }), "Couldn't change container mode").finally(() => setWantMode(null));
+  };
+  // A radio group (WAI-ARIA): one tab stop on the chosen mode; arrow keys move to the next one and choose it.
+  const modeKey = (ev: KeyboardEvent<HTMLButtonElement>, i: number): void => {
+    const step = ev.key === 'ArrowDown' || ev.key === 'ArrowRight' ? 1 : ev.key === 'ArrowUp' || ev.key === 'ArrowLeft' ? -1 : 0;
+    if (!step) return;
+    ev.preventDefault();
+    if (busy) return;
+    const next = CONTAINER_MODES[(i + step + CONTAINER_MODES.length) % CONTAINER_MODES.length]!.mode;
+    document.getElementById(`${ids}-mode-${next}`)?.focus();
+    setMode(next);
+  };
 
   const save = (): void => {
     setTouched(true);
@@ -216,7 +232,7 @@ export function ContainersSetting() {
         <ul className="m-0 flex list-disc flex-col gap-0.5 pl-5">
           <li>Only commands go into the container. The AI tools themselves still run on this computer, guarded as before; running a whole tool in a container comes later.</li>
           <li>Castes with web access (researchers, analysts, writers) get the open web in the container. All others, including documentation-only castes, get no network at all: a container can&apos;t let only some sites through.</li>
-          <li>When it&apos;s on but Docker or Podman or the image isn&apos;t ready, cards that run commands wait. They never run on this computer instead.</li>
+          <li>When a card needs a container but Docker or Podman or the image isn&apos;t ready, it waits. It never runs on this computer instead.</li>
         </ul>
       </div>
 
@@ -314,16 +330,50 @@ export function ContainersSetting() {
         </div>
       ) : null}
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-line pt-4">
-        <p className="m-0 max-w-[560px] text-sm text-text" id={`${ids}-mode`}>
-          Run every card&apos;s commands in a container
+      <div className="flex flex-col gap-2 border-t border-line pt-4">
+        <p className="m-0 text-sm font-medium text-text" id={`${ids}-mode`}>
+          When to use a container
         </p>
-        <Switch
-          checked={settings.mode === 'always'}
-          disabled={busy !== null}
-          label="Run every card's commands in a container"
-          onChange={setMode}
-        />
+        {/* Same pattern as the cadence form's trust choice: each option says exactly what it does. */}
+        <div aria-busy={busy === 'mode' || undefined} aria-labelledby={`${ids}-mode`} className="flex flex-col gap-2" data-testid="containers-mode" role="radiogroup">
+          {CONTAINER_MODES.map((m, i) => {
+            const on = mode === m.mode;
+            return (
+              <button
+                aria-checked={on}
+                aria-describedby={`${ids}-mode-${m.mode}-sentence`}
+                // aria-disabled, not disabled: the chosen option keeps focus while it saves (busy buttons stay focusable).
+                aria-disabled={busy !== null || undefined}
+                aria-labelledby={`${ids}-mode-${m.mode}-label`}
+                className={cn(
+                  'flex min-h-10 items-start gap-3 rounded-[10px] border px-3 py-2 text-left outline-none focus-visible:ring-2 focus-visible:ring-honey aria-disabled:cursor-not-allowed',
+                  on ? 'border-honey bg-honey/10' : 'border-line bg-ground hover:bg-surface-2',
+                )}
+                data-mode={m.mode}
+                id={`${ids}-mode-${m.mode}`}
+                key={m.mode}
+                onClick={() => setMode(m.mode)}
+                onKeyDown={(ev) => modeKey(ev, i)}
+                role="radio"
+                tabIndex={on ? 0 : -1}
+                type="button"
+              >
+                <span aria-hidden="true" className={cn('mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border', on ? 'border-honey' : 'border-line')}>
+                  {on ? <span className="size-2 rounded-full bg-honey" /> : null}
+                </span>
+                <span className="flex flex-col">
+                  <span className="flex items-center gap-2 text-sm font-semibold text-text" id={`${ids}-mode-${m.mode}-label`}>
+                    {m.label}
+                    {on && busy === 'mode' ? <LoaderCircle aria-hidden="true" className="size-3.5 motion-safe:animate-spin" /> : null}
+                  </span>
+                  <span className="text-xs text-muted" id={`${ids}-mode-${m.mode}-sentence`}>
+                    {m.sentence}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       <div className="flex flex-col gap-3">

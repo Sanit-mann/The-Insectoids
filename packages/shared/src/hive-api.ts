@@ -176,6 +176,26 @@ export type GoalStatusView = z.infer<typeof GoalStatusSchema>;
 /** Where the goal's work stands relative to the user's branch (Workspace 06-D3, D6). */
 export const MergeStateSchema = z.enum(['not-merged', 'awaiting-approval', 'merged', 'undone']);
 
+/**
+ * Whether a card's commands run in a container, and why (Phase 4 D2), in plain words on the card.
+ * - source: queen (marked risky in the plan), watchdog (moved after it got stuck), goal (the user forced
+ *   containers for this goal), always (the setting is "every card").
+ * - state: container (its runs use one), waiting (a container is needed but Docker/Podman or the image isn't
+ *   ready, so it waits; never the computer instead), suggested (the Queen marked it but containers are off, so
+ *   it runs on the computer, guarded as usual).
+ */
+export const CardContainerSchema = z.object({
+  source: z.enum(['queen', 'watchdog', 'goal', 'always']),
+  state: z.enum(['container', 'waiting', 'suggested']),
+  /** Plain words, e.g. "The Queen marked it: it installs packages." */
+  reason: z.string(),
+});
+export type CardContainer = z.infer<typeof CardContainerSchema>;
+
+/** The user's container choice for one goal (Phase 4 D2): auto follows the setting; always forces containers. */
+export const GoalContainersSchema = z.enum(['auto', 'always']);
+export type GoalContainers = z.infer<typeof GoalContainersSchema>;
+
 export const GoalViewSchema = z.object({
   id: Id,
   title: z.string(),
@@ -189,6 +209,8 @@ export const GoalViewSchema = z.object({
   merge: MergeStateSchema,
   /** The cadence that started this goal (Phase 3 A1), or null when the user gave it. */
   cadenceId: Id.nullable().default(null),
+  /** The user's container choice for this goal (Phase 4 D2). */
+  containers: GoalContainersSchema.default('auto'),
   createdAt: z.number(),
   updatedAt: z.number(),
 });
@@ -219,6 +241,8 @@ export const CardViewSchema = z.object({
   skills: z.array(z.string()).default([]),
   /** Set while the Watchdog holds the card (breaker step "pause the card") until the Foreman decides (C2). */
   heldReason: z.string().nullable().default(null),
+  /** Container mode for this card (Phase 4 D2); null = its commands run on the computer, nothing to say. */
+  container: CardContainerSchema.nullable().default(null),
   updatedAt: z.number(),
 });
 export type CardView = z.infer<typeof CardViewSchema>;
@@ -272,6 +296,8 @@ export const AgentViewSchema = z.object({
    * passes 9/10 coder cards here, cheaper than opus" or "rule: high priority"). Null for older lanes.
    */
   routeReason: z.string().nullable(),
+  /** The run's commands run in a container (Phase 4 D2), for a short status on the lane. False for older lanes. */
+  container: z.boolean().default(false),
 });
 export type AgentView = z.infer<typeof AgentViewSchema>;
 
@@ -589,7 +615,15 @@ export type HiveSnapshot = z.infer<typeof HiveSnapshotSchema>;
 
 export const HiveCommandSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('setProject'), path: z.string().min(1).max(1000) }),
-  z.object({ type: z.literal('submitGoal'), text: z.string().trim().min(3).max(8000), budgetTokens: z.number().int().positive().optional() }),
+  z.object({
+    type: z.literal('submitGoal'),
+    text: z.string().trim().min(3).max(8000),
+    budgetTokens: z.number().int().positive().optional(),
+    /** Phase 4 D2: "always" runs every card of this goal in a container, whatever the setting. */
+    containers: GoalContainersSchema.optional(),
+  }),
+  /** Phase 4 D2: force containers for a goal (or go back to following the setting); applies to its next runs. */
+  z.object({ type: z.literal('setGoalContainers'), goalId: Id, containers: GoalContainersSchema }),
   z.object({ type: z.literal('approve'), approvalId: Id }),
   z.object({ type: z.literal('deny'), approvalId: Id }),
   z.object({ type: z.literal('pause'), reason: z.string().max(200).optional() }),

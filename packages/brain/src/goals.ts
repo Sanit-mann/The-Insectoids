@@ -12,6 +12,12 @@ const ALLOWED: Record<GoalStatus, readonly GoalStatus[]> = {
   cancelled: [],
 };
 
+/**
+ * The user's container choice for one goal (Phase 4 D2): auto follows the container setting; always runs every card of
+ * the goal in a container, whatever the setting.
+ */
+export type GoalContainers = 'auto' | 'always';
+
 export interface Goal {
   id: string;
   title: string;
@@ -25,6 +31,8 @@ export interface Goal {
   spentUsd: number;
   /** The cadence that started it (Phase 3 A1), or null when the user gave it. */
   cadenceId: string | null;
+  /** The user's container choice for this goal (Phase 4 D2). */
+  containers: GoalContainers;
   createdAt: number;
   updatedAt: number;
 }
@@ -41,6 +49,7 @@ interface GoalRow {
   spent_tokens: number;
   spent_usd: number;
   cadence_id: string | null;
+  containers: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -57,6 +66,8 @@ const toGoal = (r: GoalRow): Goal => ({
   spentTokens: r.spent_tokens,
   spentUsd: r.spent_usd,
   cadenceId: r.cadence_id ?? null,
+  // Anything but "always" follows the setting: a goal only runs in containers when the user said so.
+  containers: r.containers === 'always' ? 'always' : 'auto',
   createdAt: r.created_at,
   updatedAt: r.updated_at,
 });
@@ -68,12 +79,12 @@ export class GoalStore {
     private readonly newId: () => string,
   ) {}
 
-  create(input: { id?: string; title: string; text: string; shelf: string; budgetTokens?: number; cadenceId?: string }): Goal {
+  create(input: { id?: string; title: string; text: string; shelf: string; budgetTokens?: number; cadenceId?: string; containers?: GoalContainers }): Goal {
     const id = input.id ?? `G-${this.newId()}`;
     const at = this.now();
     this.db
-      .prepare(`INSERT INTO goals (id, title, text, shelf, status, budget_tokens, cadence_id, created_at, updated_at) VALUES (?, ?, ?, ?, 'planning', ?, ?, ?, ?)`)
-      .run(id, input.title, input.text, input.shelf, input.budgetTokens ?? null, input.cadenceId ?? null, at, at);
+      .prepare(`INSERT INTO goals (id, title, text, shelf, status, budget_tokens, cadence_id, containers, created_at, updated_at) VALUES (?, ?, ?, ?, 'planning', ?, ?, ?, ?, ?)`)
+      .run(id, input.title, input.text, input.shelf, input.budgetTokens ?? null, input.cadenceId ?? null, input.containers ?? 'auto', at, at);
     return this.#must(id);
   }
 
@@ -106,6 +117,13 @@ export class GoalStore {
 
   setBudget(id: string, budgetTokens: number): void {
     this.db.prepare('UPDATE goals SET budget_tokens = ?, updated_at = ? WHERE id = ?').run(budgetTokens, this.now(), id);
+  }
+
+  /** The user's container choice for the goal (D2); the hive applies it to the goal's next runs. */
+  setContainers(id: string, containers: GoalContainers): Goal {
+    this.#must(id);
+    this.db.prepare('UPDATE goals SET containers = ?, updated_at = ? WHERE id = ?').run(containers, this.now(), id);
+    return this.#must(id);
   }
 
   addSpend(id: string, tokens: number, usd: number): void {

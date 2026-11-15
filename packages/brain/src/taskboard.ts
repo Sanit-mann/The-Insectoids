@@ -28,6 +28,11 @@ export type BoardCard = TaskCard & {
   foremanNote: string | null;
   /** The model tier the Foreman asked for (e.g. 'strongest'), or null. */
   foremanTier: string | null;
+  /**
+   * The Watchdog moved this card into a container after it got stuck (Phase 4 D2): why, in plain words, or null.
+   * Its later attempts run in a container while the setting is "auto".
+   */
+  containerMove: string | null;
 };
 
 export interface ClaimRequest {
@@ -82,6 +87,7 @@ interface TaskRow {
   foreman_retries: number;
   foreman_note: string | null;
   foreman_tier: string | null;
+  container_move: string | null;
   created_at: number;
   updated_at: number;
 }
@@ -110,6 +116,7 @@ function toCard(r: TaskRow): BoardCard {
     foremanRetries: r.foreman_retries ?? 0,
     foremanNote: r.foreman_note ?? null,
     foremanTier: r.foreman_tier ?? null,
+    containerMove: r.container_move ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -343,6 +350,26 @@ export class Taskboard {
       this.#event(id, cur.status, 'failed', by, note, at);
       return true;
     });
+  }
+
+  /**
+   * The Watchdog moves a card into a container for its later attempts (Phase 4 D2). Kept on the card, so it survives a
+   * restart, with a note in its history. The card keeps its status and attempts.
+   */
+  moveToContainer(id: string, by: string, reason: string): BoardCard {
+    return transaction(this.db, () => {
+      const cur = this.#must(id);
+      const at = this.now();
+      this.db.prepare('UPDATE tasks SET container_move = ?, updated_at = ? WHERE id = ?').run(reason, at, id);
+      this.#event(id, cur.status, cur.status, by, `container: ${reason}`, at);
+      return this.#must(id);
+    });
+  }
+
+  /** A note in the card's history that changes nothing else (e.g. why the Watchdog could not move it). */
+  note(id: string, by: string, note: string): void {
+    const cur = this.#must(id);
+    this.#event(id, cur.status, cur.status, by, note, this.now());
   }
 
   /** How many times this card's lease ran out (the Foreman wakes on repeats). */

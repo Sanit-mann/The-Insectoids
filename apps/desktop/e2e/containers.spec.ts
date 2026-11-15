@@ -83,10 +83,10 @@ test('no runtime: plain words with where to get one; switched on, cards wait and
   await expect(box.getByTestId('containers-download')).toHaveCount(0);
   await axe(win, 'no runtime');
 
-  // Switch it on anyway: the card that would run commands waits with the reason, and the hive pauses.
-  const modeSwitch = box.getByRole('switch', { name: "Run every card's commands in a container" });
-  await modeSwitch.click();
-  await expect(modeSwitch).toHaveAttribute('aria-checked', 'true');
+  // Every card (D2's three-way choice), anyway: the card that would run commands waits with the reason, and the hive pauses.
+  const mode = (name: string) => box.getByRole('radiogroup', { name: 'When to use a container' }).getByRole('radio', { name, exact: true });
+  await mode('Every card').click();
+  await expect(mode('Every card')).toHaveAttribute('aria-checked', 'true');
   expect(await command(win, { type: 'setManagers', scoutBeforePlanning: false })).toEqual({ ok: true });
   expect(await command(win, { type: 'submitGoal', text: GOAL })).toEqual({ ok: true });
   await expect.poll(async () => (await snapshot(win)).hive.pausedReason ?? '', { timeout: 30_000 }).toMatch(/^Container mode: Neither Docker nor Podman is on this computer/);
@@ -95,8 +95,8 @@ test('no runtime: plain words with where to get one; switched on, cards wait and
   expect(s.agents.filter((a) => a.role === 'insect')).toEqual([]);
 
   // Switched off: the hive carries on by itself, with commands on the computer as before.
-  await modeSwitch.click();
-  await expect(modeSwitch).toHaveAttribute('aria-checked', 'false');
+  await mode('Off').click();
+  await expect(mode('Off')).toHaveAttribute('aria-checked', 'true');
   await expect.poll(async () => (await snapshot(win)).approvals.some((a) => a.status === 'waiting' && a.kind === 'merge'), { timeout: 60_000 }).toBe(true);
   expect((await snapshot(win)).hive.paused).toBe(false);
 });
@@ -141,8 +141,8 @@ test('runtime ready, image missing: the download names the image, shows progress
   // Leftovers from a crash are looked for once, by label.
   expect(readFileSync(log, 'utf8')).toContain('"label=io.insectoids.run"');
 
-  // Switch on: usable, and a goal's card runs (the scripted engine gets the container in its guard).
-  await box.getByRole('switch', { name: "Run every card's commands in a container" }).click();
+  // Every card: usable, and a goal's card runs (the scripted engine gets the container in its guard).
+  await box.getByRole('radiogroup', { name: 'When to use a container' }).getByRole('radio', { name: 'Every card', exact: true }).click();
   await expect(box).toHaveAttribute('data-usable', 'true');
   await expect(box.getByTestId('containers-status')).toContainText("Container mode is on: every card's commands run in a Docker container");
   await axe(win, 'on and ready');

@@ -392,6 +392,14 @@ const MIGRATIONS: readonly string[] = [
   CREATE INDEX record_versions_time ON record_versions (changed_at, record_id, version);
   CREATE INDEX task_events_actor ON task_events (actor, at);
   `,
+  // v16: who chooses containers (Phase 4 D2). A goal remembers the user's container choice ('auto' follows the
+  // setting, 'always' forces containers for every card of that goal). A card remembers the Watchdog's move into a
+  // container (the reason in plain words; null = not moved), so its later attempts still run in one after the app
+  // restarts. A column, not a scan of the card's history: the hive reads it on every run and the view on every card.
+  `
+  ALTER TABLE goals ADD COLUMN containers TEXT NOT NULL DEFAULT 'auto';
+  ALTER TABLE tasks ADD COLUMN container_move TEXT;
+  `,
 ];
 
 export function migrate(db: DatabaseSync): void {

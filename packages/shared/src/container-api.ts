@@ -6,8 +6,9 @@ import type { VaultResult } from './vault-api';
  *
  * - The runtime (Docker, else Podman) is **detected, never installed**: the app shows where to get one.
  * - The image is **pulled only when the user says so** (a download): the button names the image first.
- * - D1 has one switch: off (default) or every card's shell commands in a container. Who chooses per card
- *   (the Queen, the Watchdog, the user per goal) comes in D2.
+ * - Three settings (D2): off (default), auto ("when needed": cards the Queen marks as risky, cards the Watchdog
+ *   moves after they got stuck, and goals the user forces), or always (every card). A goal the user forces
+ *   runs in containers even when the setting is off: that's the user's explicit choice for that goal.
  * - When container mode is on but the runtime or image isn't ready, cards that would run shell commands
  *   don't fall back to the computer: their runs are refused in plain words until it's ready or switched off.
  *
@@ -33,8 +34,11 @@ export const ContainerImageSchema = z
   .regex(/^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9._-]{1,128})?(@sha256:[a-f0-9]{64})?$/, 'That isn’t an image name the app can use (like node:22-bookworm-slim).');
 
 export const ContainerSettingsSchema = z.object({
-  /** off: commands run on the computer (guarded as before). always: every card's commands run in a container. */
-  mode: z.enum(['off', 'always']),
+  /**
+   * off: commands run on the computer (guarded as before), except goals the user forces into containers.
+   * auto: also cards the Queen marks as risky and cards the Watchdog moves. always: every card's commands.
+   */
+  mode: z.enum(['off', 'auto', 'always']),
   image: ContainerImageSchema,
   cpus: z.number().min(0.25).max(64),
   memoryMb: z.number().int().min(256).max(262_144),

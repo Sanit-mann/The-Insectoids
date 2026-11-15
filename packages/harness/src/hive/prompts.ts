@@ -149,7 +149,10 @@ every card has checkable acceptance criteria; a card may depend only on cards in
 tester cards depend on the coder cards they test. Use only the castes listed.
 Priority: use "normal" by default. Use "high" only when other work waits on the card or it is risky, "critical" only for
 an urgent fix, "low" for nice-to-haves. Priority decides how much model effort a card gets, so over-using "high" wastes tokens.
-Don't say whether the plan needs the user's approval; the hive decides that from its own rules.`,
+Don't say whether the plan needs the user's approval; the hive decides that from its own rules.
+Containers: add "container": "<short reason>" to a card only when its insect will run untrusted or downloaded code, install
+packages or tools, or run unfamiliar build scripts (e.g. "container": "it installs packages"). Its commands may then run in an
+isolated container. Keep it rare: leave it out for ordinary edits, tests and docs.`,
     servicesSection(o.services ?? []),
     skillsSection(o.skills ?? []),
   ].join('\n\n');

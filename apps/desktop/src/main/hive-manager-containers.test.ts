@@ -248,3 +248,97 @@ describe('card runs in container mode, through the host', () => {
     expect(work.every((c) => c.guard.container?.image === DEFAULT_CONTAINER_IMAGE)).toBe(true);
   }, 40_000);
 });
+
+describe('who chooses containers, through the host (Phase 4 D2)', () => {
+  const ready = async (mode: 'off' | 'auto' | 'always', running = true) => {
+    const { state, deps } = fakeRuntime({ ...DOCKER, running });
+    state.images.add(DEFAULT_CONTAINER_IMAGE);
+    const engine = demoEngine({ queenMs: 5, insectMs: 20, inspectorMs: 5 });
+    const m = create(deps, { project: true, engine });
+    await m.init();
+    await checked(m);
+    expect(await m.containersSave({ ...DEFAULT_CONTAINER_SETTINGS, mode })).toEqual({ ok: true });
+    return { m, engine, state };
+  };
+  const merge = (m: HiveManager) => until('the merge approval', () => snap(m).approvals.find((a) => a.status === 'waiting' && a.kind === 'merge'), 30_000);
+
+  it('auto: the status says so; a goal with "install" gets a Queen-marked card that runs in a container, shown on the card and its lane', async () => {
+    const { m, engine } = await ready('auto');
+    const s = status(m);
+    expect(s.usable).toBe(true);
+    expect(s.message).toMatch(/^Containers when needed: cards the Queen marks as risky, cards the Watchdog moves after they got stuck, and goals you choose/);
+    expect(await m.command({ type: 'submitGoal', text: 'Install the packages and add a farewell function' })).toEqual({ ok: true });
+    await merge(m);
+
+    const view = snap(m);
+    expect(view.goals[0]!.containers).toBe('auto');
+    expect(view.cards[0]!.container).toEqual({ source: 'queen', state: 'container', reason: 'The Queen marked it: it installs packages.' });
+    expect(engine.calls.filter((c) => c.role !== 'queen').every((c) => c.guard.container)).toBe(true);
+    const lanes = view.agents;
+    expect(lanes.find((l) => l.role === 'queen')!.container).toBe(false);
+    expect(lanes.filter((l) => l.role === 'insect' || l.role === 'inspector').every((l) => l.container)).toBe(true);
+  }, 40_000);
+
+  it('auto: a goal without a mark runs on the computer, and its card has nothing to say', async () => {
+    const { m, engine } = await ready('auto');
+    await m.command({ type: 'submitGoal', text: 'Add a farewell function to the site' });
+    await merge(m);
+    expect(snap(m).cards[0]!.container).toBeNull();
+    expect(engine.calls.every((c) => !c.guard.container)).toBe(true);
+    expect(snap(m).agents.every((l) => !l.container)).toBe(true);
+  }, 40_000);
+
+  it('off: the Queen mark shows as a suggestion and the card runs on the computer', async () => {
+    const { m, engine } = await ready('off');
+    await m.command({ type: 'submitGoal', text: 'Install the packages and add a farewell function' });
+    await merge(m);
+    expect(snap(m).cards[0]!.container).toMatchObject({ source: 'queen', state: 'suggested', reason: expect.stringMatching(/Containers are off, so it runs on this computer/) });
+    expect(engine.calls.every((c) => !c.guard.container)).toBe(true);
+  }, 40_000);
+
+  it('submitGoal with containers "always" runs the goal in containers even with the setting off', async () => {
+    const { m, engine } = await ready('off');
+    await m.command({ type: 'submitGoal', text: 'Add a farewell function to the site', containers: 'always' });
+    await merge(m);
+    const view = snap(m);
+    expect(view.goals[0]!.containers).toBe('always');
+    expect(view.cards[0]!.container).toEqual({ source: 'goal', state: 'container', reason: 'You chose containers for every card of this goal.' });
+    expect(engine.calls.filter((c) => c.role !== 'queen').every((c) => c.guard.container?.image === DEFAULT_CONTAINER_IMAGE)).toBe(true);
+  }, 40_000);
+
+  it('setGoalContainers: a forced goal waits while Docker is off; letting it follow the setting again carries on by itself on the computer', async () => {
+    const { m, engine } = await ready('off', false);
+    await m.command({ type: 'submitGoal', text: 'Add a farewell function to the site', containers: 'always' });
+    await until('the container pause', () => snap(m).hive.pausedReason?.startsWith(CONTAINER_PAUSE));
+    const goalId = snap(m).goals[0]!.id;
+    expect(snap(m).cards[0]!.container).toMatchObject({ source: 'goal', state: 'waiting', reason: expect.stringMatching(/Docker is installed but not running/) });
+    expect(engine.calls.every((c) => c.role === 'queen')).toBe(true);
+
+    expect(await m.command({ type: 'setGoalContainers', goalId, containers: 'auto' })).toEqual({ ok: true });
+    expect(snap(m).goals[0]!.containers).toBe('auto');
+    expect(snap(m).activity.some((a) => a.message.includes('follows the container setting again'))).toBe(true);
+    await merge(m);
+    expect(snap(m).hive.paused).toBe(false);
+    expect(engine.calls.filter((c) => c.role !== 'queen').every((c) => !c.guard.container)).toBe(true);
+
+    expect(await m.command({ type: 'cancelGoal', goalId })).toEqual({ ok: true });
+    expect(await m.command({ type: 'setGoalContainers', goalId, containers: 'always' })).toEqual({
+      ok: false,
+      error: '"Add a farewell function to the site" was cancelled, so it has no more runs to put in containers.',
+    });
+    expect(await m.command({ type: 'setGoalContainers', goalId: 'G-nope', containers: 'always' })).toEqual({ ok: false, error: 'No goal G-nope in this project.' });
+  }, 40_000);
+
+  it('while Docker downloads or stays off, a hive paused for a card that still needs a container stays paused', async () => {
+    const { m, state } = await ready('auto', false);
+    await m.command({ type: 'submitGoal', text: 'Install the packages and add a farewell function' });
+    await until('the container pause', () => snap(m).hive.pausedReason?.startsWith(CONTAINER_PAUSE));
+    await m.containersRecheck();
+    expect(snap(m).hive.paused).toBe(true);
+    expect(snap(m).cards[0]!.container?.state).toBe('waiting');
+    state.found = DOCKER;
+    await m.containersRecheck();
+    await merge(m);
+    expect(snap(m).cards[0]!.container?.state).toBe('container');
+  }, 40_000);
+});

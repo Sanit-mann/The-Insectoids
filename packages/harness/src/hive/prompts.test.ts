@@ -31,6 +31,13 @@ describe('prompts from the library', () => {
     expect(p.system).toMatch(/Don't say whether the plan needs the user's approval/);
   });
 
+  it('the Queen is told when to mark a card for a container, and to keep it rare (Phase 4 D2)', () => {
+    const p = queenPrompt(lib, { goal: 'Install the linter', bootCard: '', context: '', castes: ['coder'], projectListing: '' });
+    expect(p.system).toContain('"container": "<short reason>"');
+    expect(p.system).toMatch(/untrusted or downloaded code, install\s+packages or tools, or run unfamiliar build scripts/);
+    expect(p.system).toMatch(/Keep it rare/);
+  });
+
   it('the Inspector must give a verdict and not change files', () => {
     const p = inspectorPrompt(lib, card, { result: 'Done', changedFiles: ['src/contact.ts'] });
     expect(p.system).toContain('VERDICT: PASS');

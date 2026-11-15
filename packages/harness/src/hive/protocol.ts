@@ -1,5 +1,6 @@
 import { type Caste, CasteSchema, PrioritySchema } from '@insectoids/shared';
 import { z } from 'zod';
+import { planContainerMark } from './containers';
 
 /** Most cards a single wave may hold, so every wave stays small enough to review. */
 export const MAX_CARDS_PER_WAVE = 6;
@@ -22,6 +23,11 @@ const PlanCardSchema = z.object({
    * dropped by parsePlan, never a reason to reject the plan.
    */
   skills: z.array(z.unknown()).default([]),
+  /**
+   * The Queen marks a risky card for a container (Phase 4 D2): a short reason in plain words ("it installs
+   * packages"). Absent = no mark. Loose like skills: a value that isn't usable text is dropped by parsePlan.
+   */
+  container: z.unknown().optional(),
 });
 
 const PlanSchema = z.object({
@@ -31,7 +37,7 @@ const PlanSchema = z.object({
   waves: z.array(z.object({ cards: z.array(PlanCardSchema).min(1).max(MAX_CARDS_PER_WAVE) })).min(1).max(MAX_WAVES),
 });
 
-export type PlanCard = Omit<z.infer<typeof PlanCardSchema>, 'skills'> & { id: string; skills?: string[] };
+export type PlanCard = Omit<z.infer<typeof PlanCardSchema>, 'skills' | 'container'> & { id: string; skills?: string[]; container?: string };
 export interface Plan {
   headline: string;
   summary: string;
@@ -79,7 +85,10 @@ export function parsePlan(text: string, opts: { castes: readonly Caste[]; skillA
 
   let n = 0;
   const waves = parsed.data.waves.map((w) => ({
-    cards: w.cards.map((c) => ({ ...c, id: c.id ?? `C-${String(++n).padStart(2, '0')}`, skills: planSkills(c.skills, opts.skillAllowed) })),
+    cards: w.cards.map(({ container, ...c }) => {
+      const mark = planContainerMark(container);
+      return { ...c, id: c.id ?? `C-${String(++n).padStart(2, '0')}`, skills: planSkills(c.skills, opts.skillAllowed), ...(mark ? { container: mark } : {}) };
+    }),
   }));
   const ids = new Set<string>();
   const waveOf = new Map<string, number>();

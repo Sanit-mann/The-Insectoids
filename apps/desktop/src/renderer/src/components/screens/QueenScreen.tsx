@@ -1,10 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
-import type { ApprovalView, GoalView, HiveSnapshot } from '@insectoids/shared';
-import { FolderGit2, FolderOpen } from 'lucide-react';
+import { useEffect, useId, useRef, useState } from 'react';
+import type { ApprovalView, ContainerStatus, GoalView, HiveSnapshot } from '@insectoids/shared';
+import { Box, FolderGit2, FolderOpen } from 'lucide-react';
 import { decide } from '@/components/approvals/kinds';
 import { AIPrompt } from '@/components/kokonutui/ai-prompt';
 import { EmptyState } from '@/components/kokonutui/empty-state';
 import { InlineAlert } from '@/components/kokonutui/inline-alert';
+import { useContainerStatus } from '@/components/containers/useContainerStatus';
+import { notReadyWords } from '@/components/containers/words';
 import { GoalThread } from '@/components/queen/GoalThread';
 import { useProjectPicker } from '@/components/queen/useProjectPicker';
 import { BrandMark } from '@/components/BrandMark';
@@ -39,11 +41,39 @@ function BudgetField({ value, onChange }: { value: string; onChange: (v: string)
   );
 }
 
+/**
+ * Phase 4 D2: "Run this goal's cards in containers" for the goal being written (sends containers: 'always'). A native
+ * checkbox, like the Brain's export options. When Docker or the image isn't ready, the note under the composer says
+ * the goal's cards will wait, and the checkbox points at it.
+ */
+function ContainersField({ checked, onChange, status, noteId }: { checked: boolean; onChange: (v: boolean) => void; status: ContainerStatus | null; noteId: string }) {
+  const id = useId();
+  const warn = checked && status !== null && notReadyWords(status) !== null;
+  return (
+    <label className="flex min-h-8 cursor-pointer items-center gap-1.5 text-xs text-muted" htmlFor={id}>
+      <input
+        aria-describedby={warn ? noteId : undefined}
+        checked={checked}
+        className="size-4 accent-honey"
+        data-testid="goal-containers-option"
+        id={id}
+        onChange={(e) => onChange(e.target.checked)}
+        type="checkbox"
+      />
+      <Box aria-hidden="true" className="size-3.5" />
+      Run this goal&apos;s cards in containers
+    </label>
+  );
+}
+
 /** Phase 1: your one conversation with the hive (App 07 Queen chat). */
 export function QueenScreen() {
   const { snapshot: snap, error, loading } = useHive();
   const picker = useProjectPicker();
   const [budget, setBudget] = useState('');
+  const [boxed, setBoxed] = useState(false);
+  const containers = useContainerStatus();
+  const boxNoteId = useId();
   const [seed, setSeed] = useState<{ key: number; text: string } | undefined>(undefined);
   const [actionError, setActionError] = useState<string | null>(null);
   const [rechecking, setRechecking] = useState(false);
@@ -85,13 +115,21 @@ export function QueenScreen() {
 
   const ready = engineReady(snap);
   const goals = [...snap.goals].reverse(); // oldest first, like a conversation
+  const boxNote = boxed && containers ? notReadyWords(containers) : null;
   const disabledReason = ready ? null : `The Queen can't start yet: ${snap.engine.message}`;
 
   const submit = async (text: string): Promise<boolean> => {
     setActionError(null);
     const n = Number(budget);
-    const r = await runCommand({ type: 'submitGoal', text, ...(budget && n > 0 ? { budgetTokens: n } : {}) });
+    const r = await runCommand({
+      type: 'submitGoal',
+      text,
+      ...(budget && n > 0 ? { budgetTokens: n } : {}),
+      ...(boxed ? { containers: 'always' as const } : {}),
+    });
     if (!r.ok) setActionError(r.error);
+    // The choice is for the goal just sent; the next goal starts from "follow the setting" again.
+    else setBoxed(false);
     return r.ok;
   };
 
@@ -132,7 +170,7 @@ export function QueenScreen() {
           ) : (
             <section aria-label="Conversation with the Queen" className="flex flex-col gap-8">
               {goals.map((g) => (
-                <GoalThread goal={g} key={g.id} onAdjust={adjust} onError={setActionError} snap={snap} />
+                <GoalThread containers={containers} goal={g} key={g.id} onAdjust={adjust} onError={setActionError} snap={snap} />
               ))}
             </section>
           )}
@@ -144,7 +182,12 @@ export function QueenScreen() {
           {actionError && <InlineAlert message={actionError} onDismiss={() => setActionError(null)} title="That didn't work" tone="error" />}
           <AIPrompt
             disabledReason={disabledReason}
-            footer={<BudgetField onChange={setBudget} value={budget} />}
+            footer={
+              <div className="flex flex-wrap items-center gap-x-4 gap-y-1">
+                <BudgetField onChange={setBudget} value={budget} />
+                <ContainersField checked={boxed} noteId={boxNoteId} onChange={setBoxed} status={containers} />
+              </div>
+            }
             header={
               <>
                 <FolderGit2 aria-hidden="true" className="size-3.5" />
@@ -164,6 +207,14 @@ export function QueenScreen() {
             onSubmit={submit}
             seed={seed}
           />
+          {boxNote && (
+            <p className="m-0 flex items-start gap-2 px-1 text-xs text-muted" data-testid="goal-containers-note" id={boxNoteId}>
+              <Box aria-hidden="true" className="mt-px size-3.5 shrink-0" />
+              <span>
+                {boxNote} This goal&apos;s cards will wait until it is (Settings → Containers); they never run on this computer instead.
+              </span>
+            </p>
+          )}
           {picker.error && <InlineAlert message={picker.error} onDismiss={picker.clearError} title="That folder can't be used" tone="error" />}
         </div>
       </div>

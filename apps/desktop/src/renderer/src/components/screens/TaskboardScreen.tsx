@@ -3,6 +3,7 @@ import { Columns3 } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { StatusDot } from '@/components/StatusDot';
 import { FromCadence } from '@/components/cadence/FromCadence';
+import { ContainerChip, containerLabel } from '@/components/containers/ContainerChip';
 import { CARD_STATUS, casteLabel } from '@/components/hive/format';
 import { useNow } from '@/components/hive/useNow';
 import { CardDetail } from '@/components/taskboard/CardDetail';
@@ -47,6 +48,7 @@ function CardFace({ card }: { card: CardView }) {
       </span>
       <span className="font-semibold leading-snug">{card.title}</span>
       {card.heldReason ? <HeldBadge reason={card.heldReason} compact /> : null}
+      {card.container ? <ContainerChip container={card.container} compact /> : null}
       <span className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs text-muted">
         {card.status === 'failed' && (
           <span className="flex items-center gap-1 text-text">
@@ -166,7 +168,8 @@ export function TaskboardScreen() {
           <KanbanBoard
             columns={columns}
             getId={(c) => c.id}
-            getLabel={(c) => `${c.title}. ${CARD_STATUS[c.status].label}. ${casteLabel(c.caste)}, wave ${c.wave}.`}
+            // The face is hidden from screen readers, so the container words (D2) go in the name too.
+            getLabel={(c) => `${c.title}. ${CARD_STATUS[c.status].label}. ${casteLabel(c.caste)}, wave ${c.wave}.${containerLabel(c.container ?? null)}`}
             renderCard={(c) => <CardFace card={c} />}
             selectedId={opened?.id ?? null}
             onOpen={(id) => setOpenId((cur) => (cur === id ? null : id))}

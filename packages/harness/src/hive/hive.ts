@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import type { CadenceAutonomy, Caste } from '@insectoids/shared';
+import type { CadenceAutonomy, CardContainer, Caste, GoalContainers } from '@insectoids/shared';
 import { type ApprovalItem, type BoardCard, type Brain, type Goal, cardReadKey } from '@insectoids/brain';
 import type { Workspace } from '@insectoids/workspace';
 import type { ClaudeEvent } from '../claude/stream';
@@ -9,7 +9,18 @@ import { type ServiceAccess, type ServiceTicket, servicesBrief } from './service
 import type { Engine, EngineRequest, EngineResult } from './engine';
 import { CASTE_NETWORK, MAX_FOUND_SKILLS, chooseSkills, firstSentence } from './catalog';
 import type { ContainerPolicy } from '@insectoids/reflexes';
-import { CONTAINER_PAUSE, type ContainerChoice, type HiveContainerSetup, chooseContainer, containerRunName } from './containers';
+import {
+  CONTAINER_PAUSE,
+  type ContainerChoice,
+  type ContainerWant,
+  type HiveContainerSetup,
+  cardContainerView,
+  chooseContainer,
+  containerRunName,
+  containerWant,
+  containersProblem,
+  containersUsable,
+} from './containers';
 import { type Library, ROLE_SKILLS, brainRules, estimateTokens, inspectorPrompt, insectPrompt, queenPrompt } from './prompts';
 import { type Plan, parsePlan, parseStatus, parseVerdict } from './protocol';
 import type { EngineId } from '@insectoids/shared';
@@ -101,9 +112,10 @@ export interface HiveOptions {
    */
   scout?: { enabled(): boolean; outline(goal: string): string | null };
   /**
-   * Container mode (Phase 4 D1): asked at the start of every card run that may run commands (insects and the
-   * Inspector). Absent or off: commands run on the computer, guarded as before. On but not usable: the run is
-   * refused, the card waits with the reason and the hive pauses until it's ready (never the computer instead).
+   * Container mode (Phase 4 D1, D2): the user's setting and the runtime, asked at the start of every card run that may
+   * run commands (insects and the Inspector). Who wants a container for a card is decided by `containerWant` (the
+   * setting, the goal's choice, the Watchdog's move, the Queen's mark). Absent: off. Wanted but not usable: the run
+   * is refused, the card waits with the reason and the hive pauses until it's ready (never the computer instead).
    */
   containers?: () => HiveContainerSetup;
   /**
@@ -185,6 +197,8 @@ export interface RunInfo {
   error?: string;
   tokens?: number;
   costUsd?: number;
+  /** The run's commands run in a container (Phase 4 D2: shown on the Hive screen's lane). */
+  container?: boolean;
 }
 
 /** What Hive.askBrain returns (Phase 4 A1). `unknown`: the run said UNKNOWN or cited no source it was given. */
@@ -287,6 +301,8 @@ export class Hive {
        * normal rule; 'run' = the plan starts on its own. The Careful preset (approveEveryPlan) still wins.
        */
       autonomy?: CadenceAutonomy;
+      /** Phase 4 D2: 'always' runs every card of this goal in a container, whatever the setting. Default 'auto'. */
+      containers?: GoalContainers;
     } = {},
   ): Promise<Goal> {
     const { brain } = this.#o;
@@ -296,6 +312,7 @@ export class Hive {
       shelf: this.#o.shelf,
       budgetTokens: opts.budgetTokens ?? this.#o.defaultBudgetTokens!,
       ...(opts.cadenceId ? { cadenceId: opts.cadenceId } : {}),
+      ...(opts.containers ? { containers: opts.containers } : {}),
     });
     brain.write({ kind: 'task', shelf: this.#o.shelf, title: `Goal: ${goal.title}`, body: text, source: goal.id }, { type: 'user' });
 
@@ -514,21 +531,129 @@ export class Hive {
   }
 
   /**
-   * The container decision for one card run (Phase 4 D1). `network` is the run's own network rule (the caste's for
-   * insects, none for the Inspector); a docs-only caste gets no network in a container.
+   * The container decision for one card run (Phase 4 D1, D2): the D2 rule for this card, then the runtime. `network`
+   * is the run's own network rule (the caste's for insects, none for the Inspector); a docs-only caste gets no
+   * network in a container.
    */
-  #containerFor(network: EngineRequest['guard']['network'], agentId: string): ContainerChoice {
+  #containerFor(card: BoardCard, network: EngineRequest['guard']['network'], agentId: string): ContainerChoice {
     const setup = this.#o.containers?.();
-    if (!setup || setup.mode === 'off') return null;
-    return chooseContainer(setup, network, containerRunName(agentId, ++this.#boxes));
+    const want = this.#want(card, setup);
+    if (!want?.wanted) return null;
+    return chooseContainer(setup, network, containerRunName(agentId, ++this.#boxes), true);
   }
 
-  /** Container mode is on but not usable: pause the hive once, in plain words, so cards aren't refused one by one. */
+  /**
+   * Who wants a container for this card (D2): the setting, the goal's choice, the Watchdog's move kept on the card,
+   * and the Queen's mark in the stored plan. Every insect card runs commands (D1), so every card can be chosen.
+   */
+  #want(card: BoardCard, setup: HiveContainerSetup | undefined): ContainerWant | null {
+    return containerWant({
+      mode: setup?.mode ?? 'off',
+      goal: this.#o.brain.goals.get(card.goalId)?.containers ?? 'auto',
+      queenMark: this.#cardContainerMark(card.goalId, card.id),
+      watchdogMove: card.containerMove,
+    });
+  }
+
+  /** The Queen's container mark for a card, from the stored plan (cards themselves don't keep it), like integrations. */
+  #cardContainerMark(goalId: string, cardId: string): string | null {
+    const plan = this.#o.brain.goals.get(goalId)?.plan as Plan | null | undefined;
+    const card = plan?.waves.flatMap((w) => w.cards).find((c) => `${goalId}.${c.id}` === cardId);
+    return typeof card?.container === 'string' && card.container ? card.container : null;
+  }
+
+  /**
+   * The card's container status for the Hive screen (D2), in words: the same rule as its runs, with whether
+   * containers are usable right now. Null: its commands run on the computer and there's nothing to say.
+   */
+  cardContainer(cardId: string): CardContainer | null {
+    const card = this.#o.brain.taskboard.get(cardId);
+    if (!card) return null;
+    const setup = this.#o.containers?.();
+    return cardContainerView(this.#want(card, setup), setup);
+  }
+
+  /**
+   * Does a waiting card still need a container that isn't usable (D2)? The app keeps a container pause while this is
+   * true, and resumes once it's false (containers ready, or the user changed the setting or the goal's choice so no
+   * waiting card needs one). Waiting: refused cards (blocked with the container note), cards in review (the
+   * Inspector), and open cards of running goals.
+   */
+  containersNeeded(): boolean {
+    const setup = this.#o.containers?.();
+    if (containersUsable(setup)) return false;
+    const board = this.#o.brain.taskboard;
+    for (const goal of this.#o.brain.goals.list('running')) {
+      for (const card of board.list({ goalId: goal.id })) {
+        const waiting =
+          card.status === 'open' ||
+          card.status === 'review' ||
+          (card.status === 'blocked' && Boolean(board.events(card.id).at(-1)?.note?.startsWith(CONTAINER_PAUSE)));
+        if (waiting && this.#want(card, setup)?.wanted) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * The user forces containers for a goal, or lets it follow the setting again (D2). It applies to the goal's next
+   * runs; a run already going keeps what it started with. A finished or cancelled goal has no runs left to change.
+   */
+  setGoalContainers(goalId: string, containers: GoalContainers): Goal {
+    const { brain } = this.#o;
+    const goal = brain.goals.get(goalId);
+    if (!goal) throw new Error(`No goal ${goalId}`);
+    if (goal.status === 'done') throw new Error(`"${goal.title}" is finished, so it has no more runs to put in containers.`);
+    if (goal.status === 'cancelled') throw new Error(`"${goal.title}" was cancelled, so it has no more runs to put in containers.`);
+    return brain.goals.setContainers(goalId, containers);
+  }
+
+  /** A card needs a container that isn't usable: pause the hive once, in plain words, so cards aren't refused one by one. */
   #containerRefused(reason: string): void {
     if (this.#paused) return;
     this.pause(
-      `${CONTAINER_PAUSE} ${reason} Cards that run commands wait; they never run on your computer instead. The hive carries on by itself once containers are ready, or when you switch container mode off.`,
+      `${CONTAINER_PAUSE} ${reason} Cards that run commands wait; they never run on your computer instead. The hive carries on by itself once containers are ready, or once no waiting card needs one.`,
     );
+  }
+
+  /**
+   * The Watchdog's move (D2): a card it stopped goes back for another attempt, so with the setting "auto" its next
+   * attempts run in a container, where whatever made it stuck can do less harm. Kept on the card (survives a restart).
+   * Only when containers are usable right now; otherwise nothing moves and the card's history says why. Cards that
+   * already run in a container (the setting "always", a forced goal, a Queen mark) need no move.
+   */
+  #watchdogMove(cardId: string, evidence: string): void {
+    try {
+      const board = this.#o.brain.taskboard;
+      const card = board.get(cardId);
+      const setup = this.#o.containers?.();
+      if (!card || card.containerMove || setup?.mode !== 'auto' || this.#want(card, setup)?.wanted) return;
+      if (!containersUsable(setup)) {
+        const note = `The Watchdog would have moved it into a container, but containers aren't ready: ${containersProblem(setup)}`;
+        board.note(card.id, 'Watchdog', note);
+        this.#emit({ type: 'watchdog', goalId: card.goalId, cardId: card.id, agentId: 'Watchdog', message: `"${card.title}": ${note}` });
+        return;
+      }
+      board.moveToContainer(card.id, 'Watchdog', `The Watchdog moved it after it got stuck: ${clip(evidence, 200)}`);
+      this.#emit({ type: 'watchdog', goalId: card.goalId, cardId: card.id, agentId: 'Watchdog', message: `The Watchdog moved "${card.title}" into a container for its next attempts: ${clip(evidence, 200)}` });
+    } catch {
+      // Bookkeeping must never stop the hive.
+    }
+  }
+
+  /**
+   * Did the Watchdog stop this card's last attempt? Its evidence, from the board (so it also works after a restart):
+   * a hold by the Watchdog, or a last attempt given up with a "Watchdog:" note.
+   */
+  #watchdogEvidence(card: BoardCard): string | null {
+    const events = this.#o.brain.taskboard.events(card.id);
+    if (card.heldReason !== null) {
+      const hold = events.findLast((e) => e.note?.startsWith('held: '));
+      return hold?.actor === 'Watchdog' ? card.heldReason : null;
+    }
+    // The move that ended the last attempt (a real transition, not a note or a hold kept on the same status).
+    const ended = events.findLast((e) => e.from !== e.to && (e.to === 'failed' || e.to === 'open'));
+    return ended?.note?.startsWith('Watchdog: ') ? ended.note.slice('Watchdog: '.length) : null;
   }
 
   /**
@@ -719,9 +844,12 @@ export class Hive {
     const stuck = card.status === 'failed' || (card.status === 'open' && card.heldReason !== null);
     if (!stuck) return;
     let action = choice.action;
+    // Read before the retry clears the hold: did the Watchdog stop the last attempt (D2)?
+    const watchdog = action !== 'to-queen' ? this.#watchdogEvidence(card) : null;
     try {
       if (action !== 'to-queen') {
         board.foremanRetry(cardId, 'Foreman', { note: choice.note, tier: action === 'stronger-model' ? 'strongest' : null });
+        if (watchdog !== null) this.#watchdogMove(cardId, watchdog);
       } else if (card.status === 'open') {
         board.escalate(cardId, 'Foreman', `Foreman: ${choice.reason}`);
       }
@@ -1031,7 +1159,7 @@ export class Hive {
       const id = wsId(card);
       // Container mode (D1): decided before any work starts. Refused = the card waits with the reason (blocked, no
       // attempt used) and the hive pauses; resume puts it back on the board.
-      const box = this.#containerFor(CASTE_NETWORK[card.caste], agentId);
+      const box = this.#containerFor(card, CASTE_NETWORK[card.caste], agentId);
       if (box && 'refused' in box) {
         if (!resumeNote) brain.taskboard.start(card.id, agentId);
         const why = `${CONTAINER_PAUSE} ${box.refused}`;
@@ -1111,6 +1239,9 @@ export class Hive {
         const after = brain.taskboard.giveUp(card.id, agentId, `Watchdog: ${breaker.evidence}`);
         // Hold it before anything awaits: the next Foreman pass must not hand the card to a new insect first.
         if (breaker.step === 'pause-card' && after.status === 'open') this.#holdCard(card, breaker.evidence);
+        // Straight back on the board for another attempt (not held, not out of attempts): the Watchdog's move (D2)
+        // happens now. A held or failed card is moved when the Foreman sends it back (#applyForeman).
+        else if (after.status === 'open') this.#watchdogMove(card.id, breaker.evidence);
         await workspace.removeCard(goal.id, id);
         return;
       }
@@ -1196,9 +1327,10 @@ export class Hive {
     const done = (async () => {
       const { brain, workspace } = this.#o;
       const id = wsId(card);
-      // The Inspector runs the card's checks (tests, builds), so in container mode it runs them in one too, with no
-      // network. Refused: the card stays in review and the hive pauses until containers are ready.
-      const box = this.#containerFor('none', 'Inspector');
+      // The Inspector runs the card's checks (tests, builds), so when the card's runs are in a container (same rule as
+      // its insects) it runs them in one too, with no network. Refused: the card stays in review and the hive pauses
+      // until containers are ready.
+      const box = this.#containerFor(card, 'none', 'Inspector');
       if (box && 'refused' in box) {
         this.#containerRefused(box.refused);
         return;
@@ -1419,8 +1551,9 @@ ${brief}`,
       model: req.route.model,
       effort: req.route.effort,
       ...(req.route.reason ? { reason: req.route.reason } : {}),
+      ...(req.guard.container ? { container: true } : {}),
     };
-    const ids = { ...(goalId ? { goalId } : {}), ...(cardId ? { cardId } : {}), agentId: req.agentId };
+    const ids ={ ...(goalId ? { goalId } : {}), ...(cardId ? { cardId } : {}), agentId: req.agentId };
     this.#emit({ type: 'run-started', ...ids, message: info.title, run: info });
     // The Watchdog watches the Queen and every insect (C2). The other runs are short, read-only and capped.
     const watched = { runId: info.runId, agentId: req.agentId, role: req.role, goalId, cardId: cardId ?? null };

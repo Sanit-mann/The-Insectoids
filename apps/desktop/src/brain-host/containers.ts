@@ -5,7 +5,8 @@
  *
  * - The runtime is detected, never installed: the words name Docker Desktop and Podman Desktop and where to get them.
  * - The image is downloaded only when the user presses "Download image" (after the screen named it and its size).
- * - Mode on but not usable: card runs are refused with `refusal()`; they never fall back to the computer.
+ * - Mode on but not usable: card runs that need a container are refused with `refusal()`; they never fall back to the
+ *   computer. Who needs one (the setting, the goal, the Queen, the Watchdog) the hive decides per card (Phase 4 D2).
  *
  * No Electron imports, so it is unit-tested under plain Node with a fake runtime.
  */
@@ -94,9 +95,17 @@ export class ContainerKeeper {
     return { ...this.#settings };
   }
 
-  /** Cards can run in containers right now: mode on, runtime running, image here, no download in progress. */
+  /** Cards can run in containers right now: mode on (auto or always), runtime running, image here, no download in progress. */
   get usable(): boolean {
-    return this.#settings.mode === 'always' && this.#ready;
+    return this.#settings.mode !== 'off' && this.#ready;
+  }
+
+  /**
+   * Runtime running, image here, no download in progress, whatever the setting (Phase 4 D2): a goal the user forces
+   * into containers runs in one even with the setting off.
+   */
+  get ready(): boolean {
+    return this.#ready;
   }
 
   get #ready(): boolean {
@@ -225,14 +234,16 @@ export class ContainerKeeper {
     this.#pull = null;
   }
 
-  /** What the hive gives each card run (Phase 4 D1). */
+  /**
+   * What the hive gives each card run (Phase 4 D1, D2): the setting and the runtime. The runtime is given whatever the
+   * setting, since the hive decides per card who wants a container (a forced goal does even with the setting off).
+   */
   setup(): HiveContainerSetup {
     const s = this.#settings;
-    if (s.mode === 'off') return { mode: 'off' };
     const rt = this.#runtime;
-    if (!this.#ready || !rt) return { mode: 'always', usable: false, reason: this.refusal() };
+    if (!this.#ready || !rt) return { mode: s.mode, usable: false, reason: this.refusal() };
     return {
-      mode: 'always',
+      mode: s.mode,
       usable: true,
       runtime: rt.kind,
       command: rt.command,
@@ -285,7 +296,12 @@ export class ContainerKeeper {
     const s = this.#settings;
     const problem = this.#runtimeProblem();
     if (problem) {
-      const off = s.mode === 'off' ? ' Container mode is off, so card commands run on this computer, guarded as before.' : ' Until then, cards that run commands wait.';
+      const off =
+        s.mode === 'off'
+          ? ' Container mode is off, so card commands run on this computer, guarded as before.'
+          : s.mode === 'auto'
+            ? ' Until then, cards that need a container wait; the others run on this computer, guarded as before.'
+            : ' Until then, cards that run commands wait.';
       return `${problem}${this.#state === 'checking' ? '' : off}`;
     }
     const rt = this.#runtime!;
@@ -295,8 +311,10 @@ export class ContainerKeeper {
       const failed = this.#pullError ? ` The last download didn't finish: ${this.#pullError}` : '';
       return `${name} is ready, but the image isn't on this computer yet. Download ${imageWords(s.image)} on the Containers settings.${failed}`;
     }
-    return s.mode === 'always'
-      ? `Container mode is on: every card's commands run in a ${product(rt.kind).name} container, with only the card's folder inside.`
-      : `${name} is ready and the image is on this computer. Container mode is off: card commands run on this computer, guarded as before.`;
+    if (s.mode === 'always') return `Container mode is on: every card's commands run in a ${product(rt.kind).name} container, with only the card's folder inside.`;
+    if (s.mode === 'auto') {
+      return `Containers when needed: cards the Queen marks as risky, cards the Watchdog moves after they got stuck, and goals you choose run their commands in a ${product(rt.kind).name} container, with only the card's folder inside.`;
+    }
+    return `${name} is ready and the image is on this computer. Container mode is off: card commands run on this computer, guarded as before, except goals you put in containers.`;
   }
 }

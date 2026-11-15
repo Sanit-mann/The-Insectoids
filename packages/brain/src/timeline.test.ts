@@ -310,14 +310,15 @@ describe('the timeline index (schema v15)', () => {
     openBrain(file).close();
     const raw = new DatabaseSync(file);
     try {
-      raw.exec('DROP INDEX record_versions_time; DROP INDEX task_events_actor; PRAGMA user_version = 14;');
+      // v16's columns go too, so reopening runs v15 and then v16, as for a real v14 Brain.
+      raw.exec('DROP INDEX record_versions_time; DROP INDEX task_events_actor; ALTER TABLE goals DROP COLUMN containers; ALTER TABLE tasks DROP COLUMN container_move; PRAGMA user_version = 14;');
     } finally {
       raw.close();
     }
     openBrain(file).close();
     const db = new DatabaseSync(file);
     try {
-      expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(15);
+      expect((db.prepare('PRAGMA user_version').get() as { user_version: number }).user_version).toBe(16);
       const names = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all() as Array<{ name: string }>).map((r) => r.name);
       expect(names).toEqual(expect.arrayContaining(['record_versions_time', 'task_events_actor']));
       const plan = (

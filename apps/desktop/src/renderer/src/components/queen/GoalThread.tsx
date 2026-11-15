@@ -1,10 +1,11 @@
 import { useState } from 'react';
-import type { ActivityView, ApprovalView, GoalView, HiveSnapshot } from '@insectoids/shared';
+import type { ActivityView, ApprovalView, ContainerStatus, GoalView, HiveSnapshot } from '@insectoids/shared';
 import { Crown, User } from 'lucide-react';
 import { KIND_META, ago, decide } from '@/components/approvals/kinds';
 import { ApprovalCard, DecisionLine } from '@/components/kokonutui/ai-tool-approval';
 import { StatusDot } from '@/components/StatusDot';
 import { FromCadence } from '@/components/cadence/FromCadence';
+import { GoalContainers } from '@/components/containers/GoalContainers';
 import { GOAL_STATUS, goalProgress, tokens, usd } from './goal-status';
 import { PlanBody } from './PlanView';
 
@@ -105,13 +106,15 @@ function Progress({ goal, snap }: { goal: GoalView; snap: HiveSnapshot }) {
 interface GoalThreadProps {
   goal: GoalView;
   snap: HiveSnapshot;
+  /** Container status (Phase 4 D2), read once by the Queen screen; null while unknown. */
+  containers: ContainerStatus | null;
   /** Plan "Adjust": deny the plan and put the goal text back in the composer. */
   onAdjust: (goal: GoalView, approval: ApprovalView) => void;
   onError: (message: string) => void;
 }
 
 /** One goal in the Queen thread: your message, the Queen's plan, progress, and anything that needs you. */
-export function GoalThread({ goal, snap, onAdjust, onError }: GoalThreadProps) {
+export function GoalThread({ goal, snap, containers, onAdjust, onError }: GoalThreadProps) {
   const approvals = snap.approvals.filter((a) => a.goalId === goal.id);
   const waiting = approvals.filter((a) => a.status === 'waiting');
   const planApproval = waiting.find((a) => a.kind === 'plan');
@@ -161,6 +164,8 @@ export function GoalThread({ goal, snap, onAdjust, onError }: GoalThreadProps) {
           )
         )}
         {(goal.status === 'running' || goal.status === 'done' || goal.status === 'stuck' || goal.status === 'cancelled') && <Progress goal={goal} snap={snap} />}
+        {/* Phase 4 D2: the goal's container choice, changeable while it still has runs ahead. */}
+        <GoalContainers goal={goal} status={containers} />
         {waiting
           .filter((a) => a !== planApproval)
           .map((a) => {

@@ -1213,7 +1213,7 @@ export class HiveManager {
         const before = new Set(this.#o.brain.goals.list().map((g) => g.id));
         // Planning can take minutes with a real engine: start it and return. The goal shows up at once.
         this.#track(
-          p.hive.submitGoal(cmd.text, cmd.budgetTokens ? { budgetTokens: cmd.budgetTokens } : {}).catch((err: unknown) => {
+          p.hive.submitGoal(cmd.text, { ...(cmd.budgetTokens ? { budgetTokens: cmd.budgetTokens } : {}), ...(cmd.containers ? { containers: cmd.containers } : {}) }).catch((err: unknown) => {
             if (this.#disposed) return;
             this.#note('error', `The Queen could not plan: ${err instanceof Error ? err.message : String(err)}`);
             this.#changed('plan-failed');
@@ -1238,6 +1238,19 @@ export class HiveManager {
         return p.hive.deny(cmd.approvalId);
       case 'cancelGoal':
         return p.hive.cancelGoal(this.#ownGoal(cmd.goalId).id);
+      case 'setGoalContainers': {
+        // Phase 4 D2: the user forces containers for a goal (or lets it follow the setting again), for its next runs.
+        const goal = p.hive.setGoalContainers(this.#ownGoal(cmd.goalId).id, cmd.containers);
+        this.#note(
+          'containers',
+          cmd.containers === 'always'
+            ? `"${goal.title}" now runs every card in a container, whatever the container setting.`
+            : `"${goal.title}" follows the container setting again.`,
+        );
+        // Letting a goal follow the setting may leave no waiting card that needs a container: carry on.
+        this.#maybeResumeAfterContainers();
+        return;
+      }
       case 'undoCard': {
         const card = this.#o.brain.taskboard.get(cmd.cardId);
         if (!card || card.goalId !== this.#ownGoal(cmd.goalId).id) throw new Error(`No card ${cmd.cardId} in this goal.`);
@@ -1606,6 +1619,7 @@ export class HiveManager {
       spentUsd: g.spentUsd,
       merge: this.#project?.hive.mergeState(g.id) ?? 'not-merged',
       cadenceId: g.cadenceId,
+      containers: g.containers,
       createdAt: g.createdAt,
       updatedAt: g.updatedAt,
     };
@@ -1627,6 +1641,8 @@ export class HiveManager {
       result: c.result ?? null,
       skills: (this.#cardSkills ?? this.#latestSkills([c.id])).get(c.id) ?? [],
       heldReason: c.heldReason,
+      // Phase 4 D2: the same rule the card's runs use, with whether containers are usable right now.
+      container: this.#project?.hive.cardContainer(c.id) ?? null,
       undone: c.status === 'done' && Boolean(undo && (undo.goalReset || undo.cards.has(c.id))),
       updatedAt: c.updatedAt,
     };
@@ -2179,6 +2195,7 @@ export class HiveManager {
         model: r.model,
         effort: r.effort,
         routeReason: r.reason ?? null,
+        container: r.container === true,
         status: 'working',
         tokens: 0,
         costUsd: 0,
@@ -2364,7 +2381,11 @@ export class HiveManager {
     if (r.ok) {
       this.#note(
         'containers',
-        settings.mode === 'always' ? 'Container mode is on: card commands run in a container.' : 'Container mode is off: cards run commands on this computer, guarded as before.',
+        settings.mode === 'always'
+          ? 'Container mode is on: card commands run in a container.'
+          : settings.mode === 'auto'
+            ? 'Containers when needed: cards the Queen marks, cards the Watchdog moves and goals you choose run their commands in a container.'
+            : 'Container mode is off: cards run commands on this computer, guarded as before, except goals you put in containers.',
       );
     }
     return r;
@@ -2395,13 +2416,21 @@ export class HiveManager {
     this.#containersPushTimer.unref?.();
   }
 
-  /** A hive paused by container mode carries on by itself once containers are ready, or the user switched it off. */
+  /**
+   * A hive paused by container mode carries on by itself once containers are ready, or once no waiting card needs one
+   * (the user switched the setting off, or let a forced goal follow the setting again). Asked on every change of the
+   * keeper (download progress included), so it only resumes when that really changes something: a resume that would
+   * be refused again at once would just pause again.
+   */
   #maybeResumeAfterContainers(): void {
     if (!this.#paused || !this.#pausedReason?.startsWith(CONTAINER_PAUSE)) return;
-    const s = this.#containers.settings;
-    if (s.mode === 'always' && !this.#containers.usable) return;
+    const p = this.#project;
+    if (p?.hive.containersNeeded()) return;
     this.#resume();
-    this.#note('resumed', s.mode === 'off' ? 'Container mode is off; the hive carries on, with commands on this computer as before.' : 'Containers are ready; the hive carries on.');
+    this.#note(
+      'resumed',
+      this.#containers.ready ? 'Containers are ready; the hive carries on.' : 'No waiting card needs a container now; the hive carries on, with commands on this computer as before.',
+    );
   }
 
   #maybeResumeAfterLimit(): void {

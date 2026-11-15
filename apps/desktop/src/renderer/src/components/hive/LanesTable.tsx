@@ -1,4 +1,5 @@
 import type { AgentView } from '@insectoids/shared';
+import { Box } from 'lucide-react';
 import type { KeyboardEvent } from 'react';
 import { StatusDot } from '@/components/StatusDot';
 import { engineName } from '@/components/connections/engine-names';
@@ -87,6 +88,13 @@ export function LanesTable({ agents, selectedId, onSelect, now }: LanesTableProp
                     <StatusDot status={laneDot(a.status)} />
                     {LANE_LABEL[a.status]}
                   </span>
+                  {/* Phase 4 D2: this run's commands ran in a container (words, not just the icon). */}
+                  {a.container ? (
+                    <span className="mt-0.5 flex items-center gap-1 text-[11px] text-muted" data-testid="lane-container">
+                      <Box aria-hidden="true" className="size-3 shrink-0" />
+                      In a container
+                    </span>
+                  ) : null}
                 </td>
                 <td className="px-3.5 py-2.5 text-right font-mono text-xs tabular-nums text-muted">{formatDuration((a.endedAt ?? now) - a.startedAt)}</td>
               </tr>

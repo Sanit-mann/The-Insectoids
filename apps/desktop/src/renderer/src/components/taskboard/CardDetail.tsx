@@ -3,6 +3,7 @@ import { X } from 'lucide-react';
 import { StatusDot } from '@/components/StatusDot';
 import { CARD_STATUS, casteLabel, formatDuration } from '@/components/hive/format';
 import { openLibraryItem } from '@/lib/library-nav';
+import { ContainerDetail } from '@/components/containers/ContainerChip';
 import { HeldBadge } from './HeldBadge';
 
 interface CardDetailProps {
@@ -45,6 +46,7 @@ export function CardDetail({ card, cards, now, onClose }: CardDetailProps) {
         {card.escalated && <span className="rounded-full border border-st-blocked/60 px-2 py-0.5 text-xs">Escalated to you</span>}
       </div>
       {card.heldReason ? <HeldBadge reason={card.heldReason} /> : null}
+      {card.container ? <ContainerDetail container={card.container} /> : null}
 
       <section aria-label="Brief">
         <div className="text-xs text-muted">Brief (built by the Brain)</div>

@@ -86,3 +86,34 @@ describe('Inspector verdict', () => {
     expect(parseVerdict(text)).toEqual(expected);
   });
 });
+
+describe("the Queen's container mark (Phase 4 D2)", () => {
+  const cardsOf = (cards: Array<Record<string, unknown>>) => {
+    const r = parsePlan(plan({ summary: 'One wave', waves: [{ cards }] }), { castes: ['coder'] });
+    if (!r.ok) throw new Error(r.error);
+    return r.plan.waves[0]!.cards;
+  };
+
+  it('keeps a short plain-words reason, trimmed to one line', () => {
+    const [c] = cardsOf([card({ container: '  it installs\n packages ' })]);
+    expect(c!.container).toBe('it installs packages');
+  });
+
+  it('absent: no mark (the key is not there at all)', () => {
+    const [c] = cardsOf([card()]);
+    expect(c!.container).toBeUndefined();
+    expect('container' in c!).toBe(false);
+  });
+
+  it('drops a bad value instead of rejecting the plan', () => {
+    const cards = cardsOf([card({ container: true }), card({ title: 'Two', container: { why: 'x' } }), card({ title: 'Three', container: '   ' }), card({ title: 'Four', container: 7 })]);
+    expect(cards).toHaveLength(4);
+    for (const c of cards) expect('container' in c).toBe(false);
+  });
+
+  it('clips a long reason to a short status', () => {
+    const [c] = cardsOf([card({ container: `it runs ${'a downloaded script '.repeat(20)}` })]);
+    expect(c!.container!.length).toBeLessThanOrEqual(120);
+    expect(c!.container!.endsWith('…')).toBe(true);
+  });
+});
